@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { currencyMinorUnits } from "@chaste/erp-core";
-import { acceptSalesQuote, createSalesQuote, declineSalesQuote, fetchSalesQuoteCustomers, fetchSalesQuoteDeals, fetchSalesQuotes, SALES_QUOTE_DATABASE_INTEGER_MAX, SalesQuoteApiError, type SalesQuote, type SalesQuoteCustomer, type SalesQuoteDeal } from "../api/sales-quotes";
+import { acceptSalesQuote, createOrderFromSalesQuote, createSalesQuote, declineSalesQuote, fetchSalesQuoteCustomers, fetchSalesQuoteDeals, fetchSalesQuotes, SALES_QUOTE_DATABASE_INTEGER_MAX, SalesQuoteApiError, type SalesQuote, type SalesQuoteCustomer, type SalesQuoteDeal } from "../api/sales-quotes";
 import "./sales-page.css";
 
 type QuoteTab = "quotes" | "customers" | "deals";
-type DraftLine = { description: string; quantity: string; unitPrice: string; tax: string };
-const emptyLine = (): DraftLine => ({ description: "", quantity: "1", unitPrice: "", tax: "0" });
+type DraftLine = { description: string; sku: string; quantity: string; unitPrice: string; tax: string };
+const emptyLine = (): DraftLine => ({ description: "", sku: "", quantity: "1", unitPrice: "", tax: "0" });
 const today = () => new Date().toISOString().slice(0, 10);
 
 function parseMoney(value: string, digits: number): number | null {
@@ -160,6 +160,7 @@ export function SalesQuoteWorkspace({ actorId, organizationId, baseCurrency }: {
       ...(expiresAt ? { expiresAt: `${expiresAt}T23:59:59.000Z` } : {}),
       lines: lines.map((line) => ({
         description: line.description.trim(),
+        ...(line.sku.trim() ? { sku: line.sku.trim() } : {}),
         quantity: parseQuantity(line.quantity)!,
         unitPriceMinor: parseMoney(line.unitPrice, digits)!,
         taxMinor: parseMoney(line.tax, digits)!,
@@ -201,6 +202,26 @@ export function SalesQuoteWorkspace({ actorId, organizationId, baseCurrency }: {
       await load();
     } catch (error) {
       if (isCurrentScope()) showActionError(error instanceof SalesQuoteApiError ? error.message : "The quote could not be accepted.");
+    } finally { if (isCurrentScope()) setBusy(false); }
+  }
+
+  async function createOrder(quote: SalesQuote) {
+    const submittedScopeIdentity = scopeIdentity;
+    const isCurrentScope = () => currentScopeIdentity.current === submittedScopeIdentity;
+    if (!actorId || !organizationId) { showActionError("The active actor and workspace are required to turn a quote into an order."); return; }
+    clearActionMessages();
+    setBusy(true);
+    try {
+      const result = await createOrderFromSalesQuote(quote.id, scope);
+      if (!isCurrentScope()) return;
+      if (result.kind === "pending") {
+        showNotice(`Quote #${quote.number} order creation is waiting for approval. Retry the same action to check approval: ${result.reason}`);
+        return;
+      }
+      showNotice(`Quote #${quote.number} became sales order #${result.data.orderNumber}. Confirm it in Sales to reserve stock and check credit before delivery.`);
+      await load();
+    } catch (error) {
+      if (isCurrentScope()) showActionError(error instanceof SalesQuoteApiError ? error.message : "The quote could not become a sales order.");
     } finally { if (isCurrentScope()) setBusy(false); }
   }
 
@@ -248,6 +269,7 @@ export function SalesQuoteWorkspace({ actorId, organizationId, baseCurrency }: {
         </div>
         <div className="sales-quote-lines"><h4>Line items</h4>{lines.map((line, index) => <div className="sales-quote-line" key={index}>
           <label>Description<input required maxLength={500} value={line.description} onChange={(event) => setLine(index, "description", event.currentTarget.value)} /></label>
+          <label>SKU (optional)<input maxLength={120} value={line.sku} onChange={(event) => setLine(index, "sku", event.currentTarget.value)} placeholder="Stock-backed item" /></label>
           <label>Quantity<input required inputMode="decimal" pattern="[0-9]+(\.[0-9]{0,3})?" value={line.quantity} onChange={(event) => setLine(index, "quantity", event.currentTarget.value)} /></label>
           <label>Unit price<input required inputMode="decimal" value={line.unitPrice} onChange={(event) => setLine(index, "unitPrice", event.currentTarget.value)} /></label>
           <label>Tax<input required inputMode="decimal" value={line.tax} onChange={(event) => setLine(index, "tax", event.currentTarget.value)} /></label>
@@ -256,13 +278,13 @@ export function SalesQuoteWorkspace({ actorId, organizationId, baseCurrency }: {
           <button type="button" className="sales-write-secondary" disabled={lines.length >= 100} onClick={() => setLines((current) => [...current, emptyLine()])}>Add line</button>
         </div>
         <div className="sales-write-actions"><strong>Quote total: {total === null ? "Check line values" : formatMoney(total, currency, digits)}</strong><button type="submit" className="sales-write-primary" disabled={busy || customers.length === 0}>{busy ? "Sending…" : "Create and send quote"}</button></div>
-        <p className="sales-quote-help">Quotes are created with sent status and can be accepted into an invoice.</p>
+        <p className="sales-quote-help">Add a SKU for stocked lines so confirming the resulting order can reserve stock. Quotes are created already sent.</p>
       </form>}
 
       {!loading && hasCurrentData && !visibleLoadError && tab === "quotes" && <div className="sales-quote-list">
         <div className="sales-quote-list-heading"><h3>Quotes</h3><label>Filter<select value={quoteFilter} onChange={(event) => setQuoteFilter(event.currentTarget.value)}><option value="all">All statuses</option>{["sent", "accepted", "declined", "expired", "draft"].map((status) => <option key={status}>{status}</option>)}</select></label></div>
         {filteredQuotes.length === 0 ? <p className="sales-quote-empty">No quotes in this view.</p> : <div className="sales-table-scroll"><table className="sales-table"><thead><tr><th>Quote</th><th>Customer</th><th>Status</th><th>Expires</th><th>Total</th><th>Actions</th></tr></thead><tbody>{filteredQuotes.map((quote) => <tr key={quote.id}>
-          <th scope="row">#{quote.number}</th><td>{customerNames.get(quote.customerId) ?? "Unknown customer"}</td><td><span className="sales-status">{quote.status}</span></td><td>{quote.expiresAt ? new Date(quote.expiresAt).toLocaleDateString() : "No expiry"}</td><td className="sales-total">{formatMoney(quote.totalMinor, currency, digits)}</td><td>{quote.status === "sent" && <><button type="button" disabled={busy} onClick={() => void accept(quote)}>Accept and create invoice</button><button type="button" disabled={busy} onClick={() => void decline(quote)}>Decline quote</button></>}{quote.invoiceId && <a href="/accounting/invoices">Open invoices</a>}</td>
+          <th scope="row">#{quote.number}</th><td>{customerNames.get(quote.customerId) ?? "Unknown customer"}</td><td><span className="sales-status">{quote.status}</span></td><td>{quote.expiresAt ? new Date(quote.expiresAt).toLocaleDateString() : "No expiry"}</td><td className="sales-total">{formatMoney(quote.totalMinor, currency, digits)}</td><td>{quote.status === "sent" && <><button type="button" disabled={busy} onClick={() => void createOrder(quote)}>Create sales order</button><button type="button" disabled={busy} title="Creates the invoice now, without stock reservation or fulfilment" onClick={() => void accept(quote)}>Invoice immediately</button><button type="button" disabled={busy} onClick={() => void decline(quote)}>Decline quote</button></>}{quote.orderId && <a href="/sales">Open sales order</a>}{quote.invoiceId && <a href="/accounting/invoices">Open invoices</a>}</td>
         </tr>)}</tbody></table></div>}
       </div>}
 

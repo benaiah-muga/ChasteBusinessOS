@@ -686,3 +686,10 @@
 }
 .sales-empty-action { margin-top: 13px; min-height: 34px; border: 1px solid var(--ink-900); border-radius: 7px; padding: 0 13px; background: var(--ink-900); color: var(--paper-50); cursor: pointer; font-size: 11px; font-weight: 650; }
 .sales-empty-action:hover:not(:disabled) { background: var(--ink-700); }
+
+.sales-quote-list td button + button,
+.sales-quote-list td a + a,
+.sales-quote-list td button + a,
+.sales-quote-list td a + button {
+  margin-left: 0.4rem;
+}

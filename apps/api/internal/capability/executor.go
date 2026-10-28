@@ -95,53 +95,59 @@ type inverseFieldMapping struct {
 }
 
 var capabilitySpecs = map[string]capabilitySpec{
-	createCustomerCapabilityID:             {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.deactivateCustomer"},
-	saveCustomerViewCapabilityID:           {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreCustomerView"},
-	restoreCustomerViewCapabilityID:        {module: "crm", permission: "crm.write", risk: "write"},
-	deactivateCustomerCapabilityID:         {module: "crm", permission: "crm.write", risk: "write"},
-	mergeCustomersCapabilityID:             {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreCustomerMerge"},
-	restoreCustomerMergeCapabilityID:       {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.mergeCustomers"},
-	importCustomersCapabilityID:            {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.undoCustomerImport"},
-	undoCustomerImportCapabilityID:         {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreImportedCustomers"},
-	restoreImportedCustomersCapabilityID:   {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.undoCustomerImport"},
-	updateCustomerProfilesCapabilityID:     {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreCustomerProfiles"},
-	restoreCustomerProfilesCapabilityID:    {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.reapplyCustomerProfiles"},
-	reapplyCustomerProfilesCapabilityID:    {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreCustomerProfiles"},
-	listCustomersCapabilityID:              {module: "crm", permission: "crm.read", risk: "read"},
-	listCRMCustomerCollectionCapabilityID:  {module: "crm", permission: "crm.read", risk: "read", humanOnly: true},
-	listCustomerViewsCapabilityID:          {module: "crm", permission: "crm.read", risk: "read"},
-	listDealsCapabilityID:                  {module: "crm", permission: "crm.read", risk: "read"},
-	documentsListDocsCapabilityID:          {module: "documents", permission: "documents.read", risk: "read"},
-	documentsListIngestedCapabilityID:      {module: "documents", permission: "documents.read", risk: "read"},
-	documentsListDocVersionsCapabilityID:   {module: "documents", permission: "documents.read", risk: "read"},
-	documentsGetDocVersionCapabilityID:     {module: "documents", permission: "documents.read", risk: "read"},
-	pipelineReportCapabilityID:             {module: "crm", permission: "crm.read", risk: "read"},
-	listTasksCapabilityID:                  {module: "crm", permission: "crm.read", risk: "read"},
-	customerTimelineCapabilityID:           {module: "crm", permission: "crm.read", risk: "read"},
-	createDealCapabilityID:                 {module: "crm", permission: "crm.write", risk: "write"},
-	moveDealStageCapabilityID:              {module: "crm", permission: "crm.write", risk: "write"},
-	convertLeadCapabilityID:                {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: undoLeadConversionCapabilityID, inverseInputSource: "output", inverseFields: []string{"conversionIntentId"}},
-	undoLeadConversionCapabilityID:         {module: "crm", permission: "crm.write", risk: "destructive", inverseCapabilityID: reapplyLeadConversionCapabilityID, inverseInputSource: "output", inverseFields: []string{"undoIntentId"}},
-	reapplyLeadConversionCapabilityID:      {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: undoLeadConversionCapabilityID, inverseInputSource: "output", inverseFields: []string{"conversionIntentId"}},
-	createTaskCapabilityID:                 {module: "crm", permission: "crm.write", risk: "write"},
-	completeTaskCapabilityID:               {module: "crm", permission: "crm.write", risk: "write"},
-	updateTaskDetailsCapabilityID:          {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreTaskDetails"},
-	restoreTaskDetailsCapabilityID:         {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.updateTaskDetails"},
-	createQuoteCapabilityID:                {module: "accounting", permission: "accounting.write", risk: "write", inverseCapabilityID: "accounting.declineQuote"},
-	acceptQuoteCapabilityID:                {module: "accounting", permission: "accounting.write", risk: "write"},
-	declineQuoteCapabilityID:               {module: "accounting", permission: "accounting.write", risk: "write"},
-	expireQuoteCapabilityID:                {module: "accounting", permission: "accounting.write", risk: "write"},
-	listQuotesCapabilityID:                 {module: "accounting", permission: "accounting.read", risk: "read"},
-	createRecurringTemplateCapabilityID:    {module: "accounting", permission: "accounting.write", risk: "write", inverseCapabilityID: "accounting.pauseRecurringTemplate"},
-	pauseRecurringTemplateCapabilityID:     {module: "accounting", permission: "accounting.write", risk: "write", inverseCapabilityID: "accounting.resumeRecurringTemplate"},
-	resumeRecurringTemplateCapabilityID:    {module: "accounting", permission: "accounting.write", risk: "write"},
-	listRecurringTemplatesCapabilityID:     {module: "accounting", permission: "accounting.read", risk: "read"},
-	hrHireEmployeeCapabilityID:             {module: "hr", permission: "hr.write", risk: "write", inverseCapabilityID: "hr.deactivateEmployee"},
-	hrDeactivateEmployeeCapabilityID:       {module: "hr", permission: "hr.write", risk: "write"},
-	hrListEmployeesCapabilityID:            {module: "hr", permission: "hr.read", risk: "read"},
-	hrReportCapabilityID:                   {module: "hr", permission: "hr.read", risk: "read"},
-	hrUpdateEmployeeStructureCapabilityID:  {module: "hr", permission: "hr.write", risk: "write"},
-	salesCreateOrderCapabilityID:           {module: "sales", permission: "sales.write", risk: "write", inverseCapabilityID: "sales.cancelOrder"},
+	createCustomerCapabilityID:            {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.deactivateCustomer"},
+	saveCustomerViewCapabilityID:          {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreCustomerView"},
+	restoreCustomerViewCapabilityID:       {module: "crm", permission: "crm.write", risk: "write"},
+	deactivateCustomerCapabilityID:        {module: "crm", permission: "crm.write", risk: "write"},
+	mergeCustomersCapabilityID:            {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreCustomerMerge"},
+	restoreCustomerMergeCapabilityID:      {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.mergeCustomers"},
+	importCustomersCapabilityID:           {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.undoCustomerImport"},
+	undoCustomerImportCapabilityID:        {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreImportedCustomers"},
+	restoreImportedCustomersCapabilityID:  {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.undoCustomerImport"},
+	updateCustomerProfilesCapabilityID:    {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreCustomerProfiles"},
+	restoreCustomerProfilesCapabilityID:   {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.reapplyCustomerProfiles"},
+	reapplyCustomerProfilesCapabilityID:   {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreCustomerProfiles"},
+	listCustomersCapabilityID:             {module: "crm", permission: "crm.read", risk: "read"},
+	listCRMCustomerCollectionCapabilityID: {module: "crm", permission: "crm.read", risk: "read", humanOnly: true},
+	listCustomerViewsCapabilityID:         {module: "crm", permission: "crm.read", risk: "read"},
+	listDealsCapabilityID:                 {module: "crm", permission: "crm.read", risk: "read"},
+	documentsListDocsCapabilityID:         {module: "documents", permission: "documents.read", risk: "read"},
+	documentsListIngestedCapabilityID:     {module: "documents", permission: "documents.read", risk: "read"},
+	documentsListDocVersionsCapabilityID:  {module: "documents", permission: "documents.read", risk: "read"},
+	documentsGetDocVersionCapabilityID:    {module: "documents", permission: "documents.read", risk: "read"},
+	pipelineReportCapabilityID:            {module: "crm", permission: "crm.read", risk: "read"},
+	listTasksCapabilityID:                 {module: "crm", permission: "crm.read", risk: "read"},
+	customerTimelineCapabilityID:          {module: "crm", permission: "crm.read", risk: "read"},
+	createDealCapabilityID:                {module: "crm", permission: "crm.write", risk: "write"},
+	moveDealStageCapabilityID:             {module: "crm", permission: "crm.write", risk: "write"},
+	convertLeadCapabilityID:               {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: undoLeadConversionCapabilityID, inverseInputSource: "output", inverseFields: []string{"conversionIntentId"}},
+	undoLeadConversionCapabilityID:        {module: "crm", permission: "crm.write", risk: "destructive", inverseCapabilityID: reapplyLeadConversionCapabilityID, inverseInputSource: "output", inverseFields: []string{"undoIntentId"}},
+	reapplyLeadConversionCapabilityID:     {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: undoLeadConversionCapabilityID, inverseInputSource: "output", inverseFields: []string{"conversionIntentId"}},
+	createTaskCapabilityID:                {module: "crm", permission: "crm.write", risk: "write"},
+	completeTaskCapabilityID:              {module: "crm", permission: "crm.write", risk: "write"},
+	updateTaskDetailsCapabilityID:         {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreTaskDetails"},
+	restoreTaskDetailsCapabilityID:        {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.updateTaskDetails"},
+	createQuoteCapabilityID:               {module: "accounting", permission: "accounting.write", risk: "write", inverseCapabilityID: "accounting.declineQuote"},
+	acceptQuoteCapabilityID:               {module: "accounting", permission: "accounting.write", risk: "write"},
+	declineQuoteCapabilityID:              {module: "accounting", permission: "accounting.write", risk: "write"},
+	expireQuoteCapabilityID:               {module: "accounting", permission: "accounting.write", risk: "write"},
+	listQuotesCapabilityID:                {module: "accounting", permission: "accounting.read", risk: "read"},
+	createRecurringTemplateCapabilityID:   {module: "accounting", permission: "accounting.write", risk: "write", inverseCapabilityID: "accounting.pauseRecurringTemplate"},
+	pauseRecurringTemplateCapabilityID:    {module: "accounting", permission: "accounting.write", risk: "write", inverseCapabilityID: "accounting.resumeRecurringTemplate"},
+	resumeRecurringTemplateCapabilityID:   {module: "accounting", permission: "accounting.write", risk: "write"},
+	listRecurringTemplatesCapabilityID:    {module: "accounting", permission: "accounting.read", risk: "read"},
+	hrHireEmployeeCapabilityID:            {module: "hr", permission: "hr.write", risk: "write", inverseCapabilityID: "hr.deactivateEmployee"},
+	hrDeactivateEmployeeCapabilityID:      {module: "hr", permission: "hr.write", risk: "write"},
+	hrListEmployeesCapabilityID:           {module: "hr", permission: "hr.read", risk: "read"},
+	hrReportCapabilityID:                  {module: "hr", permission: "hr.read", risk: "read"},
+	hrUpdateEmployeeStructureCapabilityID: {module: "hr", permission: "hr.write", risk: "write"},
+	salesCreateOrderCapabilityID:          {module: "sales", permission: "sales.write", risk: "write", inverseCapabilityID: "sales.cancelOrder"},
+	salesCreateOrderFromQuoteCapabilityID: {
+		module: "sales", permission: "sales.write", risk: "write", inverseCapabilityID: "sales.cancelOrder",
+		title:       "Create sales order from quote",
+		intent:      "Award a sent quote into a draft sales order with the same lines so credit checks, stock reservations, fulfilment, invoicing, and collection continue from one record.",
+		inputSchema: `{"type":"object","properties":{"quoteId":{"type":"string","format":"uuid"}},"required":["quoteId"],"additionalProperties":false}`,
+	},
 	salesUpdateDraftOrderCapabilityID:      {module: "sales", permission: "sales.write", risk: "write", inverseCapabilityID: salesRestoreDraftOrderCapabilityID},
 	salesRestoreDraftOrderCapabilityID:     {module: "sales", permission: "sales.write", risk: "write", inverseCapabilityID: salesUpdateDraftOrderCapabilityID, agentHidden: "internal inverse checkpoint used by the session revert path; callers edit through sales.updateDraftOrder"},
 	salesConfirmOrderCapabilityID:          {module: "sales", permission: "sales.write", risk: "write", inverseCapabilityID: "sales.cancelOrder"},
@@ -533,7 +539,7 @@ func supportedCapability(capabilityID string) bool {
 		createQuoteCapabilityID, acceptQuoteCapabilityID, declineQuoteCapabilityID, expireQuoteCapabilityID, listQuotesCapabilityID,
 		createRecurringTemplateCapabilityID, pauseRecurringTemplateCapabilityID, resumeRecurringTemplateCapabilityID, listRecurringTemplatesCapabilityID,
 		hrHireEmployeeCapabilityID, hrDeactivateEmployeeCapabilityID, hrListEmployeesCapabilityID, hrReportCapabilityID, hrUpdateEmployeeStructureCapabilityID,
-		salesCreateOrderCapabilityID, salesUpdateDraftOrderCapabilityID, salesRestoreDraftOrderCapabilityID, salesConfirmOrderCapabilityID, salesDeliverOrderCapabilityID, salesCancelOrderCapabilityID, salesListOrdersCapabilityID,
+		salesCreateOrderCapabilityID, salesCreateOrderFromQuoteCapabilityID, salesUpdateDraftOrderCapabilityID, salesRestoreDraftOrderCapabilityID, salesConfirmOrderCapabilityID, salesDeliverOrderCapabilityID, salesCancelOrderCapabilityID, salesListOrdersCapabilityID,
 		createInvoiceCapabilityID, recordFxRateCapabilityID, recordPaymentCapabilityID, reversePaymentCapabilityID, trialBalanceCapabilityID,
 		submitExpenseClaimCapabilityID, decideExpenseClaimCapabilityID, payExpenseClaimCapabilityID, listExpenseClaimsCapabilityID, listExpensePoliciesCapabilityID, setExpensePolicyCapabilityID,
 		createVendorCapabilityID, createPurchaseOrderCapabilityID, receiveGoodsCapabilityID, returnGoodsCapabilityID, createBillCapabilityID, payBillCapabilityID, reverseVendorPaymentCapabilityID,
@@ -1017,7 +1023,7 @@ func (e *Executor) executeWithFinalizer(
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
 			input = parsed
-		case salesCreateOrderCapabilityID, salesUpdateDraftOrderCapabilityID, salesRestoreDraftOrderCapabilityID, salesConfirmOrderCapabilityID, salesDeliverOrderCapabilityID, salesCancelOrderCapabilityID, salesListOrdersCapabilityID:
+		case salesCreateOrderCapabilityID, salesCreateOrderFromQuoteCapabilityID, salesUpdateDraftOrderCapabilityID, salesRestoreDraftOrderCapabilityID, salesConfirmOrderCapabilityID, salesDeliverOrderCapabilityID, salesCancelOrderCapabilityID, salesListOrdersCapabilityID:
 			parsed, err := parseSalesInput(capabilityID, rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
@@ -2268,6 +2274,12 @@ func (e *Executor) executeWithFinalizer(
 			data, err = marshalJS(output)
 		case HRUpdateEmployeeStructureInput:
 			output, err := hrUpdateEmployeeStructure(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case SalesCreateOrderFromQuoteInput:
+			output, err := salesCreateOrderFromQuote(ctx, tx, claims, parsed, now)
 			if err != nil {
 				return Result{}, err
 			}
@@ -3853,7 +3865,7 @@ func canonicalInputHash(input any) (string, error) {
 		CreateQuoteInput, AcceptQuoteInput, DeclineQuoteInput, ExpireQuoteInput, ListQuotesInput,
 		CreateRecurringTemplateInput, PauseRecurringTemplateInput, ResumeRecurringTemplateInput, ListRecurringTemplatesInput,
 		HRHireEmployeeInput, HRDeactivateEmployeeInput, HRListEmployeesInput, HRReportInput, HRUpdateEmployeeStructureInput,
-		SalesCreateOrderInput, SalesUpdateDraftOrderInput, SalesConfirmOrderInput, SalesDeliverOrderInput, SalesCancelOrderInput, SalesListOrdersInput,
+		SalesCreateOrderInput, SalesCreateOrderFromQuoteInput, SalesUpdateDraftOrderInput, SalesConfirmOrderInput, SalesDeliverOrderInput, SalesCancelOrderInput, SalesListOrdersInput,
 		CreateInvoiceInput, RecordFxRateInput, RecordPaymentInput, ReversePaymentInput, TrialBalanceInput,
 		SubmitExpenseClaimInput, DecideExpenseClaimInput, PayExpenseClaimInput, ListExpenseClaimsInput, ListExpensePoliciesInput, SetExpensePolicyInput,
 		CreateVendorInput, CreatePurchaseOrderInput, ReceiveGoodsInput, ReturnGoodsInput, CreateBillInput, PayBillInput, ReverseVendorPaymentInput,

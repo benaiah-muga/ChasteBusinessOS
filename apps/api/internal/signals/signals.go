@@ -23,6 +23,7 @@ const millisPerDay = int64(24 * time.Hour / time.Millisecond)
 func Register(pool *pgxpool.Pool) {
 	capability.RegisterSignalsProducer(NewInventoryProducer(pool))
 	capability.RegisterSignalsProducer(NewAccountingProducer(pool))
+	capability.RegisterSignalsProducer(NewPurchasingProducer(pool))
 	capability.RegisterSignalsProducer(NewCRMProducer(pool))
 	capability.RegisterSignalsProducer(NewHRProducer(pool))
 	capability.RegisterSignalsProducer(NewSupportProducer(pool))

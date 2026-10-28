@@ -9,6 +9,7 @@ const DocumentRowSchema = z.object({
   sourceType: z.string().min(1),
   createdAt: z.string().datetime(),
   folder: z.string().nullable(),
+  refType: z.string().nullable().optional(),
 });
 
 const CapabilitySuccessSchema = z.object({ ok: z.literal(true), data: z.unknown() }).strict();
@@ -41,6 +42,9 @@ const GoDocumentDetailOutputSchema = z.object({
     parsedMarkdown: z.string().nullable(),
     createdAt: z.string().datetime(),
     folder: z.string().nullable(),
+    refType: z.string().nullable().default(null),
+    refId: z.string().uuid().nullable().default(null),
+    linkedBillNumber: z.number().int().positive().nullable().default(null),
     suggestions: z.array(DocumentCodingSuggestionSchema).default([]),
   }).strict(),
 }).strict();
@@ -60,6 +64,8 @@ const ErrorResponseSchema = z.object({ error: z.string().optional(), message: z.
 
 export type DocumentRow = z.infer<typeof DocumentRowSchema>;
 export type DocumentDetail = z.infer<typeof GoDocumentDetailOutputSchema>["document"];
+export type DocumentVendor = { id: string; name: string };
+export type DocumentWorkspace = { documents: DocumentRow[]; vendors: DocumentVendor[] };
 
 export class DocumentsApiError extends Error {
   constructor(readonly status: number, message: string) {
@@ -168,13 +174,17 @@ async function executeGoDocumentRead(input: Record<string, unknown>, signal?: Ab
   return parsed.data.data;
 }
 
-export async function fetchDocuments(signal?: AbortSignal): Promise<DocumentRow[]> {
+export async function fetchDocumentWorkspace(signal?: AbortSignal): Promise<DocumentWorkspace> {
   const body = await executeGoDocumentRead({}, signal);
   const parsed = GoDocumentListOutputSchema.safeParse(body);
   if (!parsed.success) {
     throw new DocumentsApiError(200, "The Go documents service returned data in an unexpected format.");
   }
-  return parsed.data.documents;
+  return { documents: parsed.data.documents, vendors: parsed.data.vendors };
+}
+
+export async function fetchDocuments(signal?: AbortSignal): Promise<DocumentRow[]> {
+  return (await fetchDocumentWorkspace(signal)).documents;
 }
 
 export async function fetchDocumentDetail(id: string, signal?: AbortSignal): Promise<DocumentDetail> {

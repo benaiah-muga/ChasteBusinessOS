@@ -551,6 +551,26 @@ func TestSessionCapabilityHandlerRejectsInvalidAuthOriginAndCallerClaims(t *test
 		}
 	})
 
+	t.Run("sales domain refusals are definitive client errors", func(t *testing.T) {
+		resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
+		executor := &fakeDirectCapabilityExecutor{err: capability.SalesDomainError("quote is accepted; only sent quotes become orders")}
+		response := httptest.NewRecorder()
+		NewSessionCapabilityHandler(resolver, executor, nil).ServeHTTP(response, directCapabilityRequest(http.MethodPost, `{"capabilityId":"sales.createOrderFromQuote","input":{},"intentId":"sales-domain-refusal-1"}`))
+		if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), "only sent quotes become orders") {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+		}
+	})
+
+	t.Run("purchasing domain refusals are definitive client errors", func(t *testing.T) {
+		resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
+		executor := &fakeDirectCapabilityExecutor{err: capability.PurchasingDomainError("document is already linked to a business record")}
+		response := httptest.NewRecorder()
+		NewSessionCapabilityHandler(resolver, executor, nil).ServeHTTP(response, directCapabilityRequest(http.MethodPost, `{"capabilityId":"purchasing.createBill","input":{},"intentId":"purchasing-domain-refusal-1"}`))
+		if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), "document is already linked to a business record") {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+		}
+	})
+
 	t.Run("creator domain refusals use the Vite refusal envelope", func(t *testing.T) {
 		resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
 		executor := &fakeDirectCapabilityExecutor{err: capability.CreatorDomainError("proposal lacks valid isolated candidate evidence")}

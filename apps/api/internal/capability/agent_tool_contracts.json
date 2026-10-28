@@ -988,7 +988,7 @@
     },
     {
       "id": "accounting.createQuote",
-      "description": "Create quote. Draft a price quote for a customer with line items so they can accept it later and it becomes an invoice without retyping anything. Use this governed read when the user asks for this information.",
+      "description": "Create a sent sales quote with priced lines and optional catalogue SKUs. Award it with sales.createOrderFromQuote so stock and credit are checked at confirmation, or decline it with accounting.declineQuote.",
       "schema": {
         "type": "object",
         "properties": {
@@ -1028,6 +1028,12 @@
                   "type": "integer",
                   "minimum": 0,
                   "maximum": 9007199254740991
+                },
+                "sku": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120,
+                  "description": "Optional catalogue SKU for a stocked line; the item follows the quote into the sales order."
                 },
                 "taxCodeId": {
                   "type": "string",
@@ -1127,7 +1133,7 @@
     },
     {
       "id": "purchasing.createBill",
-      "description": "Record vendor bill. Record an invoice received from a supplier; posts the expense and the amount owed to Accounts Payable. Use this governed read when the user asks for this information.",
+      "description": "Record a vendor bill from a supplier, optionally promoting a reviewed ingested document. Reference a purchase order and line numbers to run three-way matching before payment.",
       "schema": {
         "type": "object",
         "properties": {
@@ -1144,6 +1150,11 @@
             "type": "integer",
             "exclusiveMinimum": 0,
             "maximum": 9007199254740991
+          },
+          "documentId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Optional ingested document under review; the bill and its one-time document link commit together."
           },
           "lines": {
             "minItems": 1,
@@ -1693,6 +1704,24 @@
       "schema": {
         "type": "object",
         "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "sales.createOrderFromQuote",
+      "description": "Award a sent sales quote into a draft sales order with the same lines. This posts no revenue and reserves no stock; confirm the order separately to check credit and reserve inventory, then deliver it to invoice the shipment.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "quoteId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Sent quote UUID returned by accounting.listQuotes."
+          }
+        },
+        "required": [
+          "quoteId"
+        ],
         "additionalProperties": false
       }
     }

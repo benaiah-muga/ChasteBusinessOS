@@ -667,11 +667,61 @@ func TestDocumentsProducerSignals(t *testing.T) {
 		VALUES ($1::uuid, $2::uuid, 'No expiry', 'upload', 'parsed', 'human')`,
 		signalsUUID(t), fx.orgID)
 
+	awaiting := signalsUUID(t)
+	fx.mustExec(`
+		INSERT INTO documents (id, org_id, title, source_type, status, created_at, created_by_actor_type, parsed_markdown)
+		VALUES ($1::uuid, $2::uuid, 'Copper invoice', 'text', 'parsed', $3, 'human', 'Copper wire 40 spools')`,
+		awaiting, fx.orgID, fx.daysAgo(3))
+	fx.mustExec(`
+		INSERT INTO document_suggestions (org_id, document_id, description, suggested_account_code)
+		VALUES ($1::uuid, $2::uuid, 'Copper wire', '6000')`, fx.orgID, awaiting)
+	recentAwaiting := signalsUUID(t)
+	fx.mustExec(`
+		INSERT INTO documents (id, org_id, title, source_type, status, created_at, created_by_actor_type, parsed_markdown)
+		VALUES ($1::uuid, $2::uuid, 'Fresh invoice', 'text', 'parsed', $3, 'human', 'Fresh')`,
+		recentAwaiting, fx.orgID, fx.daysAgo(1))
+	fx.mustExec(`
+		INSERT INTO document_suggestions (org_id, document_id, description, suggested_account_code)
+		VALUES ($1::uuid, $2::uuid, 'Fresh supplies', '6000')`, fx.orgID, recentAwaiting)
+	linked := signalsUUID(t)
+	fx.mustExec(`
+		INSERT INTO documents (id, org_id, title, source_type, status, created_at, created_by_actor_type, parsed_markdown, ref_type, ref_id)
+		VALUES ($1::uuid, $2::uuid, 'Already billed', 'text', 'parsed', $3, 'human', 'Billed', 'vendor_bill', $4)`,
+		linked, fx.orgID, fx.daysAgo(3), signalsUUID(t))
+	fx.mustExec(`
+		INSERT INTO document_suggestions (org_id, document_id, description, suggested_account_code)
+		VALUES ($1::uuid, $2::uuid, 'Already billed line', '6000')`, fx.orgID, linked)
+	dismissed := signalsUUID(t)
+	fx.mustExec(`
+		INSERT INTO documents (id, org_id, title, source_type, status, created_at, created_by_actor_type, parsed_markdown)
+		VALUES ($1::uuid, $2::uuid, 'Dismissed invoice', 'text', 'parsed', $3, 'human', 'Dismissed')`,
+		dismissed, fx.orgID, fx.daysAgo(3))
+	fx.mustExec(`
+		INSERT INTO document_suggestions (org_id, document_id, description, suggested_account_code, status)
+		VALUES ($1::uuid, $2::uuid, 'Dismissed line', '6000', 'dismissed')`, fx.orgID, dismissed)
+
 	signals, err := NewDocumentsProducer(fx.runtime)(fx.ctx, fx.orgID, fx.now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	byID := fx.assertSignalIDs(signals, "documents.expired:"+expired, "documents.expired:"+recent)
+	byID := fx.assertSignalIDs(signals, "documents.expired:"+expired, "documents.expired:"+recent, "documents.awaitingAction:"+awaiting)
+	review := byID["documents.awaitingAction:"+awaiting]
+	if review.Severity != "orange" || review.Subject != `Document "Copper invoice" is parsed but not recorded` {
+		t.Errorf("awaiting review = %s / %q", review.Severity, review.Subject)
+	}
+	if review.Detail != "1 coded line is waiting for review. Create the supplier bill from the extracted lines, or dismiss the document so the queue stays honest." {
+		t.Errorf("awaiting review detail = %q", review.Detail)
+	}
+	fx.requireRef(t, review, "document", awaiting)
+	if _, exists := byID["documents.awaitingAction:"+recentAwaiting]; exists {
+		t.Error("a document inside the review grace period was queued")
+	}
+	if _, exists := byID["documents.awaitingAction:"+linked]; exists {
+		t.Error("a document already linked to a bill was queued")
+	}
+	if _, exists := byID["documents.awaitingAction:"+dismissed]; exists {
+		t.Error("a document with only dismissed suggestions was queued")
+	}
 
 	license := byID["documents.expired:"+expired]
 	if license.Severity != "red" || license.Subject != `Document "Trade License" expired 2 days ago` {
@@ -686,5 +736,140 @@ func TestDocumentsProducerSignals(t *testing.T) {
 	insurance := byID["documents.expired:"+recent]
 	if insurance.Subject != `Document "Insurance" expired 1 day ago` {
 		t.Errorf("singular subject = %q", insurance.Subject)
+	}
+}
+
+func TestPurchasingProducerSignals(t *testing.T) {
+	fx := newSignalsFixture(t)
+
+	vendor := signalsUUID(t)
+	fx.mustExec(`INSERT INTO vendors (id, org_id, name, payment_term_days) VALUES ($1::uuid, $2::uuid, 'CopperWire GmbH', 30)`,
+		vendor, fx.orgID)
+	delayed := signalsUUID(t)
+	fx.mustExec(`
+		INSERT INTO purchase_orders (id, org_id, vendor_id, number, status, promised_at, created_at)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, 41, 'partial', $4, $5)`,
+		delayed, fx.orgID, vendor, fx.daysAgo(10), fx.daysAgo(20))
+	onTime := signalsUUID(t)
+	fx.mustExec(`
+		INSERT INTO purchase_orders (id, org_id, vendor_id, number, status, promised_at, created_at)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, 42, 'ordered', $4, $5)`,
+		onTime, fx.orgID, vendor, fx.daysFromNow(3), fx.daysAgo(1))
+	closed := signalsUUID(t)
+	fx.mustExec(`
+		INSERT INTO purchase_orders (id, org_id, vendor_id, number, status, promised_at, created_at)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, 43, 'closed', $4, $5)`,
+		closed, fx.orgID, vendor, fx.daysAgo(10), fx.daysAgo(20))
+
+	overdue := signalsUUID(t)
+	fx.mustExec(`
+		INSERT INTO vendor_bills (id, org_id, vendor_id, number, status, total_minor, due_at, created_at)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, 71, 'open', 72000, $4, $5)`,
+		overdue, fx.orgID, vendor, fx.daysAgo(45), fx.daysAgo(60))
+	veryOverdue := signalsUUID(t)
+	fx.mustExec(`
+		INSERT INTO vendor_bills (id, org_id, vendor_id, number, status, total_minor, paid_minor, due_at, created_at)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, 72, 'open', 50000, 10000, $4, $5)`,
+		veryOverdue, fx.orgID, vendor, fx.daysAgo(75), fx.daysAgo(90))
+	settled := signalsUUID(t)
+	fx.mustExec(`
+		INSERT INTO vendor_bills (id, org_id, vendor_id, number, status, total_minor, paid_minor, due_at, created_at)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, 73, 'paid', 10000, 10000, $4, $5)`,
+		settled, fx.orgID, vendor, fx.daysAgo(45), fx.daysAgo(60))
+	future := signalsUUID(t)
+	fx.mustExec(`
+		INSERT INTO vendor_bills (id, org_id, vendor_id, number, status, total_minor, due_at, created_at)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, 74, 'open', 20000, $4, $5)`,
+		future, fx.orgID, vendor, fx.daysFromNow(10), fx.daysAgo(1))
+
+	otherVendor := signalsUUID(t)
+	fx.mustExec(`INSERT INTO vendors (id, org_id, name) VALUES ($1::uuid, $2::uuid, 'Foreign supplier')`,
+		otherVendor, fx.otherOrgID)
+	fx.mustExec(`
+		INSERT INTO vendor_bills (id, org_id, vendor_id, number, status, total_minor, due_at, created_at)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, 900, 'open', 99000, $4, $5)`,
+		signalsUUID(t), fx.otherOrgID, otherVendor, fx.daysAgo(100), fx.daysAgo(120))
+
+	signals, err := NewPurchasingProducer(fx.runtime)(fx.ctx, fx.orgID, fx.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := fx.assertSignalIDs(signals,
+		"purchasing.orderDelayed:"+delayed,
+		"purchasing.billOverdue:"+overdue,
+		"purchasing.billOverdue:"+veryOverdue,
+	)
+	supply := byID["purchasing.orderDelayed:"+delayed]
+	if supply.Severity != "red" || supply.Subject != "Purchase order #41 is 10 days past its promised date" {
+		t.Errorf("delayed order = %s / %q", supply.Severity, supply.Subject)
+	}
+	fx.requireRef(t, supply, "purchase_order", delayed)
+	draft := decodeDraft[getPurchaseOrderDraft](t, supply)
+	if supply.SuggestedAction.CapabilityID != "purchasing.getPurchaseOrder" || draft.PONumber != 41 {
+		t.Errorf("delayed order draft = %+v", draft)
+	}
+
+	bill := byID["purchasing.billOverdue:"+overdue]
+	if bill.Severity != "orange" || bill.Subject != "Supplier bill #71 is 45 days past due" {
+		t.Errorf("overdue bill = %s / %q", bill.Severity, bill.Subject)
+	}
+	if bill.Detail != "720.00 is still owed to \"CopperWire GmbH\" (due "+fx.daysAgo(45).Format("2006-01-02")+"). Review the cash position and pay it, or record why it is being withheld." {
+		t.Errorf("overdue bill detail = %q", bill.Detail)
+	}
+	fx.requireRef(t, bill, "bill", overdue)
+	if byID["purchasing.billOverdue:"+veryOverdue].Severity != "red" {
+		t.Errorf("a 75 day bill should be red")
+	}
+}
+
+func TestAccountingExpenseAnomalySignal(t *testing.T) {
+	fx := newSignalsFixture(t)
+
+	for index, amount := range []int64{10_000, 12_000, 14_000} {
+		fx.mustExec(`
+			INSERT INTO expense_claims (id, org_id, claimant_user_id, amount_minor, memo, category, status, created_at)
+			VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'Approved travel', 'travel', 'approved', $5)`,
+			signalsUUID(t), fx.orgID, fx.userID, amount, fx.daysAgo(30+index))
+	}
+	flagged := signalsUUID(t)
+	fx.mustExec(`
+		INSERT INTO expense_claims (id, org_id, claimant_user_id, amount_minor, memo, category, status, created_at)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, 120000, 'Business class upgrade', 'travel', 'submitted', $4)`,
+		flagged, fx.orgID, fx.userID, fx.daysAgo(1))
+	ordinary := signalsUUID(t)
+	fx.mustExec(`
+		INSERT INTO expense_claims (id, org_id, claimant_user_id, amount_minor, memo, category, status, created_at)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, 13000, 'Ordinary trip', 'travel', 'submitted', $4)`,
+		ordinary, fx.orgID, fx.userID, fx.daysAgo(1))
+	thin := signalsUUID(t)
+	fx.mustExec(`
+		INSERT INTO expense_claims (id, org_id, claimant_user_id, amount_minor, memo, category, status, created_at)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, 900000, 'First ever office buy', 'office', 'submitted', $4)`,
+		thin, fx.orgID, fx.userID, fx.daysAgo(1))
+
+	signals, err := NewAccountingProducer(fx.runtime)(fx.ctx, fx.orgID, fx.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]capability.BusinessSignal{}
+	for _, signal := range signals {
+		byID[signal.ID] = signal
+	}
+	anomaly, ok := byID["accounting.unusualClaim:"+flagged]
+	if !ok {
+		t.Fatalf("missing unusual claim signal; got %v", byID)
+	}
+	if anomaly.Severity != "orange" || anomaly.Subject != "Unusual expense claim: 1200.00 in travel" {
+		t.Errorf("anomaly = %s / %q", anomaly.Severity, anomaly.Subject)
+	}
+	if anomaly.Detail != "The claim is 1200.00 against a 120.00 median across 3 approved claims in this category over the last 180 days. Approve deliberately or ask for the receipt before it reaches the books." {
+		t.Errorf("anomaly detail = %q", anomaly.Detail)
+	}
+	fx.requireRef(t, anomaly, "expense_claim", flagged)
+	if _, exists := byID["accounting.unusualClaim:"+ordinary]; exists {
+		t.Error("an ordinary claim was flagged as unusual")
+	}
+	if _, exists := byID["accounting.unusualClaim:"+thin]; exists {
+		t.Error("a category with thin history was flagged")
 	}
 }

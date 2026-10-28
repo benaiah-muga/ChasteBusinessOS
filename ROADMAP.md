@@ -17,6 +17,10 @@ The sequence is evidence-gated, not date-gated.
 - [x] Purchase commitments and quote awards require human authority for agent and system actors; deactivated suppliers are rejected, and high-impact public writes require an intent.
 - [x] Versioned purchase proposal and a line-level quote commitment.
 - [x] Persistent exceptions, business objectives, and Decision Records.
+- [x] Durable exception lifecycle in the Inbox: acknowledge, take ownership, resolve, reopen, and keep no-longer-detected exceptions visible until a person closes them.
+- [x] Quote-to-cash continuity: SKU-aware quote lines, award into a sales order, credit and stock checks on confirmation, delivery-created invoice linked back to the order, and quote restoration when an untouched order is cancelled.
+- [x] Document-to-action continuity: reviewed coding suggestions become a vendor bill with the source document linked atomically, and parsed documents awaiting review raise an exception.
+- [x] Replenishment-to-payment skill spans cash forecast, payables context, supplier comparison, purchase approval, receiving, three-way matching, and a reviewed payment run.
 - [x] Workmate purchase proposal card: supplier context, exact approval payload, approve and reject in the conversation.
 - [x] Post-approval order status: remaining quantities and receipt history, with a backend plan-to-receipt acceptance proof.
 - [x] Workmate cards for exception, progress, waiting, and verified result.

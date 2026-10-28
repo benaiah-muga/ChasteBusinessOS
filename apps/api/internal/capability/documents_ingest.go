@@ -158,12 +158,14 @@ func parseAddDocumentVersionInput(raw json.RawMessage) (DocumentsInput, error) {
 
 func ingestDocument(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityClaims, input DocumentsInput) (IngestDocumentOutput, error) {
 	var (
-		sizeBytes  *int64
-		sourceType = "text"
-		contentB64 *string
-		rawText    *string
-		folder     *string
-		expiresAt  *time.Time
+		sizeBytes      *int64
+		sourceType     = "text"
+		status         = "received"
+		contentB64     *string
+		rawText        *string
+		parsedMarkdown *string
+		folder         *string
+		expiresAt      *time.Time
 	)
 	if input.FileBase64 != nil {
 		sourceType = "upload"
@@ -178,6 +180,10 @@ func ingestDocument(ctx context.Context, tx pgx.Tx, claims authbridge.Capability
 	}
 	if input.Text != nil {
 		rawText = input.Text
+		// Pasted text needs no OCR: it is already the reviewer-visible content.
+		// The raw bytes stay private; parsed_markdown is the projected text.
+		parsedMarkdown = input.Text
+		status = "parsed"
 	}
 	if input.Folder != nil && input.Folder.Present && !input.Folder.Nulled {
 		folder = stringPointer(input.Folder.Value)
@@ -194,11 +200,11 @@ func ingestDocument(ctx context.Context, tx pgx.Tx, claims authbridge.Capability
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO documents (
 			org_id, title, source_type, mime_type, size_bytes, content_base64, raw_text,
-			created_by_actor_type, created_by_actor_id, folder, ref_type, ref_id, expires_at)
-		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9::uuid, $10, $11, $12::uuid, $13)
+			parsed_markdown, status, created_by_actor_type, created_by_actor_id, folder, ref_type, ref_id, expires_at)
+		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::uuid, $12, $13, $14::uuid, $15)
 		RETURNING id::text`,
 		claims.OrganizationID, *input.Title, sourceType, input.MIMEType, sizeBytes,
-		contentB64, rawText, claims.ActorType, claims.ActorID, folder,
+		contentB64, rawText, parsedMarkdown, status, claims.ActorType, claims.ActorID, folder,
 		input.RefType, input.RefID, expiresAt).Scan(&documentID); err != nil {
 		return IngestDocumentOutput{}, err
 	}

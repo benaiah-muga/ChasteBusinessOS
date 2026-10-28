@@ -27,6 +27,7 @@ type IngestedDocumentRow struct {
 	SourceType string  `json:"sourceType"`
 	CreatedAt  string  `json:"createdAt"`
 	Folder     *string `json:"folder"`
+	RefType    *string `json:"refType"`
 }
 
 type IngestedVendorRow struct {
@@ -49,17 +50,20 @@ type IngestedSuggestion struct {
 }
 
 type IngestedDocumentDetail struct {
-	ID             string               `json:"id"`
-	Title          string               `json:"title"`
-	Status         string               `json:"status"`
-	SourceType     string               `json:"sourceType"`
-	MIMEType       *string              `json:"mimeType"`
-	SizeBytes      *int64               `json:"sizeBytes"`
-	ParseError     *string              `json:"parseError"`
-	ParsedMarkdown *string              `json:"parsedMarkdown"`
-	CreatedAt      string               `json:"createdAt"`
-	Folder         *string              `json:"folder"`
-	Suggestions    []IngestedSuggestion `json:"suggestions,omitempty"`
+	ID               string               `json:"id"`
+	Title            string               `json:"title"`
+	Status           string               `json:"status"`
+	SourceType       string               `json:"sourceType"`
+	MIMEType         *string              `json:"mimeType"`
+	SizeBytes        *int64               `json:"sizeBytes"`
+	ParseError       *string              `json:"parseError"`
+	ParsedMarkdown   *string              `json:"parsedMarkdown"`
+	CreatedAt        string               `json:"createdAt"`
+	Folder           *string              `json:"folder"`
+	RefType          *string              `json:"refType"`
+	RefID            *string              `json:"refId"`
+	LinkedBillNumber *int64               `json:"linkedBillNumber"`
+	Suggestions      []IngestedSuggestion `json:"suggestions,omitempty"`
 }
 
 type IngestedDocumentsOutput struct {
@@ -163,13 +167,16 @@ func readIngestedDocuments(ctx context.Context, tx pgx.Tx, orgID string, input I
 		var document IngestedDocumentDetail
 		var createdAt time.Time
 		err := tx.QueryRow(ctx, `
-			SELECT id::text, title, status, source_type, mime_type, size_bytes, parse_error,
-			       parsed_markdown, created_at, folder
-			FROM documents
-			WHERE org_id = $1::uuid AND id = $2::uuid
+			SELECT d.id::text, d.title, d.status, d.source_type, d.mime_type, d.size_bytes, d.parse_error,
+			       d.parsed_markdown, d.created_at, d.folder, d.ref_type, d.ref_id::text, vb.number
+			FROM documents d
+			LEFT JOIN vendor_bills vb
+			  ON vb.id = d.ref_id AND vb.org_id = d.org_id AND d.ref_type = 'vendor_bill'
+			WHERE d.org_id = $1::uuid AND d.id = $2::uuid
 			LIMIT 1`, orgID, *input.ID).Scan(
 			&document.ID, &document.Title, &document.Status, &document.SourceType, &document.MIMEType,
 			&document.SizeBytes, &document.ParseError, &document.ParsedMarkdown, &createdAt, &document.Folder,
+			&document.RefType, &document.RefID, &document.LinkedBillNumber,
 		)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return IngestedDocumentsOutput{}, ErrIngestedDocumentNotFound
@@ -212,7 +219,7 @@ func readIngestedDocuments(ctx context.Context, tx pgx.Tx, orgID string, input I
 	}
 
 	rows, err := tx.Query(ctx, `
-		SELECT id::text, title, status, source_type, created_at, folder
+		SELECT id::text, title, status, source_type, created_at, folder, ref_type
 		FROM documents
 		WHERE org_id = $1::uuid
 		ORDER BY created_at DESC
@@ -224,7 +231,7 @@ func readIngestedDocuments(ctx context.Context, tx pgx.Tx, orgID string, input I
 	for rows.Next() {
 		var document IngestedDocumentRow
 		var createdAt time.Time
-		if err := rows.Scan(&document.ID, &document.Title, &document.Status, &document.SourceType, &createdAt, &document.Folder); err != nil {
+		if err := rows.Scan(&document.ID, &document.Title, &document.Status, &document.SourceType, &createdAt, &document.Folder, &document.RefType); err != nil {
 			rows.Close()
 			return IngestedDocumentsOutput{}, err
 		}

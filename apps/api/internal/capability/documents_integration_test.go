@@ -129,6 +129,15 @@ func TestGoDocumentsIngestionAndVersions(t *testing.T) {
 	if err := json.Unmarshal(created.Data, &createdOut); err != nil {
 		t.Fatal(err)
 	}
+	var createdStatus string
+	var createdMarkdown *string
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT status, parsed_markdown FROM documents WHERE org_id=$1::uuid AND id=$2::uuid`, fx.orgID, createdOut.DocumentID).
+		Scan(&createdStatus, &createdMarkdown); err != nil {
+		t.Fatal(err)
+	}
+	if createdStatus != "parsed" || createdMarkdown == nil || *createdMarkdown != "pasted text" {
+		t.Fatalf("pasted text document status=%q markdown=%v, want parsed content without exposing raw_text", createdStatus, createdMarkdown)
+	}
 	if !isUUID(createdOut.DocumentID) {
 		t.Fatalf("createDocument documentId = %q", createdOut.DocumentID)
 	}

@@ -185,6 +185,9 @@ beforeEach(() => {
           parsedMarkdown: "Terms for supplier orders.",
           createdAt: "2026-09-29T09:00:00.000Z",
           folder: "Suppliers",
+          refType: null,
+          refId: null,
+          linkedBillNumber: null,
         } } });
     }
     if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });

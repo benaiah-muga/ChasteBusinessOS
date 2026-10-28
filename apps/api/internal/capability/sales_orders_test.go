@@ -34,6 +34,14 @@ func TestSalesOrdersParserContracts(t *testing.T) {
 			outputJS: `{"orderId":"` + orderID + `","orderNumber":7}`,
 		},
 		{
+			name:     "createOrderFromQuote",
+			parse:    func(raw json.RawMessage) (any, error) { return ParseSalesCreateOrderFromQuoteInput(raw) },
+			raw:      `{"quoteId":"` + customerID + `","unknown":true}`,
+			wantJSON: `{"quoteId":"` + customerID + `"}`,
+			output:   SalesCreateOrderFromQuoteOutput{OrderID: orderID, OrderNumber: 7, QuoteNumber: 3, TotalMinor: 660000},
+			outputJS: `{"orderId":"` + orderID + `","orderNumber":7,"quoteNumber":3,"totalMinor":660000}`,
+		},
+		{
 			name:     "createOrderMinimal",
 			parse:    func(raw json.RawMessage) (any, error) { return ParseSalesCreateOrderInput(raw) },
 			raw:      `{"customerId":"` + customerID + `","lines":[{"description":"Bare","quantity":1000,"unitPriceMinor":500}]}`,
@@ -1263,5 +1271,113 @@ func TestSalesOrdersConcurrentCreditConfirmationsSerializeOnCustomer(t *testing.
 	}
 	if got := fx.count(`SELECT count(*) FROM sales_orders WHERE id = ANY($1::uuid[]) AND status='confirmed'`, []string{firstOrder.OrderID, secondOrder.OrderID}); got != 2 {
 		t.Fatalf("confirmed orders = %d, want both permitted orders", got)
+	}
+}
+
+func TestSalesQuoteBecomesOrderAndCancellationRestoresTheQuote(t *testing.T) {
+	fx := newExecutorFixture(t)
+	cleanupAccountingFixtureLedger(t, fx)
+	claims := salesTestClaims(fx)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	customerID := seedCRMDealCustomer(t, fx, fx.orgID, "Quote buyer")
+	itemID := seedSalesItem(t, fx, fx.orgID, "QO-CHAIR", "goods")
+	seedSalesStock(t, fx, fx.orgID, itemID, 50000)
+	seedSalesAccounts(t, fx, fx.orgID)
+
+	quote := salesInOrgTx(t, fx, fx.orgID, func(tx pgx.Tx) (CreateQuoteOutput, error) {
+		return createQuote(fx.ctx, tx, claims, CreateQuoteInput{
+			CustomerID: customerID,
+			Memo:       crmStringPointer("Awarded fit-out"),
+			Lines: []CreateQuoteLineInput{
+				{Description: "QO chair", Quantity: 10000, UnitPriceMinor: 25000, TaxMinor: crmInt64Pointer(5000), SKU: crmStringPointer("QO-CHAIR")},
+				{Description: "Installation", Quantity: 1000, UnitPriceMinor: 40000},
+			},
+		})
+	})
+	var quoteItemID *string
+	var quoteLineCount int64
+	if err := fx.owner.QueryRow(fx.ctx, `
+		SELECT (SELECT item_id::text FROM quote_lines WHERE quote_id=$1::uuid AND description='QO chair'),
+		       (SELECT count(*) FROM quote_lines WHERE quote_id=$1::uuid)`, quote.QuoteID).Scan(&quoteItemID, &quoteLineCount); err != nil {
+		t.Fatal(err)
+	}
+	if quoteItemID == nil || *quoteItemID != itemID || quoteLineCount != 2 {
+		t.Fatalf("quote lines = item %v count %d, want the SKU resolved and two lines", quoteItemID, quoteLineCount)
+	}
+
+	order := salesInOrgTx(t, fx, fx.orgID, func(tx pgx.Tx) (SalesCreateOrderFromQuoteOutput, error) {
+		return salesCreateOrderFromQuote(fx.ctx, tx, claims, SalesCreateOrderFromQuoteInput{QuoteID: quote.QuoteID}, now)
+	})
+	if !isUUID(order.OrderID) || order.OrderNumber != 1 || order.QuoteNumber != quote.QuoteNumber || order.TotalMinor != quote.TotalMinor {
+		t.Fatalf("quote order = %+v, want linked order number 1 and quote total %d", order, quote.TotalMinor)
+	}
+	var status, convertedOrderID, orderQuoteID string
+	var convertedInvoiceID *string
+	if err := fx.owner.QueryRow(fx.ctx, `
+		SELECT status, converted_order_id::text, converted_invoice_id::text FROM quotes WHERE id=$1::uuid`, quote.QuoteID).
+		Scan(&status, &convertedOrderID, &convertedInvoiceID); err != nil {
+		t.Fatal(err)
+	}
+	if status != "accepted" || convertedOrderID != order.OrderID || convertedInvoiceID != nil {
+		t.Fatalf("quote after award = %s order %s invoice %v, want accepted with the order and no invoice", status, convertedOrderID, convertedInvoiceID)
+	}
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT quote_id::text FROM sales_orders WHERE id=$1::uuid`, order.OrderID).Scan(&orderQuoteID); err != nil {
+		t.Fatal(err)
+	}
+	if orderQuoteID != quote.QuoteID {
+		t.Fatalf("order quote = %s, want %s", orderQuoteID, quote.QuoteID)
+	}
+	err := salesErrInOrgTx(t, fx, fx.orgID, func(tx pgx.Tx) error {
+		_, err := salesCreateOrderFromQuote(fx.ctx, tx, claims, SalesCreateOrderFromQuoteInput{QuoteID: quote.QuoteID}, now)
+		return err
+	})
+	if err == nil || !strings.Contains(err.Error(), "only sent quotes become orders") {
+		t.Fatalf("second award error = %v, want status refusal", err)
+	}
+
+	salesInOrgTx(t, fx, fx.orgID, func(tx pgx.Tx) (SalesConfirmOrderOutput, error) {
+		return salesConfirmOrder(fx.ctx, tx, claims, SalesConfirmOrderInput{OrderID: order.OrderID}, now)
+	})
+	delivered := salesInOrgTx(t, fx, fx.orgID, func(tx pgx.Tx) (SalesDeliverOrderOutput, error) {
+		return salesDeliverOrder(fx.ctx, tx, claims, SalesDeliverOrderInput{OrderID: order.OrderID}, now)
+	})
+	var invoiceOrderID string
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT sales_order_id::text FROM invoices WHERE id=$1::uuid`, delivered.InvoiceID).Scan(&invoiceOrderID); err != nil {
+		t.Fatal(err)
+	}
+	if invoiceOrderID != order.OrderID {
+		t.Fatalf("invoice order = %s, want %s", invoiceOrderID, order.OrderID)
+	}
+
+	second := salesInOrgTx(t, fx, fx.orgID, func(tx pgx.Tx) (CreateQuoteOutput, error) {
+		return createQuote(fx.ctx, tx, claims, CreateQuoteInput{
+			CustomerID: customerID,
+			Lines:      []CreateQuoteLineInput{{Description: "Second chance", Quantity: 1000, UnitPriceMinor: 9000}},
+		})
+	})
+	secondOrder := salesInOrgTx(t, fx, fx.orgID, func(tx pgx.Tx) (SalesCreateOrderFromQuoteOutput, error) {
+		return salesCreateOrderFromQuote(fx.ctx, tx, claims, SalesCreateOrderFromQuoteInput{QuoteID: second.QuoteID}, now)
+	})
+	salesInOrgTx(t, fx, fx.orgID, func(tx pgx.Tx) (SalesCancelOrderOutput, error) {
+		return salesCancelOrder(fx.ctx, tx, fx.orgID, SalesCancelOrderInput{OrderID: secondOrder.OrderID}, now)
+	})
+	var restoredStatus string
+	var restoredOrderID *string
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT status, converted_order_id::text FROM quotes WHERE id=$1::uuid`, second.QuoteID).
+		Scan(&restoredStatus, &restoredOrderID); err != nil {
+		t.Fatal(err)
+	}
+	if restoredStatus != "sent" || restoredOrderID != nil {
+		t.Fatalf("quote after cancel = %s order %v, want sent with no converted order", restoredStatus, restoredOrderID)
+	}
+
+	listed := salesInOrgTx(t, fx, fx.orgID, func(tx pgx.Tx) (SalesListOrdersOutput, error) {
+		return salesListOrders(fx.ctx, tx, fx.orgID, SalesListOrdersInput{})
+	})
+	if len(listed.Orders) != 2 {
+		t.Fatalf("listed orders = %d, want 2", len(listed.Orders))
+	}
+	if listed.Orders[1].QuoteID == nil || *listed.Orders[1].QuoteID != quote.QuoteID || listed.Orders[1].QuoteNumber == nil || *listed.Orders[1].QuoteNumber != quote.QuoteNumber {
+		t.Fatalf("first listed order quote = %v/%v, want quote %s number %d", listed.Orders[1].QuoteID, listed.Orders[1].QuoteNumber, quote.QuoteID, quote.QuoteNumber)
 	}
 }

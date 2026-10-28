@@ -22,11 +22,19 @@ const (
 	listQuotesCapabilityID   = "accounting.listQuotes"
 )
 
+type CreateQuoteLineInput struct {
+	Description    string  `json:"description"`
+	Quantity       int64   `json:"quantity"`
+	UnitPriceMinor int64   `json:"unitPriceMinor"`
+	TaxMinor       *int64  `json:"taxMinor,omitempty"`
+	SKU            *string `json:"sku,omitempty"`
+}
+
 type CreateQuoteInput struct {
-	CustomerID string              `json:"customerId"`
-	Memo       *string             `json:"memo,omitempty"`
-	ExpiresAt  *string             `json:"expiresAt,omitempty"`
-	Lines      []CreateInvoiceLine `json:"lines"`
+	CustomerID string                 `json:"customerId"`
+	Memo       *string                `json:"memo,omitempty"`
+	ExpiresAt  *string                `json:"expiresAt,omitempty"`
+	Lines      []CreateQuoteLineInput `json:"lines"`
 }
 
 type CreateQuoteOutput struct {
@@ -72,6 +80,7 @@ type ListQuoteSummary struct {
 	CreatedAt  *string `json:"createdAt"`
 	ExpiresAt  *string `json:"expiresAt"`
 	InvoiceID  *string `json:"invoiceId"`
+	OrderID    *string `json:"orderId"`
 }
 
 type ListQuotesOutput struct {
@@ -144,7 +153,7 @@ func quoteDateTimeValue(value *string) (any, error) {
 	return parsed.UTC().Truncate(time.Millisecond), nil
 }
 
-func parseCreateQuoteLines(fields map[string]json.RawMessage) ([]CreateInvoiceLine, error) {
+func parseCreateQuoteLines(fields map[string]json.RawMessage) ([]CreateQuoteLineInput, error) {
 	linesRaw, ok := fields["lines"]
 	if !ok || bytes.Equal(bytes.TrimSpace(linesRaw), []byte("null")) {
 		return nil, errors.New("lines must contain at least one line")
@@ -156,16 +165,16 @@ func parseCreateQuoteLines(fields map[string]json.RawMessage) ([]CreateInvoiceLi
 	if len(lineValues) > 100 {
 		return nil, errors.New("lines must contain at most 100 entries")
 	}
-	lines := make([]CreateInvoiceLine, 0, len(lineValues))
+	lines := make([]CreateQuoteLineInput, 0, len(lineValues))
 	for _, lineRaw := range lineValues {
 		lineFields, err := decodeJSONObject(lineRaw)
 		if err != nil {
 			return nil, errors.New("each quote line must be an object")
 		}
-		if err := rejectQuoteFields(lineFields, "description", "quantity", "unitPriceMinor", "taxMinor"); err != nil {
+		if err := rejectQuoteFields(lineFields, "description", "quantity", "unitPriceMinor", "taxMinor", "sku"); err != nil {
 			return nil, err
 		}
-		var line CreateInvoiceLine
+		var line CreateQuoteLineInput
 		line.Description, err = requiredString(lineFields, "description")
 		if err != nil {
 			return nil, err
@@ -184,6 +193,17 @@ func parseCreateQuoteLines(fields map[string]json.RawMessage) ([]CreateInvoiceLi
 		}
 		if line.TaxMinor, err = optionalSafeInteger(lineFields, "taxMinor"); err != nil || line.TaxMinor != nil && (*line.TaxMinor < 0 || *line.TaxMinor > maxDatabaseInteger) {
 			return nil, errors.New("taxMinor must be a non-negative integer")
+		}
+		if rawSKU, present := lineFields["sku"]; present {
+			var sku string
+			if bytes.Equal(bytes.TrimSpace(rawSKU), []byte("null")) || json.Unmarshal(rawSKU, &sku) != nil {
+				return nil, errors.New("sku must be a string")
+			}
+			sku = strings.TrimSpace(sku)
+			if sku == "" || utf16Length(sku) > 120 || strings.ContainsRune(sku, '\x00') {
+				return nil, errors.New("sku must contain 1 to 120 characters after trimming and no null byte")
+			}
+			line.SKU = &sku
 		}
 		lines = append(lines, line)
 	}
@@ -257,7 +277,7 @@ func ParseListQuotesInput(raw json.RawMessage) (ListQuotesInput, error) {
 
 // computeQuoteTotals mirrors erp-core computeInvoiceTotals, which the
 // TypeScript createQuote applies with taxMinor defaulted to zero.
-func computeQuoteTotals(lines []CreateInvoiceLine) (int64, int64, int64, error) {
+func computeQuoteTotals(lines []CreateQuoteLineInput) (int64, int64, int64, error) {
 	var subtotal, tax big.Int
 	for _, line := range lines {
 		if line.Quantity <= 0 || line.Quantity > maxDatabaseInteger {
@@ -345,10 +365,24 @@ func createQuote(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityCla
 		if line.TaxMinor != nil {
 			taxMinor = *line.TaxMinor
 		}
+		var itemID *string
+		if line.SKU != nil {
+			var resolved string
+			err := tx.QueryRow(ctx, `
+				SELECT id::text FROM items WHERE org_id = $1::uuid AND sku = $2 LIMIT 1`,
+				claims.OrganizationID, *line.SKU).Scan(&resolved)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return CreateQuoteOutput{}, AccountingDomainError(fmt.Sprintf("no item with sku %s", *line.SKU))
+			}
+			if err != nil {
+				return CreateQuoteOutput{}, err
+			}
+			itemID = &resolved
+		}
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO quote_lines (quote_id, description, quantity, unit_price_minor, tax_minor)
-			VALUES ($1::uuid, $2, $3, $4, $5)`,
-			quoteID, line.Description, line.Quantity, line.UnitPriceMinor, taxMinor); err != nil {
+			INSERT INTO quote_lines (quote_id, description, quantity, unit_price_minor, tax_minor, item_id)
+			VALUES ($1::uuid, $2, $3, $4, $5, $6::uuid)`,
+			quoteID, line.Description, line.Quantity, line.UnitPriceMinor, taxMinor, itemID); err != nil {
 			return CreateQuoteOutput{}, err
 		}
 	}
@@ -449,7 +483,8 @@ func expireQuote(ctx context.Context, tx pgx.Tx, orgID string, now time.Time) (E
 
 func listQuotes(ctx context.Context, tx pgx.Tx, orgID string, input ListQuotesInput) (ListQuotesOutput, error) {
 	query := `
-		SELECT id::text, number, status, total_minor, customer_id::text, created_at, expires_at, converted_invoice_id::text
+		SELECT id::text, number, status, total_minor, customer_id::text, created_at, expires_at,
+		       converted_invoice_id::text, converted_order_id::text
 		FROM quotes
 		WHERE org_id = $1::uuid`
 	args := []any{orgID}
@@ -467,7 +502,7 @@ func listQuotes(ctx context.Context, tx pgx.Tx, orgID string, input ListQuotesIn
 	for rows.Next() {
 		var quote ListQuoteSummary
 		var createdAt, expiresAt *time.Time
-		if err := rows.Scan(&quote.ID, &quote.Number, &quote.Status, &quote.TotalMinor, &quote.CustomerID, &createdAt, &expiresAt, &quote.InvoiceID); err != nil {
+		if err := rows.Scan(&quote.ID, &quote.Number, &quote.Status, &quote.TotalMinor, &quote.CustomerID, &createdAt, &expiresAt, &quote.InvoiceID, &quote.OrderID); err != nil {
 			return ListQuotesOutput{}, err
 		}
 		quote.CreatedAt = crmISOTime(createdAt)

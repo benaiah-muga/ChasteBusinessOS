@@ -1,12 +1,13 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SalesQuoteWorkspace } from "./SalesQuoteWorkspace";
-import { acceptSalesQuote, createSalesQuote, declineSalesQuote, fetchSalesQuoteCustomers, fetchSalesQuoteDeals, fetchSalesQuotes } from "../api/sales-quotes";
+import { acceptSalesQuote, createOrderFromSalesQuote, createSalesQuote, declineSalesQuote, fetchSalesQuoteCustomers, fetchSalesQuoteDeals, fetchSalesQuotes } from "../api/sales-quotes";
 
 vi.mock("../api/sales-quotes", () => ({
   SALES_QUOTE_DATABASE_INTEGER_MAX: 2_147_483_647,
   SalesQuoteApiError: class SalesQuoteApiError extends Error { status = 0; },
   acceptSalesQuote: vi.fn(),
+  createOrderFromSalesQuote: vi.fn(),
   createSalesQuote: vi.fn(),
   declineSalesQuote: vi.fn(),
   fetchSalesQuoteCustomers: vi.fn(),
@@ -19,7 +20,7 @@ const organizationId = "10000000-0000-4000-8000-000000000002";
 const customerId = "20000000-0000-4000-8000-000000000001";
 const quoteId = "30000000-0000-4000-8000-000000000001";
 const customer = { id: customerId, name: "Acme Foods", email: "buy@acme.test" };
-const quote = { id: quoteId, number: 25, status: "sent" as const, totalMinor: 12500, customerId, createdAt: "2026-10-01T10:00:00.000Z", expiresAt: null, invoiceId: null };
+const quote = { id: quoteId, number: 25, status: "sent" as const, totalMinor: 12500, customerId, createdAt: "2026-10-01T10:00:00.000Z", expiresAt: null, invoiceId: null, orderId: null };
 const otherCustomer = { id: "20000000-0000-4000-8000-000000000002", name: "Globex", email: null };
 const otherQuote = { ...quote, id: "30000000-0000-4000-8000-000000000002", number: 26, customerId: otherCustomer.id };
 
@@ -33,6 +34,7 @@ beforeEach(() => {
   }]);
   vi.mocked(createSalesQuote).mockResolvedValue({ kind: "completed", data: { quoteId: "30000000-0000-4000-8000-000000000002", quoteNumber: 26, totalMinor: 22500 } });
   vi.mocked(acceptSalesQuote).mockResolvedValue({ kind: "completed", data: { invoiceId: "40000000-0000-4000-8000-000000000001", invoiceNumber: 701, totalMinor: 12500 } });
+  vi.mocked(createOrderFromSalesQuote).mockResolvedValue({ kind: "completed", data: { orderId: "80000000-0000-4000-8000-000000000001", orderNumber: 9, quoteNumber: 25, totalMinor: 12500 } });
   vi.mocked(declineSalesQuote).mockResolvedValue({ kind: "completed", data: { status: "declined" } });
 });
 
@@ -60,9 +62,20 @@ describe("Vite Sales quote and relationship workspace", () => {
   it("accepts a sent quote and reports the created invoice", async () => {
     render(<SalesQuoteWorkspace actorId={actorId} organizationId={organizationId} baseCurrency="USD" />);
     const row = await screen.findByRole("row", { name: /#25 Acme Foods sent/ });
-    fireEvent.click(within(row).getByRole("button", { name: "Accept and create invoice" }));
+    fireEvent.click(within(row).getByRole("button", { name: "Invoice immediately" }));
     await waitFor(() => expect(acceptSalesQuote).toHaveBeenCalledWith(quoteId, { actorId, organizationId }));
     expect((await screen.findByRole("status")).textContent).toContain("Quote #25 accepted. Invoice #701 was created.");
+  });
+
+  it("awards a sent quote into a sales order and points to fulfilment", async () => {
+    const accepted = { ...quote, status: "accepted" as const, orderId: "80000000-0000-4000-8000-000000000001" };
+    vi.mocked(fetchSalesQuotes).mockResolvedValueOnce([quote]).mockResolvedValue([accepted]);
+    render(<SalesQuoteWorkspace actorId={actorId} organizationId={organizationId} baseCurrency="USD" />);
+    const row = await screen.findByRole("row", { name: /#25 Acme Foods sent/ });
+    fireEvent.click(within(row).getByRole("button", { name: "Create sales order" }));
+    await waitFor(() => expect(createOrderFromSalesQuote).toHaveBeenCalledWith(quoteId, { actorId, organizationId }));
+    expect((await screen.findByRole("status")).textContent).toContain("Quote #25 became sales order #9.");
+    expect(screen.getByRole("link", { name: "Open sales order" }).getAttribute("href")).toBe("/sales");
   });
 
   it("declines a sent quote only after confirmation and refreshes the list", async () => {
@@ -107,7 +120,7 @@ describe("Vite Sales quote and relationship workspace", () => {
   it("clears a prior action notice when the active organization changes", async () => {
     const { rerender } = render(<SalesQuoteWorkspace actorId={actorId} organizationId={organizationId} baseCurrency="USD" />);
     const row = await screen.findByRole("row", { name: /#25 Acme Foods sent/ });
-    fireEvent.click(within(row).getByRole("button", { name: "Accept and create invoice" }));
+    fireEvent.click(within(row).getByRole("button", { name: "Invoice immediately" }));
     expect((await screen.findByRole("status")).textContent).toContain("Quote #25 accepted.");
 
     const salesReadCount = vi.mocked(fetchSalesQuotes).mock.calls.length;

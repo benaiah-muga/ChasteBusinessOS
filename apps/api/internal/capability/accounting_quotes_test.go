@@ -25,7 +25,7 @@ func TestGoAccountingQuotesParsersMirrorZodContracts(t *testing.T) {
 		CustomerID: customerID,
 		Memo:       crmStringPointer("Spring offer"),
 		ExpiresAt:  crmStringPointer("2026-10-01T09:30:00.123Z"),
-		Lines: []CreateInvoiceLine{
+		Lines: []CreateQuoteLineInput{
 			{Description: "Legacy migration", Quantity: 1500, UnitPriceMinor: 999},
 			{Description: "With tax", Quantity: 1000, UnitPriceMinor: 50000, TaxMinor: crmInt64Pointer(2000)},
 		},
@@ -34,7 +34,7 @@ func TestGoAccountingQuotesParsersMirrorZodContracts(t *testing.T) {
 		created.ExpiresAt == nil || *created.ExpiresAt != *wantCreate.ExpiresAt || len(created.Lines) != 2 ||
 		created.Lines[0] != wantCreate.Lines[0] || created.Lines[1].Description != wantCreate.Lines[1].Description ||
 		created.Lines[1].Quantity != wantCreate.Lines[1].Quantity || created.Lines[1].UnitPriceMinor != wantCreate.Lines[1].UnitPriceMinor ||
-		created.Lines[1].TaxMinor == nil || *created.Lines[1].TaxMinor != *wantCreate.Lines[1].TaxMinor || created.Lines[1].TaxCodeID != nil {
+		created.Lines[1].TaxMinor == nil || *created.Lines[1].TaxMinor != *wantCreate.Lines[1].TaxMinor {
 		t.Fatalf("ParseCreateQuoteInput() = %+v, want %+v", created, wantCreate)
 	}
 	encoded, err := marshalJS(created)
@@ -47,8 +47,21 @@ func TestGoAccountingQuotesParsersMirrorZodContracts(t *testing.T) {
 	}
 
 	minimal, err := ParseCreateQuoteInput(json.RawMessage(`{"customerId":"` + customerID + `","lines":[{"description":"d","quantity":1000,"unitPriceMinor":10}]}`))
-	if err != nil || minimal.Memo != nil || minimal.ExpiresAt != nil || minimal.Lines[0].TaxMinor != nil || minimal.Lines[0].TaxCodeID != nil {
+	if err != nil || minimal.Memo != nil || minimal.ExpiresAt != nil || minimal.Lines[0].TaxMinor != nil {
 		t.Fatalf("minimal createQuote input=%+v err=%v, want absent optionals", minimal, err)
+	}
+	withSKU, err := ParseCreateQuoteInput(json.RawMessage(`{"customerId":"` + customerID + `","lines":[{"description":"Chair","quantity":1000,"unitPriceMinor":10,"sku":"CHAIR-1"}]}`))
+	if err != nil || withSKU.Lines[0].SKU == nil || *withSKU.Lines[0].SKU != "CHAIR-1" {
+		t.Fatalf("ParseCreateQuoteInput sku = %+v, %v, want CHAIR-1", withSKU.Lines, err)
+	}
+	for _, raw := range []string{
+		`{"customerId":"` + customerID + `","lines":[{"description":"d","quantity":1000,"unitPriceMinor":10,"sku":""}]}`,
+		`{"customerId":"` + customerID + `","lines":[{"description":"d","quantity":1000,"unitPriceMinor":10,"sku":null}]}`,
+		`{"customerId":"` + customerID + `","lines":[{"description":"d","quantity":1000,"unitPriceMinor":10,"sku":"bad\u0000"}]}`,
+	} {
+		if _, err := ParseCreateQuoteInput(json.RawMessage(raw)); err == nil {
+			t.Errorf("ParseCreateQuoteInput accepted invalid sku %s", raw)
+		}
 	}
 	offsetExpiry := `{"customerId":"` + customerID + `","expiresAt":"2026-10-01T09:30:00+02:00","lines":[{"description":"d","quantity":1000,"unitPriceMinor":10}]}`
 	offsetQuote, err := ParseCreateQuoteInput(json.RawMessage(offsetExpiry))
@@ -167,7 +180,7 @@ func TestGoAccountingQuotesParsersMirrorZodContracts(t *testing.T) {
 }
 
 func TestComputeQuoteTotalsClassifiesClientDomainErrors(t *testing.T) {
-	for name, lines := range map[string][]CreateInvoiceLine{
+	for name, lines := range map[string][]CreateQuoteLineInput{
 		"zero total":     {{Description: "Free service", Quantity: 1_000, UnitPriceMinor: 0}},
 		"database total": {{Description: "Large service", Quantity: 2_000, UnitPriceMinor: 1_073_741_824}},
 	} {
@@ -249,7 +262,7 @@ func TestGoAccountingQuotesCreatePersistsLinesTotalsAndSequences(t *testing.T) {
 		CustomerID: customerID,
 		Memo:       crmStringPointer("Spring offer"),
 		ExpiresAt:  crmStringPointer("2026-12-01T00:00:00.000Z"),
-		Lines: []CreateInvoiceLine{
+		Lines: []CreateQuoteLineInput{
 			{Description: "Legacy migration", Quantity: 1_000, UnitPriceMinor: 5_000_00},
 			{Description: "Rounded", Quantity: 1_500, UnitPriceMinor: 999, TaxMinor: crmInt64Pointer(1)},
 		},
@@ -317,7 +330,7 @@ func TestGoAccountingQuotesCreatePersistsLinesTotalsAndSequences(t *testing.T) {
 	second, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (CreateQuoteOutput, error) {
 		return createQuote(fx.ctx, tx, claims, CreateQuoteInput{
 			CustomerID: customerID,
-			Lines:      []CreateInvoiceLine{{Description: "Bare offer", Quantity: 2_000, UnitPriceMinor: 1_000_00}},
+			Lines:      []CreateQuoteLineInput{{Description: "Bare offer", Quantity: 2_000, UnitPriceMinor: 1_000_00}},
 		})
 	})
 	if err != nil {
@@ -339,7 +352,7 @@ func TestGoAccountingQuotesCreatePersistsLinesTotalsAndSequences(t *testing.T) {
 		_, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (CreateQuoteOutput, error) {
 			return createQuote(fx.ctx, tx, claims, CreateQuoteInput{
 				CustomerID: badCustomer,
-				Lines:      []CreateInvoiceLine{{Description: "Nope", Quantity: 1_000, UnitPriceMinor: 1}},
+				Lines:      []CreateQuoteLineInput{{Description: "Nope", Quantity: 1_000, UnitPriceMinor: 1}},
 			})
 		})
 		var domainError AccountingDomainError
@@ -367,7 +380,7 @@ func TestGoAccountingQuotesAcceptConvertsThroughSharedInvoicePath(t *testing.T) 
 		return createQuote(fx.ctx, tx, claims, CreateQuoteInput{
 			CustomerID: customerID,
 			Memo:       crmStringPointer("Verbal yes"),
-			Lines:      []CreateInvoiceLine{{Description: "Fresh offer", Quantity: 1_000, UnitPriceMinor: 10_000_00, TaxMinor: crmInt64Pointer(0)}},
+			Lines:      []CreateQuoteLineInput{{Description: "Fresh offer", Quantity: 1_000, UnitPriceMinor: 10_000_00, TaxMinor: crmInt64Pointer(0)}},
 		})
 	})
 	if err != nil {
@@ -450,7 +463,7 @@ func TestGoAccountingQuotesAcceptConvertsThroughSharedInvoicePath(t *testing.T) 
 		return createQuote(fx.ctx, tx, claims, CreateQuoteInput{
 			CustomerID: customerID,
 			ExpiresAt:  crmStringPointer("2026-09-26T00:00:00.000Z"),
-			Lines:      []CreateInvoiceLine{{Description: "Lapsed offer", Quantity: 2_000, UnitPriceMinor: 1_000_00}},
+			Lines:      []CreateQuoteLineInput{{Description: "Lapsed offer", Quantity: 2_000, UnitPriceMinor: 1_000_00}},
 		})
 	})
 	if err != nil {
@@ -467,7 +480,7 @@ func TestGoAccountingQuotesAcceptConvertsThroughSharedInvoicePath(t *testing.T) 
 		return createQuote(fx.ctx, tx, claims, CreateQuoteInput{
 			CustomerID: customerID,
 			ExpiresAt:  crmStringPointer("2026-09-27T12:00:00.000Z"),
-			Lines:      []CreateInvoiceLine{{Description: "Deadline offer", Quantity: 1_000, UnitPriceMinor: 1_000_00}},
+			Lines:      []CreateQuoteLineInput{{Description: "Deadline offer", Quantity: 1_000, UnitPriceMinor: 1_000_00}},
 		})
 	})
 	if err != nil {
@@ -631,7 +644,7 @@ func TestGoAccountingQuotesListFiltersOrdersAndScopesTenants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantNewest := fmt.Sprintf(`{"id":%q,"number":3,"status":"sent","totalMinor":30000,"customerId":%q,"createdAt":"2026-09-20T10:00:00.000Z","expiresAt":"2026-12-31T00:00:00.000Z","invoiceId":null}`, newest, customerID)
+	wantNewest := fmt.Sprintf(`{"id":%q,"number":3,"status":"sent","totalMinor":30000,"customerId":%q,"createdAt":"2026-09-20T10:00:00.000Z","expiresAt":"2026-12-31T00:00:00.000Z","invoiceId":null,"orderId":null}`, newest, customerID)
 	if string(newestEncoded) != wantNewest {
 		t.Fatalf("listQuotes row JSON = %s, want %s", newestEncoded, wantNewest)
 	}
@@ -639,7 +652,7 @@ func TestGoAccountingQuotesListFiltersOrdersAndScopesTenants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantConverted := fmt.Sprintf(`{"id":%q,"number":2,"status":"accepted","totalMinor":20000,"customerId":%q,"createdAt":"2026-09-20T09:00:00.000Z","expiresAt":"2026-09-01T00:00:00.000Z","invoiceId":%q}`, converted, customerID, invoiceID)
+	wantConverted := fmt.Sprintf(`{"id":%q,"number":2,"status":"accepted","totalMinor":20000,"customerId":%q,"createdAt":"2026-09-20T09:00:00.000Z","expiresAt":"2026-09-01T00:00:00.000Z","invoiceId":%q,"orderId":null}`, converted, customerID, invoiceID)
 	if string(convertedEncoded) != wantConverted {
 		t.Fatalf("listQuotes converted row JSON = %s, want %s", convertedEncoded, wantConverted)
 	}
@@ -647,7 +660,7 @@ func TestGoAccountingQuotesListFiltersOrdersAndScopesTenants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantOldest := fmt.Sprintf(`{"id":%q,"number":1,"status":"sent","totalMinor":10000,"customerId":%q,"createdAt":"2026-09-20T08:00:00.000Z","expiresAt":null,"invoiceId":null}`, oldest, customerID)
+	wantOldest := fmt.Sprintf(`{"id":%q,"number":1,"status":"sent","totalMinor":10000,"customerId":%q,"createdAt":"2026-09-20T08:00:00.000Z","expiresAt":null,"invoiceId":null,"orderId":null}`, oldest, customerID)
 	if string(oldestEncoded) != wantOldest {
 		t.Fatalf("listQuotes oldest row JSON = %s, want %s", oldestEncoded, wantOldest)
 	}

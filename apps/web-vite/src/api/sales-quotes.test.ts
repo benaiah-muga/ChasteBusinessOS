@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { acceptSalesQuote, createSalesQuote, declineSalesQuote, fetchSalesQuoteCustomers, fetchSalesQuoteDeals, fetchSalesQuotes, SalesQuoteApiError } from "./sales-quotes";
+import { acceptSalesQuote, createOrderFromSalesQuote, createSalesQuote, declineSalesQuote, fetchSalesQuoteCustomers, fetchSalesQuoteDeals, fetchSalesQuotes, SalesQuoteApiError } from "./sales-quotes";
 
 const actorId = "10000000-0000-4000-8000-000000000001";
 const organizationId = "10000000-0000-4000-8000-000000000002";
@@ -62,8 +62,14 @@ describe("Vite Sales quote Go APIs", () => {
   });
 
   it("fails closed when Go read outputs contain invalid UUIDs", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(success({ quotes: [{ id: "bad-id", number: 1, status: "sent", totalMinor: 1, customerId, createdAt: null, expiresAt: null, invoiceId: null }] })));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(success({ quotes: [{ id: "bad-id", number: 1, status: "sent", totalMinor: 1, customerId, createdAt: null, expiresAt: null, invoiceId: null, orderId: null }] })));
     await expect(fetchSalesQuotes()).rejects.toMatchObject({ name: "SalesQuoteApiError", status: 200 });
+  });
+
+  it("tolerates an orderId field omitted by a pre-continuity API so the workspace can roll forward", async () => {
+    const legacy = { id: quoteId, number: 1, status: "sent", totalMinor: 1, customerId, createdAt: null, expiresAt: null, invoiceId: null };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(success({ quotes: [legacy] })));
+    await expect(fetchSalesQuotes()).resolves.toEqual([{ ...legacy, orderId: null }]);
   });
 
   it("rejects Go quote rows that omit nullable response fields", async () => {
@@ -134,6 +140,19 @@ describe("Vite Sales quote Go APIs", () => {
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(success({ invoiceId: "invalid", invoiceNumber: 701, totalMinor: 25000 })));
     await expect(acceptSalesQuote(quoteId, scope)).rejects.toBeInstanceOf(SalesQuoteApiError);
+  });
+
+  it("awards a quote into a sales order through the governed sales capability", async () => {
+    const orderId = "80000000-0000-4000-8000-000000000001";
+    const fetchMock = vi.fn().mockResolvedValue(success({ orderId, orderNumber: 9, quoteNumber: 27, totalMinor: 25000 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(createOrderFromSalesQuote(quoteId, scope)).resolves.toEqual({
+      kind: "completed", data: { orderId, orderNumber: 9, quoteNumber: 27, totalMinor: 25000 },
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
+      capabilityId: "sales.createOrderFromQuote", input: { quoteId }, intentId: expect.any(String),
+    });
+    expect(Object.keys(localStorage).filter((key) => key.startsWith("chaste:sales-quotes:")).length).toBe(0);
   });
 
   it("declines a quote through Go and retries the exact scoped intent after an unknown result", async () => {

@@ -233,3 +233,50 @@ func TestEvaluateExpensePolicyIsExactAndMissingSafe(t *testing.T) {
 		t.Errorf("no policy: over=%v limit=%d found=%v", over, limit, found)
 	}
 }
+
+func claimInCategory(id, category string, amountMinor int64) expenseClaimRecord {
+	return expenseClaimRecord{id: id, claimantUserID: "u", category: category, amountMinor: amountMinor, submittedAt: claimBase}
+}
+
+func TestFindUnusualExpenseClaimsRequiresHistoryAndCategoryMatch(t *testing.T) {
+	history := []expenseClaimRecord{
+		claimInCategory("h1", "travel", 10_000),
+		claimInCategory("h2", "travel", 20_000),
+		claimInCategory("h3", "travel", 30_000),
+		claimInCategory("h4", "office", 100_000),
+		claimInCategory("h5", "office", 100_000),
+		claimInCategory("h6", "office", 100_000),
+	}
+	pending := []expenseClaimRecord{
+		claimInCategory("p1", "travel", 60_000),
+		claimInCategory("p2", "office", 350_000),
+		claimInCategory("p3", "travel", 59_999),
+		claimInCategory("p4", "new", 999_999),
+	}
+	got := findUnusualExpenseClaims(pending, history, 3, 3)
+	if len(got) != 2 {
+		t.Fatalf("anomalies = %+v, want two flagged claims", got)
+	}
+	if got[0].claimID != "p2" || got[0].medianMinor != 100_000 || got[0].sampleSize != 3 {
+		t.Errorf("first anomaly = %+v, want the office claim p2 at 3.5x a 100000 median", got[0])
+	}
+	if got[1].claimID != "p1" || got[1].medianMinor != 20_000 || got[1].sampleSize != 3 {
+		t.Errorf("second anomaly = %+v, want travel claim p1 at 3x a 20000 median", got[1])
+	}
+}
+
+func TestFindUnusualExpenseClaimsIgnoresThinHistoryAndLowMultiple(t *testing.T) {
+	thin := []expenseClaimRecord{claimInCategory("h1", "travel", 10_000), claimInCategory("h2", "travel", 20_000)}
+	pending := []expenseClaimRecord{claimInCategory("p1", "travel", 1_000_000)}
+	if got := findUnusualExpenseClaims(pending, thin, 3, 3); len(got) != 0 {
+		t.Fatalf("thin history flagged: %+v", got)
+	}
+	history := []expenseClaimRecord{
+		claimInCategory("h1", "travel", 10_000),
+		claimInCategory("h2", "travel", 20_000),
+		claimInCategory("h3", "travel", 30_000),
+	}
+	if got := findUnusualExpenseClaims(pending, history, 3, 100); len(got) != 0 {
+		t.Fatalf("a high multiple threshold flagged a claim below it: %+v", got)
+	}
+}

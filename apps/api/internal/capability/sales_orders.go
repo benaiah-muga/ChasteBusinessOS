@@ -16,14 +16,21 @@ import (
 )
 
 const (
-	salesCreateOrderCapabilityID       = "sales.createOrder"
-	salesUpdateDraftOrderCapabilityID  = "sales.updateDraftOrder"
-	salesRestoreDraftOrderCapabilityID = "sales.restoreDraftOrder"
-	salesConfirmOrderCapabilityID      = "sales.confirmOrder"
-	salesDeliverOrderCapabilityID      = "sales.deliverOrder"
-	salesCancelOrderCapabilityID       = "sales.cancelOrder"
-	salesListOrdersCapabilityID        = "sales.listOrders"
+	salesCreateOrderCapabilityID          = "sales.createOrder"
+	salesCreateOrderFromQuoteCapabilityID = "sales.createOrderFromQuote"
+	salesUpdateDraftOrderCapabilityID     = "sales.updateDraftOrder"
+	salesRestoreDraftOrderCapabilityID    = "sales.restoreDraftOrder"
+	salesConfirmOrderCapabilityID         = "sales.confirmOrder"
+	salesDeliverOrderCapabilityID         = "sales.deliverOrder"
+	salesCancelOrderCapabilityID          = "sales.cancelOrder"
+	salesListOrdersCapabilityID           = "sales.listOrders"
 )
+
+// SalesDomainError marks an expected sales workflow refusal for HTTP
+// adapters, so a business refusal is not reported as a server failure.
+type SalesDomainError string
+
+func (e SalesDomainError) Error() string { return string(e) }
 
 var salesOrderStatusValues = []string{"draft", "confirmed", "delivered", "cancelled"}
 
@@ -62,6 +69,17 @@ type SalesUpdateDraftOrderSnapshot struct {
 type SalesCreateOrderOutput struct {
 	OrderID     string `json:"orderId"`
 	OrderNumber int64  `json:"orderNumber"`
+}
+
+type SalesCreateOrderFromQuoteInput struct {
+	QuoteID string `json:"quoteId"`
+}
+
+type SalesCreateOrderFromQuoteOutput struct {
+	OrderID     string `json:"orderId"`
+	OrderNumber int64  `json:"orderNumber"`
+	QuoteNumber int64  `json:"quoteNumber"`
+	TotalMinor  int64  `json:"totalMinor"`
 }
 
 type SalesConfirmOrderInput struct {
@@ -114,6 +132,8 @@ type SalesListOrderItem struct {
 	TotalMinor  int64                    `json:"totalMinor"`
 	CreatedAt   string                   `json:"createdAt"`
 	Note        *string                  `json:"note,omitempty"`
+	QuoteID     *string                  `json:"quoteId,omitempty"`
+	QuoteNumber *int64                   `json:"quoteNumber,omitempty"`
 	Lines       []SalesListOrderLineItem `json:"lines"`
 }
 
@@ -136,6 +156,8 @@ func parseSalesInput(capabilityID string, raw json.RawMessage) (any, error) {
 	switch capabilityID {
 	case salesCreateOrderCapabilityID:
 		return ParseSalesCreateOrderInput(raw)
+	case salesCreateOrderFromQuoteCapabilityID:
+		return ParseSalesCreateOrderFromQuoteInput(raw)
 	case salesUpdateDraftOrderCapabilityID, salesRestoreDraftOrderCapabilityID:
 		return ParseSalesUpdateDraftOrderInput(raw)
 	case salesConfirmOrderCapabilityID:
@@ -212,6 +234,18 @@ func ParseSalesCreateOrderInput(raw json.RawMessage) (SalesCreateOrderInput, err
 		return SalesCreateOrderInput{}, err
 	}
 	return SalesCreateOrderInput{CustomerID: customerID, Note: note, Lines: lines}, nil
+}
+
+func ParseSalesCreateOrderFromQuoteInput(raw json.RawMessage) (SalesCreateOrderFromQuoteInput, error) {
+	fields, err := decodeJSONObject(raw)
+	if err != nil {
+		return SalesCreateOrderFromQuoteInput{}, err
+	}
+	quoteID, err := salesRequiredUUID(fields, "quoteId")
+	if err != nil {
+		return SalesCreateOrderFromQuoteInput{}, err
+	}
+	return SalesCreateOrderFromQuoteInput{QuoteID: quoteID}, nil
 }
 
 func parseSalesOrderLines(lineValues []json.RawMessage) ([]SalesOrderLineInput, error) {
@@ -362,6 +396,7 @@ type salesOrderRow struct {
 	customerID  string
 	status      string
 	backordered bool
+	quoteID     *string
 }
 
 type salesOrderLineRow struct {
@@ -378,11 +413,11 @@ type salesOrderLineRow struct {
 func salesLoadOrder(ctx context.Context, tx pgx.Tx, orgID, orderID string) (*salesOrderRow, error) {
 	var order salesOrderRow
 	err := tx.QueryRow(ctx, `
-		SELECT id::text, number, customer_id::text, status, backordered
+		SELECT id::text, number, customer_id::text, status, backordered, quote_id::text
 		FROM sales_orders
 		WHERE id = $1::uuid AND org_id = $2::uuid
 		LIMIT 1
-		FOR UPDATE`, orderID, orgID).Scan(&order.id, &order.number, &order.customerID, &order.status, &order.backordered)
+		FOR UPDATE`, orderID, orgID).Scan(&order.id, &order.number, &order.customerID, &order.status, &order.backordered, &order.quoteID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -605,6 +640,95 @@ func salesCreateOrder(ctx context.Context, tx pgx.Tx, claims authbridge.Capabili
 		}
 	}
 	return SalesCreateOrderOutput{OrderID: orderID, OrderNumber: number}, nil
+}
+
+// salesCreateOrderFromQuote turns an awarded quote into a draft order without
+// posting an invoice. The order still has to pass credit and stock checks when
+// it is confirmed, so acceptance never silently commits inventory or revenue.
+func salesCreateOrderFromQuote(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityClaims, input SalesCreateOrderFromQuoteInput, now time.Time) (SalesCreateOrderFromQuoteOutput, error) {
+	orgID := claims.OrganizationID
+	var customerID, status string
+	var quoteNumber int64
+	var expiresAt *time.Time
+	if err := tx.QueryRow(ctx, `
+		SELECT customer_id::text, number, status, expires_at
+		FROM quotes
+		WHERE id = $1::uuid AND org_id = $2::uuid
+		FOR UPDATE`, input.QuoteID, orgID).Scan(&customerID, &quoteNumber, &status, &expiresAt); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return SalesCreateOrderFromQuoteOutput{}, SalesDomainError("quote not found")
+		}
+		return SalesCreateOrderFromQuoteOutput{}, err
+	}
+	if status != "sent" {
+		return SalesCreateOrderFromQuoteOutput{}, SalesDomainError(fmt.Sprintf("quote is %s; only sent quotes become orders", status))
+	}
+	if expiresAt != nil && !expiresAt.After(now) {
+		return SalesCreateOrderFromQuoteOutput{}, SalesDomainError(fmt.Sprintf("quote expired on %s; decline it and issue a fresh quote", expiresAt.UTC().Format("2006-01-02")))
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT description, quantity, unit_price_minor, tax_minor, item_id::text
+		FROM quote_lines
+		WHERE quote_id = $1::uuid
+		ORDER BY id`, input.QuoteID)
+	if err != nil {
+		return SalesCreateOrderFromQuoteOutput{}, err
+	}
+	lines := make([]salesOrderLineRow, 0, 4)
+	for rows.Next() {
+		var line salesOrderLineRow
+		if err := rows.Scan(&line.description, &line.quantity, &line.unitPriceMinor, &line.taxMinor, &line.itemID); err != nil {
+			rows.Close()
+			return SalesCreateOrderFromQuoteOutput{}, err
+		}
+		lines = append(lines, line)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return SalesCreateOrderFromQuoteOutput{}, err
+	}
+	rows.Close()
+	if len(lines) == 0 {
+		return SalesCreateOrderFromQuoteOutput{}, SalesDomainError("quote has no lines")
+	}
+	totals, err := salesComputeInvoiceTotals(lines)
+	if err != nil {
+		return SalesCreateOrderFromQuoteOutput{}, err
+	}
+	number, err := salesNextOrderNumber(ctx, tx, orgID)
+	if err != nil {
+		return SalesCreateOrderFromQuoteOutput{}, err
+	}
+	note := fmt.Sprintf("Quote #%d", quoteNumber)
+	var orderID string
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO sales_orders (org_id, number, customer_id, status, quote_id, note, created_by_actor_type, created_by_actor_id)
+		VALUES ($1::uuid, $2, $3::uuid, 'draft', $4::uuid, $5, $6, $7::uuid)
+		RETURNING id::text`,
+		orgID, number, customerID, input.QuoteID, note, claims.ActorType, claims.ActorID).Scan(&orderID); err != nil {
+		return SalesCreateOrderFromQuoteOutput{}, err
+	}
+	for _, line := range lines {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO sales_order_lines (org_id, order_id, description, quantity, unit_price_minor, tax_minor, item_id)
+			VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7::uuid)`,
+			orgID, orderID, line.description, line.quantity, line.unitPriceMinor, line.taxMinor, line.itemID); err != nil {
+			return SalesCreateOrderFromQuoteOutput{}, err
+		}
+	}
+	accepted, err := tx.Exec(ctx, `
+		UPDATE quotes SET status = 'accepted', converted_order_id = $2::uuid, decided_at = $3
+		WHERE id = $1::uuid AND org_id = $4::uuid AND status = 'sent'`,
+		input.QuoteID, orderID, now, orgID)
+	if err != nil {
+		return SalesCreateOrderFromQuoteOutput{}, err
+	}
+	if accepted.RowsAffected() != 1 {
+		return SalesCreateOrderFromQuoteOutput{}, SalesDomainError("quote was just decided by someone else")
+	}
+	return SalesCreateOrderFromQuoteOutput{
+		OrderID: orderID, OrderNumber: number, QuoteNumber: quoteNumber, TotalMinor: totals.totalMinor,
+	}, nil
 }
 
 func salesUpdateDraftOrder(ctx context.Context, tx pgx.Tx, orgID string, input SalesUpdateDraftOrderInput) (SalesUpdateDraftOrderOutput, error) {
@@ -847,7 +971,7 @@ type salesPostedInvoice struct {
 // salesInsertInvoiceWithPosting is the delivery-side port of the shared
 // TypeScript revenue write path: one ordinary invoice plus its balanced
 // AR/revenue/tax entry, reusing the Go posting door.
-func salesInsertInvoiceWithPosting(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityClaims, now time.Time, customerID, memo string, lines []salesInvoiceLine) (salesPostedInvoice, error) {
+func salesInsertInvoiceWithPosting(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityClaims, now time.Time, customerID, salesOrderID, memo string, lines []salesInvoiceLine) (salesPostedInvoice, error) {
 	orgID := claims.OrganizationID
 	var paymentTermDays *int64
 	err := tx.QueryRow(ctx, `
@@ -902,10 +1026,10 @@ func salesInsertInvoiceWithPosting(ctx context.Context, tx pgx.Tx, claims authbr
 	}
 	var invoiceID string
 	err = tx.QueryRow(ctx, `
-		INSERT INTO invoices (org_id, customer_id, number, status, currency, fx_rate_num, fx_rate_den, subtotal_minor, tax_minor, total_minor, memo, issued_at, due_at)
-		VALUES ($1::uuid, $2::uuid, $3, 'sent', $4, NULL, NULL, $5, $6, $7, $8, $9, $10)
+		INSERT INTO invoices (org_id, customer_id, number, status, currency, fx_rate_num, fx_rate_den, subtotal_minor, tax_minor, total_minor, memo, issued_at, due_at, sales_order_id)
+		VALUES ($1::uuid, $2::uuid, $3, 'sent', $4, NULL, NULL, $5, $6, $7, $8, $9, $10, $11::uuid)
 		RETURNING id::text`, orgID, customerID, invoiceNumber, baseCurrency,
-		subtotal.Int64(), tax.Int64(), total.Int64(), memo, now, dueAt).Scan(&invoiceID)
+		subtotal.Int64(), tax.Int64(), total.Int64(), memo, now, dueAt, salesOrderID).Scan(&invoiceID)
 	if err != nil {
 		return salesPostedInvoice{}, err
 	}
@@ -1096,7 +1220,7 @@ func salesDeliverOrder(ctx context.Context, tx pgx.Tx, claims authbridge.Capabil
 			taxMinor:       int64(math.Round(float64(line.taxMinor) * float64(deliver) / float64(line.quantity))),
 		})
 	}
-	posted, err := salesInsertInvoiceWithPosting(ctx, tx, claims, now, order.customerID,
+	posted, err := salesInsertInvoiceWithPosting(ctx, tx, claims, now, order.customerID, order.id,
 		fmt.Sprintf("Sales order #%d", order.number), invoiceLines)
 	if err != nil {
 		return SalesDeliverOrderOutput{}, err
@@ -1191,6 +1315,9 @@ func salesCancelOrder(ctx context.Context, tx pgx.Tx, orgID string, input SalesC
 			now, order.id); err != nil {
 			return SalesCancelOrderOutput{}, err
 		}
+		if err := salesRestoreQuoteForCancelledOrder(ctx, tx, orgID, order); err != nil {
+			return SalesCancelOrderOutput{}, err
+		}
 		return SalesCancelOrderOutput{Status: "cancelled", ReleasedThousandths: released}, nil
 	}
 	if _, err := tx.Exec(ctx, `
@@ -1198,19 +1325,40 @@ func salesCancelOrder(ctx context.Context, tx pgx.Tx, orgID string, input SalesC
 		now, order.id); err != nil {
 		return SalesCancelOrderOutput{}, err
 	}
+	if err := salesRestoreQuoteForCancelledOrder(ctx, tx, orgID, order); err != nil {
+		return SalesCancelOrderOutput{}, err
+	}
 	return SalesCancelOrderOutput{Status: "cancelled", ReleasedThousandths: 0}, nil
+}
+
+// salesRestoreQuoteForCancelledOrder makes sales.cancelOrder the complete
+// inverse of sales.createOrderFromQuote: cancelling an untouched order returns
+// its source quote to sent so the decision can be made again.
+func salesRestoreQuoteForCancelledOrder(ctx context.Context, tx pgx.Tx, orgID string, order *salesOrderRow) error {
+	if order.quoteID == nil {
+		return nil
+	}
+	_, err := tx.Exec(ctx, `
+		UPDATE quotes SET status = 'sent', converted_order_id = NULL, decided_at = NULL
+		WHERE id = $1::uuid AND org_id = $2::uuid AND status = 'accepted' AND converted_order_id = $3::uuid`,
+		*order.quoteID, orgID, order.id)
+	return err
 }
 
 func salesListOrders(ctx context.Context, tx pgx.Tx, orgID string, input SalesListOrdersInput) (SalesListOrdersOutput, error) {
 	query := `
-		SELECT id::text, number, customer_id::text, status, backordered, created_at, note
-		FROM sales_orders WHERE org_id = $1::uuid`
+		SELECT sales_orders.id::text, sales_orders.number, sales_orders.customer_id::text,
+		       sales_orders.status, sales_orders.backordered, sales_orders.created_at,
+		       sales_orders.note, sales_orders.quote_id::text, quotes.number
+		FROM sales_orders
+		LEFT JOIN quotes ON quotes.id = sales_orders.quote_id AND quotes.org_id = sales_orders.org_id
+		WHERE sales_orders.org_id = $1::uuid`
 	args := []any{orgID}
 	if input.Status != nil {
-		query += ` AND status = $2`
+		query += ` AND sales_orders.status = $2`
 		args = append(args, *input.Status)
 	}
-	query += ` ORDER BY number DESC LIMIT 200`
+	query += ` ORDER BY sales_orders.number DESC LIMIT 200`
 	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return SalesListOrdersOutput{}, err
@@ -1224,7 +1372,7 @@ func salesListOrders(ctx context.Context, tx pgx.Tx, orgID string, input SalesLi
 	for rows.Next() {
 		var order listedOrder
 		var createdAt time.Time
-		if err := rows.Scan(&order.item.ID, &order.item.Number, &order.item.CustomerID, &order.item.Status, &order.item.Backordered, &createdAt, &order.item.Note); err != nil {
+		if err := rows.Scan(&order.item.ID, &order.item.Number, &order.item.CustomerID, &order.item.Status, &order.item.Backordered, &createdAt, &order.item.Note, &order.item.QuoteID, &order.item.QuoteNumber); err != nil {
 			return SalesListOrdersOutput{}, err
 		}
 		order.id = order.item.ID

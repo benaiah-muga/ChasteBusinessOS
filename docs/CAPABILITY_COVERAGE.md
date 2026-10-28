@@ -61,7 +61,7 @@ of the catalog.
 | projects | 12 | 12 | 0 | 0 | 12 | 4 |
 | purchasing | 30 | 30 | 0 | 0 | 30 | 14 |
 | routines | 5 | 5 | 0 | 0 | 5 | 0 |
-| sales | 7 | 6 | 0 | 1 | 6 | 3 |
+| sales | 8 | 7 | 0 | 1 | 7 | 4 |
 | settings | 3 | 2 | 1 | 0 | 3 | 0 |
 | signals | 1 | 1 | 0 | 0 | 1 | 1 |
 | skills | 2 | 2 | 0 | 0 | 2 | 2 |

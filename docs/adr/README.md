@@ -103,6 +103,7 @@ the next number; superseded ones get a Status update, never deletion.
 | 0096 | Flat workspace navigation and content-shaped loading | accepted |
 | 0097 | Agent sources, notification preferences, and turn reverts | accepted |
 | 0098 | Capability parity by default and resumable Workmate sessions | accepted |
+| 0099 | Workflow continuity through durable links, not a second orchestration engine | accepted |
 
 Gaps in numbering are intentional placeholders for decisions not yet
 written down, if you made one of those calls, write the ADR.

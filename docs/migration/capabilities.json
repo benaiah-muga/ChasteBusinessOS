@@ -1317,6 +1317,12 @@
                   "type": "string",
                   "format": "uuid",
                   "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "sku": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120,
+                  "description": "Optional catalogue SKU; stock-backed lines carry the item into the sales order so confirmation can reserve it."
                 }
               },
               "required": [
@@ -22471,6 +22477,11 @@
               ],
               "additionalProperties": false
             }
+          },
+          "documentId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Optional ingested document being reviewed; it is linked to the bill atomically and cannot be reused."
           }
         },
         "required": [
@@ -25680,6 +25691,57 @@
         "required": [
           "orderId",
           "orderNumber"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "sales.createOrderFromQuote",
+      "title": "Create sales order from quote",
+      "intent": "Award a sent quote into a draft sales order with the same lines so credit checks, stock reservations, fulfilment, invoicing, and collection continue from one record.",
+      "module": "sales",
+      "risk": "write",
+      "permission": "sales.write",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": "sales.cancelOrder",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "quoteId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "quoteId"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "orderNumber": {
+            "type": "integer"
+          },
+          "quoteNumber": {
+            "type": "integer"
+          },
+          "totalMinor": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "orderId",
+          "orderNumber",
+          "quoteNumber",
+          "totalMinor"
         ],
         "additionalProperties": false
       }

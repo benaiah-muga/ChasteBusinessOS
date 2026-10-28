@@ -890,6 +890,7 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
                 <tr key={order.id}>
                   <th scope="row">
                     <span>#{order.number}</span>
+                    {order.quoteNumber ? <span className="sales-customer-id">From quote #{order.quoteNumber}</span> : null}
                     {order.lines.length > 0 && <details className="sales-order-lines">
                       <summary>{order.lines.length} line {order.lines.length === 1 ? "item" : "items"}</summary>
                       <ul>

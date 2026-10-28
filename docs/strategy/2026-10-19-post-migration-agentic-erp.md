@@ -320,3 +320,28 @@ Until the inventory loop reaches a verified result:
 
 The next decision after this slice is the proposal representation. That
 decision should be made against a working planner output, not in advance.
+
+## 8. Workflow continuity slice (24 October)
+
+The next slice follows the expert review: connect the workflows that already
+exist rather than add another AI surface. The decision record is
+[ADR 0099](../adr/0099-workflow-continuity-through-durable-links.md).
+
+- Quote-to-cash now has one path for shipped goods: SKU-aware quote lines,
+  `sales.createOrderFromQuote`, credit and stock checks on confirmation,
+  delivery-created invoices linked back to the order, and a complete inverse
+  that returns an untouched order's quote to sent.
+- Business exceptions are durable. Live signals remain deterministic
+  detection; acknowledge, ownership, resolve, reopen, and no-longer-detected
+  state live in `operational_records` through `operations.upsertRecord`.
+- Replenishment-to-payment is a complete advisory playbook that starts with
+  the deterministic planner, puts cash forecast and payables in front of the
+  commitment, and continues through receiving, three-way matching, and a
+  reviewed payment run.
+- Document-to-action now ends in the books: reviewed suggestions become a
+  vendor bill with the source document linked once, atomically, and the
+  document stops raising a review exception.
+
+Still open: document unlink and correction, automated extraction lines in the
+Go runtime, reconciliation of a delivered order against the bank feed, and a
+cross-workflow case view that shows a single customer or supplier journey.

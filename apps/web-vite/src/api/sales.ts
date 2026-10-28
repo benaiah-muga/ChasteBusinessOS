@@ -19,6 +19,8 @@ const GoSalesOrderSchema = z.object({
     sku: z.string().min(1).optional(),
   }).strict()).default([]),
   note: z.string().nullable().optional(),
+  quoteId: z.string().uuid().nullable().optional(),
+  quoteNumber: z.number().int().positive().safe().nullable().optional(),
 }).strict();
 const GoSalesOrdersSchema = z.object({ orders: z.array(GoSalesOrderSchema) }).strict();
 const GoSalesCustomersSchema = z.object({ customers: z.array(z.object({ id: z.string().uuid(), name: z.string().min(1) }).strict()) }).strict();

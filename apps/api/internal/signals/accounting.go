@@ -12,10 +12,13 @@ import (
 )
 
 const (
-	overdueSignalDays      = 30
-	overdueRedDays         = 60
-	duplicatePaymentRowCap = 500
-	duplicateClaimRowCap   = 300
+	overdueSignalDays            = 30
+	overdueRedDays               = 60
+	duplicatePaymentRowCap       = 500
+	duplicateClaimRowCap         = 300
+	expenseAnomalyWindowDays     = 180
+	expenseAnomalyMinimumHistory = 3
+	expenseAnomalyMultiple       = 3
 )
 
 type invoiceRow struct {
@@ -141,6 +144,7 @@ func accountingSignals(ctx context.Context, tx pgx.Tx, orgID string, now time.Ti
 			id:             claim.id,
 			claimantUserID: claim.claimantUserID,
 			amountMinor:    claim.amountMinor,
+			category:       claim.category,
 			submittedAt:    claim.createdAt,
 		})
 	}
@@ -171,6 +175,21 @@ func accountingSignals(ctx context.Context, tx pgx.Tx, orgID string, now time.Ti
 			Subject:  fmt.Sprintf("Expense claim over policy: %s in %s (limit %s)", formatMinor(claim.amountMinor), claim.category, formatMinor(limitMinor)),
 			Detail:   fmt.Sprintf("The category ceiling is %s; this pending claim exceeds it. Approve deliberately or send back with a reason.", formatMinor(limitMinor)),
 			Evidence: evidence("expense_claim", claim.id),
+		})
+	}
+
+	history, err := accountingExpenseHistory(ctx, tx, orgID, now)
+	if err != nil {
+		return nil, err
+	}
+	for _, anomaly := range findUnusualExpenseClaims(claimRecords, history, expenseAnomalyMinimumHistory, expenseAnomalyMultiple) {
+		signals = append(signals, capability.BusinessSignal{
+			ID:       fmt.Sprintf("accounting.unusualClaim:%s", anomaly.claimID),
+			Severity: "orange",
+			Module:   "accounting",
+			Subject:  fmt.Sprintf("Unusual expense claim: %s in %s", formatMinor(anomaly.amountMinor), anomaly.category),
+			Detail:   fmt.Sprintf("The claim is %s against a %s median across %d approved claims in this category over the last %d days. Approve deliberately or ask for the receipt before it reaches the books.", formatMinor(anomaly.amountMinor), formatMinor(anomaly.medianMinor), anomaly.sampleSize, expenseAnomalyWindowDays),
+			Evidence: evidence("expense_claim", anomaly.claimID),
 		})
 	}
 
@@ -286,4 +305,27 @@ func accountingExpensePolicies(ctx context.Context, tx pgx.Tx, orgID string) ([]
 		policies = append(policies, policy)
 	}
 	return policies, rows.Err()
+}
+
+func accountingExpenseHistory(ctx context.Context, tx pgx.Tx, orgID string, now time.Time) ([]expenseClaimRecord, error) {
+	cutoff := now.Add(-time.Duration(expenseAnomalyWindowDays) * 24 * time.Hour)
+	rows, err := tx.Query(ctx, `
+		SELECT id::text, claimant_user_id::text, amount_minor, category, created_at
+		FROM expense_claims
+		WHERE org_id = $1::uuid AND status IN ('approved', 'paid') AND created_at >= $2
+		ORDER BY id ASC
+		LIMIT 2000`, orgID, cutoff)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	history := make([]expenseClaimRecord, 0)
+	for rows.Next() {
+		var claim expenseClaimRecord
+		if err := rows.Scan(&claim.id, &claim.claimantUserID, &claim.amountMinor, &claim.category, &claim.submittedAt); err != nil {
+			return nil, err
+		}
+		history = append(history, claim)
+	}
+	return history, rows.Err()
 }

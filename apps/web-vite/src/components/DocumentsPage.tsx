@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { DocumentsApiError, fetchDocumentDetail, fetchDocuments, fetchDocumentsEnabled, type DocumentDetail, type DocumentRow } from "../api/documents";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { currencyMinorUnits } from "@chaste/erp-core";
+import { DocumentsApiError, fetchDocumentDetail, fetchDocumentWorkspace, fetchDocumentsEnabled, type DocumentDetail, type DocumentRow, type DocumentVendor } from "../api/documents";
+import { createPurchasingBill, PurchasingApiError } from "../api/purchasing";
 import { authClient } from "../api/auth";
 import { fetchOrganizations } from "../api/organizations";
 import { createAuthoredDocumentDraft, documentJsonToHtml, DocumentsEditorApiError, sanitizeDocumentHtml } from "../api/documents-editor";
@@ -93,6 +95,7 @@ function DocumentDetails({
   onRequestDelete,
   onCancelDelete,
   onConfirmDelete,
+  billPromotion,
 }: {
   state: DetailState;
   selected: DocumentRow;
@@ -102,6 +105,7 @@ function DocumentDetails({
   onRequestDelete: () => void;
   onCancelDelete: () => void;
   onConfirmDelete: () => void;
+  billPromotion?: ReactNode;
 }) {
   if (state.status === "loading" || state.status === "idle") {
     return <p className="documents-detail-message" role="status">Loading document details…</p>;
@@ -178,15 +182,201 @@ function DocumentDetails({
             </ul>
           : <p className="documents-muted">No coding suggestions are available for this document.</p>}
       </section>
+      {billPromotion}
       <p className="documents-detail-id">Record {document.id || selected.id}</p>
     </article>
   );
 }
 
-export function DocumentsPage() {
+type BillDraftLine = { description: string; quantity: string; unitPrice: string; expenseAccountCode: string };
+
+function emptyBillLine(): BillDraftLine {
+  return { description: "", quantity: "1", unitPrice: "0.00", expenseAccountCode: "6000" };
+}
+
+function parseBillMoney(value: string, digits: number): number | null {
+  const input = value.trim();
+  if (!/^\d+(?:\.\d*)?$/.test(input)) return null;
+  const [whole = "", fraction = ""] = input.split(".");
+  if (fraction.length > digits) return null;
+  const minor = Number(whole) * 10 ** digits + Number(fraction.padEnd(digits, "0") || "0");
+  return Number.isSafeInteger(minor) && minor >= 0 ? minor : null;
+}
+
+function parseBillQuantity(value: string): number | null {
+  const input = value.trim();
+  if (!/^\d+(?:\.\d{0,3})?$/.test(input)) return null;
+  const [whole = "", fraction = ""] = input.split(".");
+  const quantity = Number(whole) * 1000 + Number(fraction.padEnd(3, "0") || "0");
+  return Number.isSafeInteger(quantity) && quantity > 0 ? quantity : null;
+}
+
+function DocumentBillPromotion({ document, vendors, actorId, organizationId, baseCurrency, onCreated }: {
+  document: DocumentDetail;
+  vendors: DocumentVendor[];
+  actorId: string | null;
+  organizationId: string | null;
+  baseCurrency: string | null;
+  onCreated: () => void;
+}) {
+  const currency = (baseCurrency?.trim().toUpperCase() || "USD");
+  const digits = currencyMinorUnits(currency) ?? 2;
+  const suggestedLines = useMemo<BillDraftLine[]>(() => document.suggestions
+    .filter((suggestion) => suggestion.status === "open")
+    .map((suggestion) => ({
+      description: suggestion.description,
+      quantity: (suggestion.quantityThousandths / 1000).toString(),
+      unitPrice: (suggestion.unitPriceMinor / 10 ** digits).toFixed(digits),
+      expenseAccountCode: suggestion.suggestedAccountCode,
+    })), [document.suggestions, digits]);
+  const [open, setOpen] = useState(suggestedLines.length > 0);
+  const [vendorId, setVendorId] = useState("");
+  const [vendorRef, setVendorRef] = useState("");
+  const [memo, setMemo] = useState("");
+  const [poNumber, setPoNumber] = useState("");
+  const [lines, setLines] = useState<BillDraftLine[]>(suggestedLines.length > 0 ? suggestedLines : [emptyBillLine()]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  if (document.refType) {
+    return (
+      <section className="documents-bill-linked" aria-label="Linked business record">
+        <h3>Recorded in the books</h3>
+        {document.linkedBillNumber
+          ? <p>This document is linked to <a href="/purchasing">supplier bill #{document.linkedBillNumber}</a>. The official record keeps the reviewed bill, not the uploaded file.</p>
+          : <p>This document is linked to a business record, so it is no longer waiting for action.</p>}
+      </section>
+    );
+  }
+
+  if (!open) {
+    return (
+      <section className="documents-bill-promote" aria-label="Record supplier bill">
+        <h3>Turn this document into a business record</h3>
+        <p>Review the extracted text, then record a supplier bill so the cost reaches Accounts Payable with an audit trail.</p>
+        <button type="button" className="documents-primary-link" onClick={() => setOpen(true)}>Record a supplier bill</button>
+      </section>
+    );
+  }
+
+  function updateLine(index: number, key: keyof BillDraftLine, value: string) {
+    setLines((current) => current.map((line, row) => row === index ? { ...line, [key]: value } : line));
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setNotice(null);
+    if (!actorId || !organizationId) { setError("Sign in to the active workspace before recording a supplier bill."); return; }
+    if (!vendorId) { setError("Choose the supplier this bill belongs to."); return; }
+    const parsedLines: Array<{ description: string; quantity: number; unitPriceMinor: number; expenseAccountCode: string }> = [];
+    for (const [index, line] of lines.entries()) {
+      const quantity = parseBillQuantity(line.quantity);
+      const unitPriceMinor = parseBillMoney(line.unitPrice, digits);
+      if (!line.description.trim()) { setError(`Line ${index + 1} needs a description.`); return; }
+      if (quantity === null) { setError(`Line ${index + 1} needs a positive quantity with at most three decimals.`); return; }
+      if (unitPriceMinor === null) { setError(`Line ${index + 1} needs a valid non-negative unit price.`); return; }
+      if (!/^\d{4}$/.test(line.expenseAccountCode)) { setError(`Line ${index + 1} needs a four digit expense account code.`); return; }
+      parsedLines.push({ description: line.description.trim(), quantity, unitPriceMinor, expenseAccountCode: line.expenseAccountCode });
+    }
+    const parsedPONumber = poNumber.trim() ? Number(poNumber.trim()) : undefined;
+    if (parsedPONumber !== undefined && (!Number.isSafeInteger(parsedPONumber) || parsedPONumber <= 0)) {
+      setError("Purchase order number must be a positive whole number.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const outcome = await createPurchasingBill({
+        action: "createBill",
+        vendorId,
+        ...(vendorRef.trim() ? { vendorRef: vendorRef.trim() } : {}),
+        ...(memo.trim() ? { memo: memo.trim() } : {}),
+        ...(parsedPONumber ? { poNumber: parsedPONumber } : {}),
+        documentId: document.id,
+        lines: parsedLines,
+      }, undefined, { actorId, organizationId });
+      if (outcome.kind === "pending") {
+        setNotice(`The supplier bill is waiting for approval. ${outcome.reason}`);
+        return;
+      }
+      const billNumber = typeof outcome.data.billNumber === "number" ? outcome.data.billNumber : null;
+      setNotice(billNumber ? `Supplier bill #${billNumber} recorded and linked to this document.` : "Supplier bill recorded and linked to this document.");
+      onCreated();
+    } catch (caught) {
+      setError(caught instanceof PurchasingApiError || caught instanceof DocumentsApiError
+        ? caught.message
+        : "The supplier bill could not be recorded. Review the lines and try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="documents-bill-promote" aria-label="Record supplier bill">
+      <div className="documents-bill-head">
+        <div>
+          <h3>Review and record the supplier bill</h3>
+          <p>These lines are suggestions from the document. Check the supplier, quantities, prices, and account codes before they reach the books.</p>
+        </div>
+      </div>
+      {error && <p className="documents-bill-error" role="alert">{error}</p>}
+      {notice && <p className="documents-bill-notice" role="status">{notice}</p>}
+      <form className="documents-bill-form" onSubmit={(event) => void submit(event)}>
+        <div className="documents-bill-fields">
+          <label>Supplier
+            <select required value={vendorId} onChange={(event) => setVendorId(event.currentTarget.value)}>
+              <option value="">Choose supplier</option>
+              {vendors.map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}
+            </select>
+          </label>
+          <label>Vendor reference<input maxLength={200} value={vendorRef} onChange={(event) => setVendorRef(event.currentTarget.value)} placeholder="Their invoice number" /></label>
+          <label>Purchase order<input inputMode="numeric" value={poNumber} onChange={(event) => setPoNumber(event.currentTarget.value)} placeholder="Optional" /></label>
+          <label>Memo<input maxLength={500} value={memo} onChange={(event) => setMemo(event.currentTarget.value)} placeholder="Optional" /></label>
+        </div>
+        <div className="documents-bill-lines">
+          {lines.map((line, index) => (
+            <div className="documents-bill-line" key={index}>
+              <label>Description<input required maxLength={500} value={line.description} onChange={(event) => updateLine(index, "description", event.currentTarget.value)} /></label>
+              <label>Quantity<input required inputMode="decimal" value={line.quantity} onChange={(event) => updateLine(index, "quantity", event.currentTarget.value)} /></label>
+              <label>Unit price<input required inputMode="decimal" value={line.unitPrice} onChange={(event) => updateLine(index, "unitPrice", event.currentTarget.value)} /></label>
+              <label>Account<input required inputMode="numeric" maxLength={4} value={line.expenseAccountCode} onChange={(event) => updateLine(index, "expenseAccountCode", event.currentTarget.value)} /></label>
+              {lines.length > 1 && <button type="button" className="documents-secondary-action" onClick={() => setLines((current) => current.filter((_, row) => row !== index))}>Remove</button>}
+            </div>
+          ))}
+          <button type="button" className="documents-secondary-action" onClick={() => setLines((current) => [...current, emptyBillLine()])}>Add line</button>
+        </div>
+        <div className="documents-bill-actions">
+          <span>Total {formatBillTotal(lines, digits, currency)}</span>
+          <button type="submit" className="documents-primary-link" disabled={busy || vendors.length === 0}>{busy ? "Recording…" : "Record supplier bill"}</button>
+        </div>
+        {vendors.length === 0 && <p className="documents-muted">Add a supplier in Purchasing before recording this bill.</p>}
+      </form>
+    </section>
+  );
+}
+
+function formatBillTotal(lines: BillDraftLine[], digits: number, currency: string): string {
+  let total = 0;
+  for (const line of lines) {
+    const quantity = parseBillQuantity(line.quantity);
+    const price = parseBillMoney(line.unitPrice, digits);
+    if (quantity === null || price === null) continue;
+    total += Math.round((quantity * price) / 1000);
+  }
+  try {
+    return new Intl.NumberFormat(undefined, { style: "currency", currency }).format(total / 10 ** digits);
+  } catch {
+    return `${currency} ${(total / 10 ** digits).toFixed(digits)}`;
+  }
+}
+
+export function DocumentsPage({ actorId = null, organizationId = null, baseCurrency = null }: { actorId?: string | null; organizationId?: string | null; baseCurrency?: string | null }) {
   const [requestedSelection] = useState(() => requestedDocumentSelection(window.location.search));
   const [state, setState] = useState<ListState>({ status: "loading" });
   const [detailState, setDetailState] = useState<DetailState>({ status: "idle" });
+  const [detailRevision, setDetailRevision] = useState(0);
+  const [vendors, setVendors] = useState<DocumentVendor[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [requestedSelectionError, setRequestedSelectionError] = useState<"invalid" | "not-found" | null>(null);
   const [query, setQuery] = useState("");
@@ -226,8 +416,10 @@ export function DocumentsPage() {
         if (!signal?.aborted) setState({ status: "disabled" });
         return;
       }
-      const documents = await fetchDocuments(signal);
+      const workspace = await fetchDocumentWorkspace(signal);
+      const documents = workspace.documents;
       if (signal?.aborted) return;
+      setVendors(workspace.vendors);
       setState({ status: "ready", documents });
       if (!requestedSelectionHandled.current && requestedSelection.kind !== "none") {
         requestedSelectionHandled.current = true;
@@ -338,7 +530,7 @@ export function DocumentsPage() {
       if (!controller.signal.aborted && requestId === detailRequestId.current) setDetailState({ status: "failed", error: readableError(error) });
     });
     return () => controller.abort();
-  }, [selectedId]);
+  }, [selectedId, detailRevision]);
 
   const documents = state.status === "ready" ? state.documents : [];
   const filtered = useMemo(() => {
@@ -740,6 +932,15 @@ export function DocumentsPage() {
               onRequestDelete={() => { setDocumentDeleteConfirmId(selected.id); setDocumentDeleteNotice(null); }}
               onCancelDelete={() => setDocumentDeleteConfirmId(null)}
               onConfirmDelete={() => void submitDocumentDelete(selected.id)}
+              billPromotion={detailState.status === "ready" ? <DocumentBillPromotion
+                key={detailState.document.id}
+                document={detailState.document}
+                vendors={vendors}
+                actorId={actorId}
+                organizationId={organizationId}
+                baseCurrency={baseCurrency}
+                onCreated={() => { setDetailRevision((value) => value + 1); void load(); }}
+              /> : undefined}
             /> : requestedSelectionError ? null : <p className="documents-detail-message">Select a document to review its details.</p>}
           </section>
         </section>

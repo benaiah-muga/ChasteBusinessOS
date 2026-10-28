@@ -1,6 +1,12 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createPurchasingBill } from "../api/purchasing";
 import { DocumentsPage } from "./DocumentsPage";
+
+vi.mock("../api/purchasing", () => ({
+  createPurchasingBill: vi.fn(),
+  PurchasingApiError: class PurchasingApiError extends Error { status = 0; requestMayHaveReachedServer = false; },
+}));
 
 const rows = [
   { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", title: "Supplier invoice", status: "parsed", sourceType: "upload", createdAt: "2026-09-28T10:00:00.000Z", folder: "Finance" },
@@ -38,6 +44,9 @@ function detail(id: string, title: string, status: string, parsedMarkdown: strin
       sizeBytes: id === rows[0]!.id ? 1024 : null,
       parseError: null,
       parsedMarkdown,
+      refType: null,
+      refId: null,
+      linkedBillNumber: null,
       suggestions: id === goDocumentId ? [{
         id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
         orgId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
@@ -54,6 +63,10 @@ function detail(id: string, title: string, status: string, parsedMarkdown: strin
     },
   };
 }
+
+beforeEach(() => {
+  vi.mocked(createPurchasingBill).mockReset();
+});
 
 afterEach(() => {
   cleanup();
@@ -100,6 +113,40 @@ describe("Vite documents page", () => {
     expect(screen.queryByRole("button", { name: /Supplier invoice/ })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /Warehouse notes/ }));
     expect(await screen.findByText("Text extraction is in progress.")).not.toBeNull();
+  });
+
+  it("records a reviewed supplier bill from the extracted lines and links the document", async () => {
+    const vendorId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    vi.mocked(createPurchasingBill).mockResolvedValue({ kind: "completed", data: { billNumber: 9, totalMinor: 3000, entryId: "ffffffff-ffff-4fff-8fff-ffffffffffff" } });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/modules") return modulesResponse(["documents"]);
+      const request = JSON.parse(String(init?.body ?? "{}")) as { capabilityId: string; input?: { id?: string } };
+      const library = emptyLibraryCapability(request.capabilityId);
+      if (library) return library;
+      if (request.capabilityId !== "documents.listIngestedDocuments") throw new Error(`Unexpected capability ${request.capabilityId}`);
+      return request.input?.id === undefined
+        ? Response.json({ ok: true, data: { documents: [rows[0]], vendors: [{ id: vendorId, name: "CopperWire GmbH" }] } })
+        : Response.json({ ok: true, data: { document: detail(rows[0]!.id, "Supplier invoice", "parsed", "Printer paper 2 x 15.00").document } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<DocumentsPage actorId="10000000-0000-4000-8000-000000000001" organizationId="20000000-0000-4000-8000-000000000001" baseCurrency="USD" />);
+
+    expect(await screen.findByRole("heading", { name: "Review and record the supplier bill" })).not.toBeNull();
+    fireEvent.change(screen.getByLabelText("Supplier"), { target: { value: vendorId } });
+    fireEvent.change(screen.getByLabelText("Vendor reference"), { target: { value: "CW-42" } });
+    fireEvent.click(screen.getByRole("button", { name: "Record supplier bill" }));
+
+    await waitFor(() => expect(createPurchasingBill).toHaveBeenCalledWith({
+      action: "createBill",
+      vendorId,
+      vendorRef: "CW-42",
+      documentId: rows[0]!.id,
+      lines: [{ description: "Printer paper", quantity: 2000, unitPriceMinor: 1500, expenseAccountCode: "6000" }],
+    }, undefined, {
+      actorId: "10000000-0000-4000-8000-000000000001",
+      organizationId: "20000000-0000-4000-8000-000000000001",
+    }));
+    expect(await screen.findByText("Supplier bill #9 recorded and linked to this document.")).not.toBeNull();
   });
 
   it("loads authored documents from Go and filters by title, folder, and linked record", async () => {
@@ -261,6 +308,9 @@ describe("Vite documents page", () => {
       sizeBytes: 1024,
       parseError: null,
       parsedMarkdown: "Invoice number: 42",
+      refType: null,
+      refId: null,
+      linkedBillNumber: null,
       suggestions: [],
     };
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

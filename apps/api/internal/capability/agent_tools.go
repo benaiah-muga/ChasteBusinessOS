@@ -55,6 +55,10 @@ var agentToolDefinitions = map[string]agentToolDefinition{
 		description: "Plan inventory replenishment from live stock, open reservations, recent sales demand, open purchase orders, and recorded costs. Returns suggested quantities, cost estimates, assumptions, and warnings. It does not create or reserve anything.",
 		schema:      `{"type":"object","properties":{"sku":{"type":"string","minLength":1,"maxLength":120,"description":"Optional exact SKU to plan; omit to plan every active goods item."},"lookbackDays":{"type":"integer","minimum":7,"maximum":365,"description":"Days of sales history used for the demand rate. Defaults to 90."},"reviewDays":{"type":"integer","minimum":0,"maximum":90,"description":"Days of demand the target stock should cover beyond lead time. Defaults to 7."},"leadTimeDays":{"type":"integer","minimum":1,"maximum":365,"description":"Configured supplier lead time in days. Defaults to 14."},"serviceLevel":{"type":"string","enum":["90","95","98","99"],"description":"Service level used for safety stock. Defaults to 95."},"includeSufficient":{"type":"boolean","description":"When true, include items that need no action. Defaults to false."}},"additionalProperties":false}`,
 	},
+	salesCreateOrderFromQuoteCapabilityID: {
+		description: "Award a sent sales quote into a draft sales order. The order keeps the quote lines and links both records; confirm the order separately to run the credit check and reserve stock, then deliver to invoice. This does not post revenue.",
+		schema:      `{"type":"object","properties":{"quoteId":{"type":"string","format":"uuid","description":"Sent quote UUID returned by accounting.listQuotes."}},"required":["quoteId"],"additionalProperties":false}`,
+	},
 	listCustomersCapabilityID: {
 		description: "Search organization customers by name, email, or phone. Returns customer IDs, names, and email addresses. Leave query out to list the first matching customers.",
 		schema:      `{"type":"object","properties":{"query":{"type":"string","description":"Optional text to match against customer name, email, or phone."}},"additionalProperties":false}`,

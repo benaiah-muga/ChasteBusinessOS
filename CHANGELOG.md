@@ -13,6 +13,12 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Added
 
+- Quote-to-cash is now one continuous governed path: quote lines can carry a catalogue SKU, `sales.createOrderFromQuote` awards a sent quote into a draft sales order with the same lines, `sales.confirmOrder` checks credit and reserves stock, `sales.deliverOrder` invoices what shipped, and the invoice points back to its order. Cancelling an untouched order returns its source quote to sent, so the award has a complete inverse.
+- The Inbox now keeps business exceptions: acknowledge, take ownership of, resolve, and reopen a signal through the persisted operational record path. A saved exception whose signal stops firing stays visible as no longer detected until a person resolves it, and a resolved condition that still fires can be reopened.
+- New deterministic exception producers cover purchase orders past their promised date, overdue supplier bills, expense claims at least three times the category median with at least three settled claims of history, and parsed documents with open coding suggestions that have waited more than two days for review.
+- Documents can be promoted into the books: a reviewer checks the extracted text and coding suggestions, chooses the supplier, edits quantity, price, and account code, and records a vendor bill with the source document linked atomically and only once. The bill and document link commit together. Pasted text is projected as parsed content at ingest, while uploaded raw bytes and raw text stay private.
+- A new `replenishment-to-payment` advisory skill carries the planner through cash forecast and payables context, supplier comparison, purchase approval, receiving, three-way-matched billing, and a reviewed payment run. The `quote-to-cash` skill now follows the order and delivery path instead of accepting straight into an invoice.
+
 - The organization agent persona (`agent_soul`) is now a governed capability: `iam.setAgentSoul` requires `iam.admin`, writes a ledger event, returns the previous persona, and is reversible through `iam.restoreAgentSoul`. Workmate can update it when an administrator asks, and the persona still cannot override security, approval, or financial integrity rules.
 - Workmate can read the organization's approval policy through `iam.getOrgPolicy`, including the autonomy ceiling, money threshold, and risk classes that always need approval, so it can explain why an action is waiting.
 - Workmate can list POS register sessions through `pos.listSessions`, including register, status, opening float, expected and counted cash, variance, and open or close times, then drill into a shift with `pos.shiftSummary`.
@@ -149,6 +155,10 @@ The full v1 changelog is preserved at the bottom of this file.
 - Saved views are reusable across Invoices, Inventory, and Agent sessions, scoped to the active organization in browser storage; CRM keeps its server-backed shared views.
 
 ### Changed
+
+- `accounting.acceptQuote` remains available for deliberate invoice-first service work, but the Sales workspace now presents "Create sales order" as the primary action and labels invoice-first as "Invoice immediately" so shipped goods do not silently skip credit, stock reservation, and fulfilment.
+- Sales order reads include their source quote, delivery invoices link to their order, and the Sales workspace shows the quote an order came from.
+- The capability manifest and agent catalog now carry the SKU-aware quote contract, the document-aware bill contract, and the new quote-to-order capability.
 
 - `crm.listCustomerViews` is selected directly for saved-view questions, and notifications are a first-class read instead of an incidental dashboard feed.
 - Tool trajectory writes are ordered under a mutex so a tool call never lands after its result and history reconstruction stays valid.

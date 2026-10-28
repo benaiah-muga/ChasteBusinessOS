@@ -550,6 +550,8 @@ export const invoices = pgTable(
     fxRateNum: bigint("fx_rate_num", { mode: "number" }),
     fxRateDen: integer("fx_rate_den"),
     memo: text("memo"),
+    /** Sales order whose delivery produced this invoice, when sold through fulfilment. */
+    salesOrderId: uuid("sales_order_id").references((): AnyPgColumn => salesOrders.id, { onDelete: "set null" }),
     posSessionId: uuid("pos_session_id").references(() => posSessions.id, { onDelete: "set null" }),
     /** When payment is expected; from the customer's payment terms (M10). */
     dueAt: timestamp("due_at", { withTimezone: true }),
@@ -559,7 +561,7 @@ export const invoices = pgTable(
     voidedAt: timestamp("voided_at", { withTimezone: true }),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex("invoice_org_number_idx").on(t.orgId, t.number), index("invoice_org_customer_idx").on(t.orgId, t.customerId)],
+  (t) => [uniqueIndex("invoice_org_number_idx").on(t.orgId, t.number), index("invoice_org_customer_idx").on(t.orgId, t.customerId), index("invoice_org_sales_order_idx").on(t.orgId, t.salesOrderId)],
 );
 
 export const invoiceLines = pgTable(
@@ -2200,6 +2202,8 @@ export const salesOrders = pgTable(
       .references(() => customers.id, { onDelete: "restrict" }),
     status: text("status").notNull().default("draft"), // draft | confirmed | delivered | cancelled
     backordered: boolean("backordered").notNull().default(false),
+    /** Quote this order fulfils; set when the quote is awarded, never rewritten. */
+    quoteId: uuid("quote_id").references((): AnyPgColumn => quotes.id, { onDelete: "set null" }),
     note: text("note"),
     createdByActorType: text("created_by_actor_type"),
     createdByActorId: uuid("created_by_actor_id"),
@@ -2210,6 +2214,7 @@ export const salesOrders = pgTable(
   (t) => [
     uniqueIndex("sales_order_org_number_idx").on(t.orgId, t.number),
     index("sales_order_org_status_idx").on(t.orgId, t.status),
+    index("sales_order_org_quote_idx").on(t.orgId, t.quoteId),
   ],
 );
 
@@ -2515,7 +2520,7 @@ export const rfqQuoteLines = pgTable(
 // ── Functional gap batch: quotes, recurring billing, timesheets,
 //    expense claims, customer portal shares, in-app notifications ──
 
-/** Sales quotes; accepting one converts it into an invoice verbatim. */
+/** Sales quotes; awarding one converts it into a sales order, not an invoice. */
 export const quotes = pgTable(
   "quotes",
   {
@@ -2534,6 +2539,7 @@ export const quotes = pgTable(
     totalMinor: integer("total_minor").notNull(),
     memo: text("memo"),
     convertedInvoiceId: uuid("converted_invoice_id").references(() => invoices.id, { onDelete: "set null" }),
+    convertedOrderId: uuid("converted_order_id").references((): AnyPgColumn => salesOrders.id, { onDelete: "set null" }),
     /** Past this instant the quote can no longer be accepted (M9). */
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     decidedAt: timestamp("decided_at", { withTimezone: true }),
@@ -2553,6 +2559,8 @@ export const quoteLines = pgTable("quote_lines", {
   quantity: integer("quantity").notNull(), // thousandths
   unitPriceMinor: integer("unit_price_minor").notNull(),
   taxMinor: integer("tax_minor").notNull().default(0),
+  /** Stock-backed line that reserves inventory when the quote becomes an order. */
+  itemId: uuid("item_id").references(() => items.id, { onDelete: "set null" }),
 });
 
 /**

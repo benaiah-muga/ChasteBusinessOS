@@ -106,3 +106,8 @@
 }
 .inbox-item-action strong { color: var(--gold-700); font-weight: 650; }
 .inbox-warning { margin: 15px 0 0; border: 1px solid #ead6a8; border-radius: 8px; padding: 8px 11px; background: var(--warning-soft); color: var(--gold-700); font-size: 10.5px; }
+
+.inbox-item-status { border: 1px solid var(--line); border-radius: 999px; padding: 1px 6px; background: var(--paper-50); color: var(--ink-500); font-weight: 650; letter-spacing: 0; text-transform: none; }
+.inbox-item-status-acknowledged { border-color: #ead6a8; background: var(--warning-soft); color: var(--gold-700); }
+.inbox-item-status-resolved { border-color: #cadfce; background: #f0f7f1; color: #3e6b4a; }
+.inbox-item-owner { border: 1px solid var(--line); border-radius: 999px; padding: 1px 6px; background: var(--paper-50); color: var(--ink-400); font-weight: 600; letter-spacing: 0; text-transform: none; }

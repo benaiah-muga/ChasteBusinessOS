@@ -7,6 +7,8 @@ import (
 )
 
 const (
+	maxSignalInt64 = int64(1<<63 - 1)
+
 	duplicatePaymentWindowDays = 7
 	duplicateClaimWindowDays   = 3
 	deadStockDays              = 90
@@ -31,7 +33,16 @@ type expenseClaimRecord struct {
 	id             string
 	claimantUserID string
 	amountMinor    int64
+	category       string
 	submittedAt    time.Time
+}
+
+type expenseAnomaly struct {
+	claimID     string
+	category    string
+	amountMinor int64
+	medianMinor int64
+	sampleSize  int
 }
 
 type duplicateClaimPair struct {
@@ -161,4 +172,48 @@ func evaluateExpensePolicy(category string, amountMinor int64, policies []expens
 		}
 	}
 	return false, 0, false
+}
+
+// findUnusualExpenseClaims compares a pending claim with the same category's
+// settled history. It requires a real sample and a high multiple so a new
+// category, a small team, or a one-off purchase does not produce noise.
+func findUnusualExpenseClaims(pending, history []expenseClaimRecord, minimumHistory int, multiple int64) []expenseAnomaly {
+	if minimumHistory < 1 || multiple < 1 {
+		return nil
+	}
+	amountsByCategory := map[string][]int64{}
+	for _, claim := range history {
+		if claim.amountMinor <= 0 {
+			continue
+		}
+		amountsByCategory[claim.category] = append(amountsByCategory[claim.category], claim.amountMinor)
+	}
+	medians := make(map[string]int64, len(amountsByCategory))
+	samples := make(map[string]int, len(amountsByCategory))
+	for category, amounts := range amountsByCategory {
+		sort.Slice(amounts, func(i, j int) bool { return amounts[i] < amounts[j] })
+		samples[category] = len(amounts)
+		medians[category] = amounts[len(amounts)/2]
+	}
+	anomalies := make([]expenseAnomaly, 0)
+	for _, claim := range pending {
+		median := medians[claim.category]
+		if median <= 0 || samples[claim.category] < minimumHistory || median > maxSignalInt64/multiple {
+			continue
+		}
+		if claim.amountMinor < median*multiple || claim.amountMinor <= median {
+			continue
+		}
+		anomalies = append(anomalies, expenseAnomaly{
+			claimID: claim.id, category: claim.category, amountMinor: claim.amountMinor,
+			medianMinor: median, sampleSize: samples[claim.category],
+		})
+	}
+	sort.SliceStable(anomalies, func(i, j int) bool {
+		if anomalies[i].amountMinor != anomalies[j].amountMinor {
+			return anomalies[i].amountMinor > anomalies[j].amountMinor
+		}
+		return anomalies[i].claimID < anomalies[j].claimID
+	})
+	return anomalies
 }

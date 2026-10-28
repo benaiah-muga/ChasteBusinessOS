@@ -634,7 +634,7 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
             <Suspense fallback={<BrandLoader full label={`Opening ${meta.label.toLowerCase()}`} detail="Loading the latest workspace data." />}>
               <div id="main-content" tabIndex={-1}>
                 {inboxPage
-                  ? <InboxPage key={organizationRevision} organizationId={activeOrgId} />
+                  ? <InboxPage key={organizationRevision} organizationId={activeOrgId} actorId={currentUserId} />
                   : approvalsPage
                     ? <ApprovalsPage key={organizationRevision} baseCurrency={baseCurrency} organizationId={activeOrgId} />
                     : ledgerPage
@@ -650,7 +650,7 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
                               : marketplacePage
                                 ? <MarketplacePage key={organizationRevision} actorId={currentUserId} organizationId={activeOrgId} />
                                 : documentsPage
-                                  ? <DocumentsPage key={organizationRevision} />
+                                  ? <DocumentsPage key={organizationRevision} actorId={currentUserId} organizationId={activeOrgId} baseCurrency={baseCurrency} />
                                   : hrPage
                                     ? <HrPage key={organizationRevision} baseCurrency={baseCurrency} actorId={currentUserId} organizationId={activeOrgId} />
                                     : crmPage

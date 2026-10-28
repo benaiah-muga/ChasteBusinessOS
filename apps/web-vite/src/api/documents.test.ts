@@ -20,6 +20,9 @@ const goDetail = {
   sizeBytes: 240,
   parseError: null,
   parsedMarkdown: "Invoice number: 42",
+  refType: null,
+  refId: null,
+  linkedBillNumber: null,
   suggestions: [],
 };
 const goSuggestion = {

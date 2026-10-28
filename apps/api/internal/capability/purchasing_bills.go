@@ -16,6 +16,12 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// PurchasingDomainError marks an expected purchasing workflow refusal for
+// HTTP adapters, so a business refusal is not reported as a server failure.
+type PurchasingDomainError string
+
+func (e PurchasingDomainError) Error() string { return string(e) }
+
 const (
 	createVendorCapabilityID         = "purchasing.createVendor"
 	createBillCapabilityID           = "purchasing.createBill"
@@ -48,11 +54,12 @@ type CreateBillLineInput struct {
 }
 
 type CreateBillInput struct {
-	VendorID  string                `json:"vendorId"`
-	VendorRef *string               `json:"vendorRef,omitempty"`
-	Memo      *string               `json:"memo,omitempty"`
-	PONumber  *int64                `json:"poNumber,omitempty"`
-	Lines     []CreateBillLineInput `json:"lines"`
+	VendorID   string                `json:"vendorId"`
+	VendorRef  *string               `json:"vendorRef,omitempty"`
+	Memo       *string               `json:"memo,omitempty"`
+	PONumber   *int64                `json:"poNumber,omitempty"`
+	DocumentID *string               `json:"documentId,omitempty"`
+	Lines      []CreateBillLineInput `json:"lines"`
 }
 
 type CreateBillOutput struct {
@@ -126,6 +133,11 @@ func ParseCreateBillInput(raw json.RawMessage) (CreateBillInput, error) {
 	}
 	if input.PONumber, err = optionalSafeInteger(fields, "poNumber"); err != nil || input.PONumber != nil && *input.PONumber <= 0 {
 		return CreateBillInput{}, errors.New("poNumber must be a positive integer")
+	}
+	if input.DocumentID, err = optionalString(fields, "documentId"); err != nil {
+		return CreateBillInput{}, err
+	} else if input.DocumentID != nil && !isZodUUID(*input.DocumentID) {
+		return CreateBillInput{}, errors.New("documentId must be a UUID")
 	}
 	linesRaw, ok := fields["lines"]
 	if !ok || bytes.Equal(bytes.TrimSpace(linesRaw), []byte("null")) {
@@ -383,6 +395,23 @@ func createBill(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityClai
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return CreateBillOutput{}, err
 	}
+	if input.DocumentID != nil {
+		var refType *string
+		var refID *string
+		err := tx.QueryRow(ctx, `
+			SELECT ref_type, ref_id::text FROM documents
+			WHERE id = $1::uuid AND org_id = $2::uuid
+			FOR UPDATE`, *input.DocumentID, orgID).Scan(&refType, &refID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return CreateBillOutput{}, PurchasingDomainError("document not found")
+		}
+		if err != nil {
+			return CreateBillOutput{}, err
+		}
+		if refType != nil || refID != nil {
+			return CreateBillOutput{}, PurchasingDomainError("document is already linked to a business record")
+		}
+	}
 	resolved := make([]resolvedBillLine, 0, len(input.Lines))
 	for _, line := range input.Lines {
 		// Zod applies this default before execute. Keep direct domain callers on
@@ -633,6 +662,15 @@ func createBill(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityClai
 			VALUES ($1::uuid, $2, $3, $4, $5, $6::uuid, $7, $8, $9, $10::uuid)`,
 			billID, line.input.Description, line.input.Quantity, line.input.UnitPriceMinor, line.taxMinor,
 			line.taxCodeID, line.rateBasisPoints, line.priceIncludesTax, line.input.ExpenseAccountCode, poLineID); err != nil {
+			return CreateBillOutput{}, err
+		}
+	}
+	if input.DocumentID != nil {
+		if _, err := tx.Exec(ctx, `
+			UPDATE documents
+			SET ref_type = 'vendor_bill', ref_id = $1::uuid, updated_at = $2
+			WHERE id = $3::uuid AND org_id = $4::uuid AND ref_type IS NULL AND ref_id IS NULL`,
+			billID, now, *input.DocumentID, orgID); err != nil {
 			return CreateBillOutput{}, err
 		}
 	}

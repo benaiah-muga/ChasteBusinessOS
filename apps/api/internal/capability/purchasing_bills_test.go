@@ -67,6 +67,14 @@ func TestPurchasingBillsParsersMirrorZodContracts(t *testing.T) {
 		defaulted.Lines[0].ExpenseAccountCode != "6000" || defaulted.Lines[0].TaxMinor != nil || defaulted.Lines[0].TaxCodeID != nil || defaulted.Lines[0].POLineNumber != nil {
 		t.Fatalf("defaulted createBill input=%+v err=%v, want expense 6000 default and absent optionals", defaulted, err)
 	}
+	documentID := "33333333-3333-4333-8333-333333333333"
+	fromDocument, err := ParseCreateBillInput(json.RawMessage(`{"vendorId":"` + vendorUUID + `","documentId":"` + documentID + `","lines":[{"description":"Desk","quantity":2000,"unitPriceMinor":1}]}`))
+	if err != nil || fromDocument.DocumentID == nil || *fromDocument.DocumentID != documentID {
+		t.Fatalf("ParseCreateBillInput documentId = %+v, %v, want %s", fromDocument.DocumentID, err, documentID)
+	}
+	if _, err := ParseCreateBillInput(json.RawMessage(`{"vendorId":"` + vendorUUID + `","documentId":"not-a-uuid","lines":[{"description":"Desk","quantity":2000,"unitPriceMinor":1}]}`)); err == nil {
+		t.Fatal("ParseCreateBillInput accepted a malformed documentId")
+	}
 	stringVendorID, err := ParseCreateBillInput(json.RawMessage(`{"vendorId":"vendor-key","lines":[{"description":"Desk","quantity":2000,"unitPriceMinor":1}]}`))
 	if err != nil || stringVendorID.VendorID != "vendor-key" {
 		t.Fatalf("ParseCreateBillInput vendorId = %+v, %v, want the legacy z.string() contract", stringVendorID, err)
@@ -1215,5 +1223,86 @@ func TestPurchasingBillsReverseVendorPaymentMirrorsAndRestores(t *testing.T) {
 	}
 	if drift != 0 {
 		t.Fatalf("journal drift after reversals = %d, want balanced books", drift)
+	}
+}
+
+func TestPurchasingBillsLinkReviewedDocumentOnce(t *testing.T) {
+	fx := newExecutorFixture(t)
+	cleanupPurchasingBillsFixture(t, fx)
+	seedPurchasingAccounts(t, fx)
+	vendorID := seedPurchasingVendor(t, fx, fx.orgID, nil)
+	claims := purchasingBillsClaims(fx)
+	now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
+
+	var documentID string
+	if err := fx.owner.QueryRow(fx.ctx, `
+		INSERT INTO documents (org_id, title, source_type, raw_text, status, created_by_actor_type)
+		VALUES ($1::uuid, 'Copper invoice', 'text', 'Copper wire 40 spools', 'parsed', 'human')
+		RETURNING id::text`, fx.orgID).Scan(&documentID); err != nil {
+		t.Fatal(err)
+	}
+	var foreignDocumentID string
+	if err := fx.owner.QueryRow(fx.ctx, `
+		INSERT INTO documents (org_id, title, source_type, raw_text, status, created_by_actor_type)
+		VALUES ($1::uuid, 'Foreign invoice', 'text', 'secret', 'parsed', 'human')
+		RETURNING id::text`, fx.otherOrgID).Scan(&foreignDocumentID); err != nil {
+		t.Fatal(err)
+	}
+
+	created, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (CreateBillOutput, error) {
+		return createBill(fx.ctx, tx, claims, CreateBillInput{
+			VendorID:   vendorID,
+			VendorRef:  crmStringPointer("CU-40"),
+			DocumentID: &documentID,
+			Lines: []CreateBillLineInput{{
+				Description: "Copper wire", Quantity: 40_000, UnitPriceMinor: 1_800,
+			}},
+		}, now)
+	})
+	if err != nil {
+		t.Fatalf("createBill from document: %v", err)
+	}
+	var linkedType string
+	var linkedID string
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT ref_type, ref_id::text FROM documents WHERE id=$1::uuid`, documentID).
+		Scan(&linkedType, &linkedID); err != nil {
+		t.Fatal(err)
+	}
+	var billID string
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT id::text FROM vendor_bills WHERE org_id=$1::uuid AND number=$2`, fx.orgID, created.BillNumber).Scan(&billID); err != nil {
+		t.Fatal(err)
+	}
+	if linkedType != "vendor_bill" || linkedID != billID {
+		t.Fatalf("document link = %s/%s, want vendor_bill/%s", linkedType, linkedID, billID)
+	}
+
+	_, reuseErr := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (CreateBillOutput, error) {
+		return createBill(fx.ctx, tx, claims, CreateBillInput{
+			VendorID: vendorID, DocumentID: &documentID,
+			Lines: []CreateBillLineInput{{Description: "Again", Quantity: 1000, UnitPriceMinor: 1}},
+		}, now)
+	})
+	if reuseErr == nil || reuseErr.Error() != "document is already linked to a business record" {
+		t.Fatalf("reused document error = %v, want link refusal", err)
+	}
+	_, foreignErr := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (CreateBillOutput, error) {
+		return createBill(fx.ctx, tx, claims, CreateBillInput{
+			VendorID: vendorID, DocumentID: &foreignDocumentID,
+			Lines: []CreateBillLineInput{{Description: "Nope", Quantity: 1000, UnitPriceMinor: 1}},
+		}, now)
+	})
+	if foreignErr == nil || foreignErr.Error() != "document not found" {
+		t.Fatalf("foreign document error = %v, want not found", foreignErr)
+	}
+
+	detail, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (IngestedDocumentsOutput, error) {
+		return readIngestedDocuments(fx.ctx, tx, fx.orgID, IngestedDocumentsInput{ID: &documentID})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Document == nil || detail.Document.RefType == nil || *detail.Document.RefType != "vendor_bill" ||
+		detail.Document.LinkedBillNumber == nil || *detail.Document.LinkedBillNumber != created.BillNumber {
+		t.Fatalf("document detail = %+v, want linked bill number", detail.Document)
 	}
 }
