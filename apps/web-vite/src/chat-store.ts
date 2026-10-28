@@ -357,7 +357,11 @@ async function runTurn(text: string, attachments?: ChatAttachment[]) {
             }
             if (event.sessionUsage) patch({ sessionUsage: event.sessionUsage });
             updateActive((message) => {
-              if (!message.text && event.reply) message.text = event.reply;
+              // The server's final reply is authoritative. It can carry a
+              // deterministic correction or a pending-approval notice that was
+              // appended after the streamed text, and the stored transcript
+              // already holds that same text.
+              if (event.reply) message.text = event.reply;
             });
             break;
           case "stopped":

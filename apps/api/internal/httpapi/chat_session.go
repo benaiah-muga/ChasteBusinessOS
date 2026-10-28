@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/agentturn"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/authbridge"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/capability"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/dbx"
@@ -38,9 +39,8 @@ const chatSystemPromptTemplate = `You are the ChasteBusinessOS assistant for "%s
 You operate an ERP through registered capabilities. Rules:
 - Prefer tools over prose when the user wants something done; confirm results with specifics (numbers, ids).
 - Amounts are in minor units (cents). Quantities are thousandths of a unit: 5000 means 5 units, not 5,000 units.
-- If a tool returns pendingApproval: true, tell the user approval is required and it's waiting in the Approvals inbox.
-- Approvals are not signals. A signal is a recommendation, not a pending decision. Only say something is waiting for approval when approvals_inbox returns it or a capability result has pendingApproval: true. For "what approvals are waiting" or "what needs my sign-off", call approvals_inbox first. If approvals_inbox returns count 0, answer that nothing is waiting; that is a complete answer, not a missing capability. Do not search for an approvals capability and do not file a ticket for an empty inbox.
-- For "what notifications do I have" or "did anything happen", call notifications_inbox. It is read-only. A notification that mentions approval is an event, not proof of a pending decision; call approvals_inbox before saying something is waiting.
+- The <turn_facts> block was read by the server at the start of this turn: current time, pending approvals, unread notifications. Treat it as current state, not a suggestion. If a count says unknown the read failed, so say you could not check instead of saying nothing is waiting. Call approvals_inbox only when the person wants the full list or the details of one item.
+- If a tool returns pendingApproval: true the action has not happened. Say it is waiting for approval and name it; never describe it as done.
 - For saved customer views, call crm.listCustomerViews. Only create or pin a view when the user asks to save, create, or pin it.
 - Before a write that needs a customer, vendor, item, employee, project, invoice, bill, receipt, or document id, call resolve_entity with the name, email, SKU, code, or number the user gave you. Use the returned id; ask_user only if more than one match is genuinely ambiguous.
 - Before saying you can't know something, call documents.searchMemory if it is available; ingested documents and policies live there.
@@ -532,7 +532,11 @@ func (h *chatSessionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		turnID = fmt.Sprintf("t%d", time.Now().UnixNano())
 		h.logError("Go chat failed to generate a turn id", sessionID, turnIDErr)
 	}
-	userEvent := map[string]any{"text": body.message, "turnId": turnID}
+	// Facts are read before the model runs so current approvals and
+	// notifications are guaranteed context, not something the model must
+	// remember to fetch.
+	turnFacts := h.turnFacts(r.Context(), resolved)
+	userEvent := map[string]any{"text": body.message, "turnId": turnID, "facts": turnFacts.Summary()}
 	if len(body.attachments) > 0 {
 		userEvent["attachments"] = body.attachments
 	}
@@ -560,7 +564,7 @@ func (h *chatSessionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		orgID:                *resolved.OrgID,
 		sessionID:            sessionID,
 		turnID:               turnID,
-		systemPrompt:         chatSystemPrompt(orgName, soul, wantsCreator),
+		systemPrompt:         chatSystemPrompt(orgName, soul, wantsCreator) + "\n\n" + agentturn.RenderFacts(turnFacts),
 		history:              history,
 		userGoal:             chatGoalWithAttachments(body.message, body.attachments),
 		maxSteps:             chatDefaultMaxSteps,
@@ -592,7 +596,7 @@ func (h *chatSessionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return queued
 		},
 		onDelta: func(text string) {
-			writer.write(map[string]any{"type": "delta", "text": text})
+			writer.write(map[string]any{"type": "delta", "text": agentturn.Sanitize(text)})
 		},
 		onEvent: func(role string, content map[string]any) {
 			h.handleChatLoopEvent(writer, *resolved.OrgID, sessionID, turnID, role, content)
@@ -612,7 +616,19 @@ func (h *chatSessionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writer.write(map[string]any{"type": "error", "error": chatLoopErrorMessage(err)})
 		return
 	}
-	if err := h.appendChatEvent(r.Context(), *resolved.OrgID, sessionID, "assistant", map[string]any{"text": result.finalMessage, "turnId": turnID}); err != nil {
+	// The model's prose is not the source of truth for what happened; the
+	// executor's effects are. Enforcement corrects an answer that reports a
+	// gated action as done or silently drops a failed material step.
+	enforced := agentturn.Enforce(result.finalMessage, chatAgentEffects(result.effects))
+	finalMessage := enforced.Text
+	if len(enforced.Violations) > 0 && h.logger != nil {
+		h.logger.Warn("workmate turn obligations were enforced", "sessionId", sessionID, "violations", len(enforced.Violations))
+	}
+	assistantEvent := map[string]any{"text": finalMessage, "turnId": turnID}
+	if len(enforced.Violations) > 0 {
+		assistantEvent["corrected"] = len(enforced.Violations)
+	}
+	if err := h.appendChatEvent(r.Context(), *resolved.OrgID, sessionID, "assistant", assistantEvent); err != nil {
 		h.logError("Go chat failed to persist the assistant event", sessionID, err)
 	}
 	cumulative, err := h.store.AddUsage(r.Context(), *resolved.OrgID, sessionID, result.usage)
@@ -622,7 +638,7 @@ func (h *chatSessionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writer.write(map[string]any{
-		"type": "done", "sessionId": sessionID, "reply": result.finalMessage,
+		"type": "done", "sessionId": sessionID, "reply": finalMessage,
 		"usage": map[string]any{"turn": result.usage, "session": cumulative},
 	})
 }
@@ -636,6 +652,60 @@ func chatGoalWithAttachments(message string, attachments []chatAttachment) strin
 		lines = append(lines, "- "+attachment.Type+": "+attachment.Title+" (id "+attachment.ID+")")
 	}
 	return message + "\n\nAttached sources. Use these exact records first; do not invent ids or assume access the person does not have:\n" + strings.Join(lines, "\n")
+}
+
+const chatTurnFactsTimeout = 3 * time.Second
+
+// turnFacts reads the state every turn needs before the model is asked
+// anything. A failed read is passed on as an error so the facts block says
+// unknown; rendering it as zero would let the model claim nothing is waiting
+// when the inbox was never read.
+func (h *chatSessionHandler) turnFacts(ctx context.Context, user *session.ResolvedUser) agentturn.Facts {
+	input := agentturn.FactInput{Now: time.Now().UTC()}
+	if h == nil || user == nil || user.OrgID == nil {
+		input.ApprovalsErr = "no signed-in workspace"
+		input.NotificationsErr = "no signed-in workspace"
+		return agentturn.CompileFacts(input)
+	}
+	readCtx, cancel := context.WithTimeout(ctx, chatTurnFactsTimeout)
+	defer cancel()
+	if h.approvals != nil {
+		if payload, ok, message := h.approvalsInbox(readCtx, user); ok {
+			input.ApprovalsPayload = payload
+		} else {
+			input.ApprovalsErr = message
+		}
+	} else {
+		input.ApprovalsErr = "approvals are unavailable"
+	}
+	if h.notifications != nil {
+		if payload, ok, message := h.notificationsInbox(readCtx, user); ok {
+			input.NotificationsPayload = payload
+		} else {
+			input.NotificationsErr = message
+		}
+	} else {
+		input.NotificationsErr = "notifications are unavailable"
+	}
+	return agentturn.CompileFacts(input)
+}
+
+func chatAgentEffects(effects []chatEffect) []agentturn.Effect {
+	if len(effects) == 0 {
+		return nil
+	}
+	converted := make([]agentturn.Effect, 0, len(effects))
+	for _, effect := range effects {
+		converted = append(converted, agentturn.Effect{
+			CapabilityID:    effect.capabilityID,
+			Risk:            effect.risk,
+			OK:              effect.ok,
+			PendingApproval: effect.pending,
+			ApprovalID:      effect.approvalID,
+			Error:           effect.err,
+		})
+	}
+	return converted
 }
 
 // handleChatLoopEvent maps kernel loop events onto the NDJSON protocol and the

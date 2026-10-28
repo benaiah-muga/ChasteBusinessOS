@@ -107,6 +107,22 @@ describe("chat store", () => {
     await vi.waitFor(() => expect(chatStore.getState().busy).toBe(false));
   });
 
+  it("adopts the server's authoritative final reply when it corrects the stream", async () => {
+    const { streams } = harness();
+    void chatStore.send("Invoice Acme.");
+    await vi.waitFor(() => expect(streams).toHaveLength(1));
+
+    streams[0]!.push('{"type":"delta","text":"Invoice created and sent."}\n');
+    streams[0]!.push('{"type":"done","reply":"Invoice created and sent.\\n\\nNot done yet: accounting.createInvoice is waiting for your approval (approval id appr-1). Nothing has changed until you approve or reject it."}\n');
+    streams[0]!.close();
+
+    await vi.waitFor(() => expect(chatStore.getState().busy).toBe(false));
+    const text = lastAssistant().text;
+    expect(text).toContain("Invoice created and sent.");
+    expect(text).toContain("waiting for your approval");
+    expect(text).toContain("Nothing has changed");
+  });
+
   it("steers a message into the running turn without disturbing the stream", async () => {
     const { steerRequests, streams } = harness();
     void chatStore.send("Draft an invoice.");

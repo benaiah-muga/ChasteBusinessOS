@@ -41,6 +41,19 @@ const (
 type chatLoopResult struct {
 	finalMessage string
 	usage        chatUsage
+	// effects are the executor's verdicts, not the model's description of
+	// them, so the handler can verify the answer against what actually ran.
+	effects []chatEffect
+}
+
+// chatEffect is one capability execution the turn can be held to.
+type chatEffect struct {
+	capabilityID string
+	risk         string
+	ok           bool
+	pending      bool
+	approvalID   string
+	err          string
 }
 
 type chatLoopDeps struct {
@@ -182,6 +195,12 @@ func runChatSessionLoop(ctx context.Context, deps chatLoopDeps) (chatLoopResult,
 			if spec, known := deps.capabilityByToolName[call.Name]; known {
 				capabilityID = spec.ID
 			}
+			effectCapabilityID, effectRisk := "", ""
+			if spec, known := deps.capabilityByToolName[call.Name]; known {
+				effectCapabilityID, effectRisk = spec.ID, spec.Risk
+			} else if capabilityID == "capability_invoke" {
+				effectCapabilityID, effectRisk = chatInvokedEffect(user.Permissions, call)
+			}
 			var (
 				toolResult   string
 				ok           bool
@@ -234,6 +253,17 @@ func runChatSessionLoop(ctx context.Context, deps chatLoopDeps) (chatLoopResult,
 				lastToolResult = toolResult
 				lastToolOK = ok
 			}
+			if effectCapabilityID != "" {
+				effect := chatEffect{capabilityID: effectCapabilityID, risk: effectRisk, ok: ok, err: errorMessage}
+				if !ok {
+					var refusal chatToolRefusal
+					if json.Unmarshal([]byte(toolResult), &refusal) == nil {
+						effect.pending = refusal.PendingApproval
+						effect.approvalID = refusal.ApprovalID
+					}
+				}
+				result.effects = append(result.effects, effect)
+			}
 			// The kernel emits tool_result only for executor calls; the ticket
 			// and ask paths are covered by their own persisted events.
 			if emitResult && deps.onEvent != nil {
@@ -276,6 +306,26 @@ func runChatSessionLoop(ctx context.Context, deps chatLoopDeps) (chatLoopResult,
 		}
 	}
 	return result, nil
+}
+
+// chatInvokedEffect resolves the capability a generic capability_invoke call
+// actually ran. An invocation the user may not make still returns a material
+// failure, so it keeps a write risk instead of being dropped from the record.
+func chatInvokedEffect(permissions map[string]bool, call chatToolCall) (string, string) {
+	var invoked struct {
+		CapabilityID string `json:"capabilityId"`
+	}
+	if json.Unmarshal(call.Arguments, &invoked) != nil {
+		return "", ""
+	}
+	capabilityID := strings.TrimSpace(invoked.CapabilityID)
+	if capabilityID == "" {
+		return "", ""
+	}
+	if spec, ok := capability.AgentCapabilityByID(permissions, capabilityID); ok {
+		return spec.ID, spec.Risk
+	}
+	return capabilityID, "write"
 }
 
 func chatToolResultCard(toolResult string) json.RawMessage {

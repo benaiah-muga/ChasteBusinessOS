@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -473,6 +474,117 @@ func TestChatSessionHandlerCreatorGateAndAddendum(t *testing.T) {
 			t.Fatalf("system prompt missing creator addendum: %q", system)
 		}
 	})
+}
+
+func TestChatSessionHandlerTurnContract(t *testing.T) {
+	resolved := chatTestIdentity()
+	resolved.Permissions = map[string]bool{"*": true}
+	provider := &scriptedChatProvider{turns: []chatTurn{
+		{toolCalls: []chatToolCall{{
+			ID:        "call_1",
+			Name:      "accounting_createInvoice",
+			Arguments: json.RawMessage(`{"customerId":"44444444-4444-4444-8444-444444444444","lines":[]}`),
+		}}},
+		{message: "Invoice created and sent to Acme. \u2014 done."},
+	}}
+	suite := newChatTestSuite(t, chatTestHandlerOptions{provider: provider, resolved: resolved})
+	suite.executor.results = []capability.Result{{OK: false, PendingApproval: true, ApprovalID: "appr-1", Error: "pending human approval"}}
+	suite.handler.approvals = &fakeApprovalInboxReader{response: ApprovalInboxResponse{Approvals: []ApprovalInboxRow{{
+		ID:           "appr-2",
+		CapabilityID: "accounting.createInvoice",
+		RiskClass:    "money",
+		Status:       "pending",
+		CreatedAt:    time.Now().Add(-2 * time.Hour).UTC().Format(time.RFC3339),
+		RaisedBy:     RaisedBy{Name: "Workmate", Kind: "agent"},
+	}}}}
+
+	recorder := httptest.NewRecorder()
+	suite.handler.ServeHTTP(recorder, defaultCookieChatRequest(t, `{"message":"Create an invoice for Acme"}`))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+
+	system := provider.callMessages(0)[0].Content
+	if !strings.Contains(system, "<turn_facts>") || !strings.Contains(system, "pendingApprovals: 1") {
+		t.Fatalf("the model was not given the turn facts: %q", system)
+	}
+	if !strings.Contains(system, "accounting.createInvoice (money)") {
+		t.Fatalf("the pending approval was not in the facts: %q", system)
+	}
+
+	events := decodeChatNDJSON(t, recorder)
+	var reply string
+	for _, event := range events {
+		if text, ok := event["text"].(string); ok && event["type"] == "delta" {
+			if strings.ContainsAny(text, "\u2014\u2013") {
+				t.Fatalf("a streamed delta carried a forbidden dash: %q", text)
+			}
+		}
+		if event["type"] == "done" {
+			reply, _ = event["reply"].(string)
+		}
+	}
+	if !strings.Contains(reply, "Not done yet: accounting.createInvoice is waiting for your approval (approval id appr-1).") {
+		t.Fatalf("reply did not surface the pending approval: %q", reply)
+	}
+	if strings.ContainsAny(reply, "\u2014\u2013") {
+		t.Fatalf("reply carried a forbidden dash: %q", reply)
+	}
+
+	persisted := suite.store.recordedEvents()
+	var assistant map[string]any
+	var userFacts map[string]any
+	for _, event := range persisted {
+		if event.role == "assistant" {
+			assistant = event.content
+		}
+		if event.role == "user" {
+			if facts, ok := event.content["facts"].(map[string]any); ok {
+				userFacts = facts
+			}
+		}
+	}
+	if assistant["text"] != reply {
+		t.Fatalf("stored assistant text=%v want %q", assistant["text"], reply)
+	}
+	if fmt.Sprint(assistant["corrected"]) != "2" {
+		t.Fatalf("expected two corrections (dash and pending approval), got %v", assistant["corrected"])
+	}
+	if userFacts == nil || fmt.Sprint(userFacts["pendingApprovals"]) != "1" {
+		t.Fatalf("the turn facts were not persisted with the user event: %v", userFacts)
+	}
+}
+
+func TestChatSystemPromptDropsEnforcedRules(t *testing.T) {
+	prompt := chatSystemPrompt("Test Org", nil, false)
+	for _, obsolete := range []string{
+		"call approvals_inbox first",
+		`For "what notifications do I have"`,
+		"A signal is a recommendation, not a pending decision",
+	} {
+		if strings.Contains(prompt, obsolete) {
+			t.Fatalf("prompt still carries the rule code now enforces: %q", obsolete)
+		}
+	}
+	if !strings.Contains(prompt, "<turn_facts>") || !strings.Contains(prompt, "pendingApproval: true") {
+		t.Fatalf("prompt lost the facts and gate guidance: %q", prompt)
+	}
+	bulletCount := 0
+	rules, style, found := strings.Cut(prompt, "Writing style:")
+	if !found {
+		t.Fatalf("prompt lost its writing style section: %q", prompt)
+	}
+	for _, line := range strings.Split(rules, "\n") {
+		if strings.HasPrefix(line, "- ") {
+			bulletCount++
+		}
+	}
+	if bulletCount > 18 {
+		t.Fatalf("prompt grew to %d rules; enforceable rules must leave the prompt", bulletCount)
+	}
+	if !strings.Contains(style, "Never use em dashes or en dashes") {
+		t.Fatalf("writing style lost the dash rule: %q", style)
+	}
 }
 
 func TestChatSessionHandlerStubsCodingPlanConnections(t *testing.T) {

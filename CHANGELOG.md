@@ -13,6 +13,10 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Added
 
+- Every Workmate turn now starts with a code-computed `<turn_facts>` block: read time, pending approvals with capability, risk class, rationale, raiser, age, and approval id, and the unread notification count with its latest title. A read that fails renders as unknown, never as zero, so the assistant can no longer claim nothing is waiting when the inbox was never read.
+- Workmate records one effect per capability execution from the executor's verdict and verifies the final answer against it. A pending approval the answer omitted gains an explicit notice, a failed material action the answer skipped gains the executor's error and a no-change statement, and dash characters are rewritten to allowed punctuation in both the stream and the stored text. Each correction is counted on the stored assistant event and logged.
+- The turn facts digest (read time, pending approval ids, unread count) is stored on the user event, so session replay shows the context the model was given.
+
 - Quote-to-cash is now one continuous governed path: quote lines can carry a catalogue SKU, `sales.createOrderFromQuote` awards a sent quote into a draft sales order with the same lines, `sales.confirmOrder` checks credit and reserves stock, `sales.deliverOrder` invoices what shipped, and the invoice points back to its order. Cancelling an untouched order returns its source quote to sent, so the award has a complete inverse.
 - The Inbox now keeps business exceptions: acknowledge, take ownership of, resolve, and reopen a signal through the persisted operational record path. A saved exception whose signal stops firing stays visible as no longer detected until a person resolves it, and a resolved condition that still fires can be reopened.
 - New deterministic exception producers cover purchase orders past their promised date, overdue supplier bills, expense claims at least three times the category median with at least three settled claims of history, and parsed documents with open coding suggestions that have waited more than two days for review.
@@ -156,6 +160,8 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- The Workmate client now treats the `done` reply as authoritative and replaces streamed text with it. A deterministic correction or an appended approval notice is what the person sees, and it matches the stored transcript.
+- Three long approval and notification rules left the Workmate system prompt. The facts block and post-turn enforcement now guarantee that behavior, so the prompt carries phrasing guidance instead of rules the runtime can enforce.
 - `accounting.acceptQuote` remains available for deliberate invoice-first service work, but the Sales workspace now presents "Create sales order" as the primary action and labels invoice-first as "Invoice immediately" so shipped goods do not silently skip credit, stock reservation, and fulfilment.
 - Sales order reads include their source quote, delivery invoices link to their order, and the Sales workspace shows the quote an order came from.
 - The capability manifest and agent catalog now carry the SKU-aware quote contract, the document-aware bill contract, and the new quote-to-order capability.
