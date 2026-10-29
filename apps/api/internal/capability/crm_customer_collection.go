@@ -3,6 +3,7 @@ package capability
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -11,11 +12,31 @@ import (
 
 type ListCRMCustomerCollectionInput struct{}
 
+type GetCRMCustomerProfileInput struct {
+	CustomerID string `json:"customerId"`
+}
+
+type CRMCustomerProfileOutput struct {
+	Customer CRMCustomerCollectionItem `json:"customer"`
+}
+
 func ParseListCRMCustomerCollectionInput(raw json.RawMessage) (ListCRMCustomerCollectionInput, error) {
 	if _, err := decodeJSONObject(raw); err != nil {
 		return ListCRMCustomerCollectionInput{}, err
 	}
 	return ListCRMCustomerCollectionInput{}, nil
+}
+
+func ParseGetCRMCustomerProfileInput(raw json.RawMessage) (GetCRMCustomerProfileInput, error) {
+	fields, err := decodeJSONObject(raw)
+	if err != nil {
+		return GetCRMCustomerProfileInput{}, err
+	}
+	customerID, err := requiredCRMDealString(fields, "customerId", 0, 0)
+	if err != nil || !isZodUUID(customerID) {
+		return GetCRMCustomerProfileInput{}, errors.New("customerId must be a UUID")
+	}
+	return GetCRMCustomerProfileInput{CustomerID: customerID}, nil
 }
 
 type crmCustomerRow struct {
@@ -25,6 +46,21 @@ type crmCustomerRow struct {
 }
 
 func listCRMCustomerCollection(ctx context.Context, tx pgx.Tx, orgID string, _ ListCRMCustomerCollectionInput, now time.Time) (ListCRMCustomerCollectionOutput, error) {
+	return readCRMCustomerCollection(ctx, tx, orgID, nil, now)
+}
+
+func getCRMCustomerProfile(ctx context.Context, tx pgx.Tx, orgID string, input GetCRMCustomerProfileInput, now time.Time) (CRMCustomerProfileOutput, error) {
+	output, err := readCRMCustomerCollection(ctx, tx, orgID, &input.CustomerID, now)
+	if err != nil {
+		return CRMCustomerProfileOutput{}, err
+	}
+	if len(output.Customers) == 0 {
+		return CRMCustomerProfileOutput{}, errors.New("customer not found")
+	}
+	return CRMCustomerProfileOutput{Customer: output.Customers[0]}, nil
+}
+
+func readCRMCustomerCollection(ctx context.Context, tx pgx.Tx, orgID string, customerID *string, now time.Time) (ListCRMCustomerCollectionOutput, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT c.id::text, c.name, c.email, c.owner_user_id::text, owner.name, owner.email,
 			c.phone, c.preferred_contact_method, c.do_not_contact,
@@ -36,8 +72,9 @@ func listCRMCustomerCollection(ctx context.Context, tx pgx.Tx, orgID string, _ L
 		LEFT JOIN memberships editor_membership ON editor_membership.org_id = c.org_id AND editor_membership.user_id = c.updated_by_user_id
 		LEFT JOIN users editor ON editor.id = editor_membership.user_id
 		WHERE c.org_id = $1::uuid AND c.merged_into_customer_id IS NULL
+		  AND ($2::uuid IS NULL OR c.id = $2::uuid)
 		ORDER BY c.name
-		LIMIT 500`, orgID)
+		LIMIT 500`, orgID, customerID)
 	if err != nil {
 		return ListCRMCustomerCollectionOutput{}, err
 	}
@@ -83,7 +120,8 @@ func listCRMCustomerCollection(ctx context.Context, tx pgx.Tx, orgID string, _ L
 		SELECT id::text, name, merged_into_customer_id::text, merged_at
 		FROM customers
 		WHERE org_id = $1::uuid AND merged_into_customer_id IS NOT NULL
-		ORDER BY name`, orgID)
+		  AND ($2::uuid IS NULL OR merged_into_customer_id = $2::uuid)
+		ORDER BY name`, orgID, customerID)
 	if err != nil {
 		return ListCRMCustomerCollectionOutput{}, err
 	}
@@ -108,13 +146,13 @@ func listCRMCustomerCollection(ctx context.Context, tx pgx.Tx, orgID string, _ L
 	}
 	mergedRows.Close()
 
-	if err := readCRMCustomerPurchaseStats(ctx, tx, orgID, canonicalCustomerID, customers); err != nil {
+	if err := readCRMCustomerPurchaseStats(ctx, tx, orgID, customerID, canonicalCustomerID, customers); err != nil {
 		return ListCRMCustomerCollectionOutput{}, err
 	}
-	if err := readCRMCustomerActivity(ctx, tx, orgID, canonicalCustomerID, customers); err != nil {
+	if err := readCRMCustomerActivity(ctx, tx, orgID, customerID, canonicalCustomerID, customers); err != nil {
 		return ListCRMCustomerCollectionOutput{}, err
 	}
-	if err := readCRMCustomerNextSteps(ctx, tx, orgID, canonicalCustomerID, now, customers); err != nil {
+	if err := readCRMCustomerNextSteps(ctx, tx, orgID, customerID, canonicalCustomerID, now, customers); err != nil {
 		return ListCRMCustomerCollectionOutput{}, err
 	}
 	for i := range customers {
@@ -129,13 +167,16 @@ func listCRMCustomerCollection(ctx context.Context, tx pgx.Tx, orgID string, _ L
 	return output, nil
 }
 
-func readCRMCustomerPurchaseStats(ctx context.Context, tx pgx.Tx, orgID string, aliases map[string]string, customers []crmCustomerRow) error {
+func readCRMCustomerPurchaseStats(ctx context.Context, tx pgx.Tx, orgID string, customerID *string, aliases map[string]string, customers []crmCustomerRow) error {
 	rows, err := tx.Query(ctx, `
 		SELECT customer_id::text, count(*)::bigint,
 			COALESCE(sum(total_minor - credited_minor), 0)::bigint
 		FROM invoices
 		WHERE org_id = $1::uuid AND pos_session_id IS NOT NULL AND customer_id IS NOT NULL
-		GROUP BY customer_id`, orgID)
+		  AND ($2::uuid IS NULL OR customer_id = $2::uuid OR customer_id IN (
+		      SELECT id FROM customers WHERE org_id = $1::uuid AND merged_into_customer_id = $2::uuid
+		  ))
+		GROUP BY customer_id`, orgID, customerID)
 	if err != nil {
 		return err
 	}
@@ -163,7 +204,7 @@ func readCRMCustomerPurchaseStats(ctx context.Context, tx pgx.Tx, orgID string, 
 	return err
 }
 
-func readCRMCustomerActivity(ctx context.Context, tx pgx.Tx, orgID string, aliases map[string]string, customers []crmCustomerRow) error {
+func readCRMCustomerActivity(ctx context.Context, tx pgx.Tx, orgID string, customerID *string, aliases map[string]string, customers []crmCustomerRow) error {
 	rows, err := tx.Query(ctx, `
 		WITH activity AS (
 			SELECT customer_id, max(updated_at) AS activity_at FROM deals
@@ -191,10 +232,11 @@ func readCRMCustomerActivity(ctx context.Context, tx pgx.Tx, orgID string, alias
 			FROM activity a
 			LEFT JOIN customers c ON c.id = a.customer_id AND c.org_id = $1::uuid
 			WHERE a.activity_at IS NOT NULL
+		  AND ($2::uuid IS NULL OR COALESCE(c.merged_into_customer_id, a.customer_id) = $2::uuid)
 		)
 		SELECT customer_id::text, max(activity_at)
 		FROM canonical_activity
-		GROUP BY customer_id`, orgID)
+		GROUP BY customer_id`, orgID, customerID)
 	if err != nil {
 		return err
 	}
@@ -227,7 +269,7 @@ type crmCustomerNextStepCandidate struct {
 	at   time.Time
 }
 
-func readCRMCustomerNextSteps(ctx context.Context, tx pgx.Tx, orgID string, aliases map[string]string, now time.Time, customers []crmCustomerRow) error {
+func readCRMCustomerNextSteps(ctx context.Context, tx pgx.Tx, orgID string, customerID *string, aliases map[string]string, now time.Time, customers []crmCustomerRow) error {
 	indexes := make(map[string]int, len(customers))
 	best := make(map[string]crmCustomerNextStepCandidate)
 	for i := range customers {
@@ -250,8 +292,11 @@ func readCRMCustomerNextSteps(ctx context.Context, tx pgx.Tx, orgID string, alia
 		SELECT id::text, customer_id::text, number, total_minor, paid_minor, credited_minor, due_at
 		FROM invoices
 		WHERE org_id = $1::uuid AND status = 'sent' AND due_at IS NOT NULL AND due_at < $2
+		  AND ($3::uuid IS NULL OR customer_id = $3::uuid OR customer_id IN (
+		      SELECT id FROM customers WHERE org_id = $1::uuid AND merged_into_customer_id = $3::uuid
+		  ))
 		ORDER BY due_at
-		LIMIT 2000`, orgID, now)
+		LIMIT 2000`, orgID, now, customerID)
 	if err != nil {
 		return err
 	}
@@ -287,8 +332,11 @@ func readCRMCustomerNextSteps(ctx context.Context, tx pgx.Tx, orgID string, alia
 		FROM tasks
 		WHERE org_id = $1::uuid AND ref_type = 'customer' AND done_at IS NULL AND ref_id IS NOT NULL
 			AND due_at IS NOT NULL AND due_at <= $2
+		  AND ($3::uuid IS NULL OR ref_id = $3::uuid OR ref_id IN (
+		      SELECT id FROM customers WHERE org_id = $1::uuid AND merged_into_customer_id = $3::uuid
+		  ))
 		ORDER BY due_at
-		LIMIT 2000`, orgID, todayEnd)
+		LIMIT 2000`, orgID, todayEnd, customerID)
 	if err != nil {
 		return err
 	}
@@ -320,8 +368,11 @@ func readCRMCustomerNextSteps(ctx context.Context, tx pgx.Tx, orgID string, alia
 		SELECT id::text, customer_id::text, number, created_at
 		FROM quotes
 		WHERE org_id = $1::uuid AND status = 'sent' AND created_at < $2
+		  AND ($3::uuid IS NULL OR customer_id = $3::uuid OR customer_id IN (
+		      SELECT id FROM customers WHERE org_id = $1::uuid AND merged_into_customer_id = $3::uuid
+		  ))
 		ORDER BY created_at
-		LIMIT 2000`, orgID, quoteBoundary)
+		LIMIT 2000`, orgID, quoteBoundary, customerID)
 	if err != nil {
 		return err
 	}

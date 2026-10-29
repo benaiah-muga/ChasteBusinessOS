@@ -1724,6 +1724,24 @@
         ],
         "additionalProperties": false
       }
+    },
+    {
+      "id": "crm.getCustomerProfile",
+      "description": "Read one customer's CRM profile: name, contact details, owner, tags, notes, active or deactivated status, merged records, last activity, purchase count, and lifetime POS spend in minor units. Use it when a person asks what the business knows about a customer and you already have the customer id.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "customerId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Customer UUID from crm.listCustomers or resolve_entity."
+          }
+        },
+        "required": [
+          "customerId"
+        ],
+        "additionalProperties": false
+      }
     }
   ]
 }

@@ -57,8 +57,8 @@ var chatToolGroups = []chatToolGroup{
 		"inventory.createItem", "inventory.adjustStock", "inventory.stockReport", "inventory.itemHistory",
 		"inventory.listLots", "inventory.listLocations", "inventory.replenishmentPlan", "analytics.stockLevels",
 	}},
-	{keywords: []string{"customer", "deal", "pipeline", "crm", "lead", "contact", "saved view", "saved-view", "customer view"}, ids: []string{
-		"crm.listCustomers", "crm.listCustomerViews", "crm.customerTimeline", "crm.createCustomer", "crm.listDeals", "crm.pipelineReport", "analytics.salesByCustomer",
+	{keywords: []string{"customer", "deal", "pipeline", "crm", "lead", "contact", "saved view", "saved-view", "customer view", "profile", "tags", "notes", "owner"}, ids: []string{
+		"crm.listCustomers", "crm.getCustomerProfile", "crm.listCustomerViews", "crm.customerTimeline", "crm.createCustomer", "crm.listDeals", "crm.pipelineReport", "analytics.salesByCustomer",
 	}},
 	{keywords: []string{"task", "follow up", "follow-up"}, ids: []string{
 		"crm.listTasks", "crm.createTask", "crm.completeTask",

@@ -36,6 +36,7 @@ const (
 	restoreCustomerProfilesCapabilityID     = "crm.restoreCustomerProfiles"
 	reapplyCustomerProfilesCapabilityID     = "crm.reapplyCustomerProfiles"
 	listCustomersCapabilityID               = "crm.listCustomers"
+	crmGetCustomerProfileCapabilityID       = "crm.getCustomerProfile"
 	listCRMCustomerCollectionCapabilityID   = "crm.listCustomerCollection"
 	listCustomerViewsCapabilityID           = "crm.listCustomerViews"
 	listDealsCapabilityID                   = "crm.listDeals"
@@ -95,19 +96,25 @@ type inverseFieldMapping struct {
 }
 
 var capabilitySpecs = map[string]capabilitySpec{
-	createCustomerCapabilityID:            {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.deactivateCustomer"},
-	saveCustomerViewCapabilityID:          {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreCustomerView"},
-	restoreCustomerViewCapabilityID:       {module: "crm", permission: "crm.write", risk: "write"},
-	deactivateCustomerCapabilityID:        {module: "crm", permission: "crm.write", risk: "write"},
-	mergeCustomersCapabilityID:            {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreCustomerMerge"},
-	restoreCustomerMergeCapabilityID:      {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.mergeCustomers"},
-	importCustomersCapabilityID:           {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.undoCustomerImport"},
-	undoCustomerImportCapabilityID:        {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreImportedCustomers"},
-	restoreImportedCustomersCapabilityID:  {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.undoCustomerImport"},
-	updateCustomerProfilesCapabilityID:    {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreCustomerProfiles"},
-	restoreCustomerProfilesCapabilityID:   {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.reapplyCustomerProfiles"},
-	reapplyCustomerProfilesCapabilityID:   {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreCustomerProfiles"},
-	listCustomersCapabilityID:             {module: "crm", permission: "crm.read", risk: "read"},
+	createCustomerCapabilityID:           {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.deactivateCustomer"},
+	saveCustomerViewCapabilityID:         {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreCustomerView"},
+	restoreCustomerViewCapabilityID:      {module: "crm", permission: "crm.write", risk: "write"},
+	deactivateCustomerCapabilityID:       {module: "crm", permission: "crm.write", risk: "write"},
+	mergeCustomersCapabilityID:           {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreCustomerMerge"},
+	restoreCustomerMergeCapabilityID:     {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.mergeCustomers"},
+	importCustomersCapabilityID:          {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.undoCustomerImport"},
+	undoCustomerImportCapabilityID:       {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreImportedCustomers"},
+	restoreImportedCustomersCapabilityID: {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.undoCustomerImport"},
+	updateCustomerProfilesCapabilityID:   {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreCustomerProfiles"},
+	restoreCustomerProfilesCapabilityID:  {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.reapplyCustomerProfiles"},
+	reapplyCustomerProfilesCapabilityID:  {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreCustomerProfiles"},
+	listCustomersCapabilityID:            {module: "crm", permission: "crm.read", risk: "read"},
+	crmGetCustomerProfileCapabilityID: {
+		module: "crm", permission: "crm.read", risk: "read",
+		title:       "Read customer profile",
+		intent:      "Read one customer's CRM profile: name, contact details, owner, tags, notes, status, merged records, last activity, purchase count, and lifetime POS spend in minor units. Use it when a person asks what the business knows about a customer and you already have the customer id.",
+		inputSchema: `{"type":"object","properties":{"customerId":{"type":"string","format":"uuid","description":"Customer UUID from crm.listCustomers or resolve_entity."}},"required":["customerId"],"additionalProperties":false}`,
+	},
 	listCRMCustomerCollectionCapabilityID: {module: "crm", permission: "crm.read", risk: "read", humanOnly: true},
 	listCustomerViewsCapabilityID:         {module: "crm", permission: "crm.read", risk: "read"},
 	listDealsCapabilityID:                 {module: "crm", permission: "crm.read", risk: "read"},
@@ -531,7 +538,7 @@ func supportedCapability(capabilityID string) bool {
 		mergeCustomersCapabilityID, restoreCustomerMergeCapabilityID, importCustomersCapabilityID,
 		undoCustomerImportCapabilityID, restoreImportedCustomersCapabilityID,
 		updateCustomerProfilesCapabilityID, restoreCustomerProfilesCapabilityID, reapplyCustomerProfilesCapabilityID,
-		listCustomersCapabilityID, listCRMCustomerCollectionCapabilityID, listCustomerViewsCapabilityID, listDealsCapabilityID, documentsListDocsCapabilityID, documentsListIngestedCapabilityID,
+		listCustomersCapabilityID, crmGetCustomerProfileCapabilityID, listCRMCustomerCollectionCapabilityID, listCustomerViewsCapabilityID, listDealsCapabilityID, documentsListDocsCapabilityID, documentsListIngestedCapabilityID,
 		documentsListDocVersionsCapabilityID, documentsGetDocVersionCapabilityID,
 		pipelineReportCapabilityID, listTasksCapabilityID, customerTimelineCapabilityID,
 		createDealCapabilityID, moveDealStageCapabilityID, convertLeadCapabilityID, undoLeadConversionCapabilityID, reapplyLeadConversionCapabilityID,
@@ -919,6 +926,12 @@ func (e *Executor) executeWithFinalizer(
 			input = parsed
 		case listCustomersCapabilityID:
 			parsed, err := ParseListCustomersInput(rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case crmGetCustomerProfileCapabilityID:
+			parsed, err := ParseGetCRMCustomerProfileInput(rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
@@ -2094,6 +2107,12 @@ func (e *Executor) executeWithFinalizer(
 			data, err = marshalJS(output)
 		case RestoreCustomerViewInput:
 			output, err := restoreCustomerView(ctx, tx, claims, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case GetCRMCustomerProfileInput:
+			output, err := getCRMCustomerProfile(ctx, tx, claims.OrganizationID, parsed, now)
 			if err != nil {
 				return Result{}, err
 			}
@@ -3858,7 +3877,7 @@ func canonicalInputHash(input any) (string, error) {
 		CreatorInstallListingInput, CreatorListMarketplaceInput, CreatorStageCandidateInput,
 		CreatorPromoteCandidateInput, CreatorRollbackCandidateInput, CreatorRecordCanaryOutcomeInput:
 		return canonicalHash(parsed)
-	case ListCustomersInput, ListCRMCustomerCollectionInput, ListCustomerViewsInput, ListDealsInput, PipelineReportInput, ListTasksInput, CustomerTimelineInput,
+	case ListCustomersInput, GetCRMCustomerProfileInput, ListCRMCustomerCollectionInput, ListCustomerViewsInput, ListDealsInput, PipelineReportInput, ListTasksInput, CustomerTimelineInput,
 		ListAuthoredDocsInput, IngestedDocumentsInput, ListDocumentVersionsInput, DocumentVersionIDInput,
 		CreateDealInput, MoveDealStageInput, ConvertLeadInput, UndoLeadConversionInput, ReapplyLeadConversionInput,
 		CreateTaskInput, CompleteTaskInput, UpdateTaskDetailsInput,

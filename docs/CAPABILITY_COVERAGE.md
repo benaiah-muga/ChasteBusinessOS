@@ -28,6 +28,7 @@ go test ./internal/capability -run 'TestEveryCapability|TestEveryVisible|TestPro
 | No test prevented human-only business actions from silently losing agent parity | `TestEveryCapabilityIsDiscoverableOrReviewedHidden` requires every exception to be reviewed, and every visible capability to resolve with a useful contract. |
 | The organization agent persona (`agent_soul`) was an admin write outside the kernel | It is now the governed `iam.setAgentSoul` capability with an audit event, an `iam.restoreAgentSoul` inverse, and a direct agent tool. |
 | The agent could not read the approval policy it operates under | `iam.getOrgPolicy` returns the autonomy ceiling, money threshold, and always-approval risk classes with an audit event. |
+| The rich CRM customer profile was human-only | `crm.getCustomerProfile` returns one customer's tags, notes, owner, lifetime POS spend, purchase count, merged records, and last activity. The 500-row collection stays human-only. |
 | A module could be added to the switchboard without a capability | `TestEveryInstalledModuleHasCapabilities` requires every installed module to have a supported, agent-visible capability. |
 | Direct HTTP writes could grow silently | `TestDirectHTTPWritesAreReviewedExceptions` lists every HTTP-layer file that writes to PostgreSQL outside the executor, with its reason, and fails on a new one. |
 | Workmate lost the thread on reload and Agent runs could only replay | Workmate resumes from `?session=`, persists the active session per organization and user, rebuilds the transcript, and exposes Continue links from Agent runs and the recent list. |
@@ -46,7 +47,7 @@ of the catalog.
 | accounting | 73 | 73 | 0 | 0 | 73 | 16 |
 | analytics | 8 | 8 | 0 | 0 | 8 | 7 |
 | creator | 15 | 14 | 1 | 0 | 14 | 1 |
-| crm | 28 | 27 | 1 | 0 | 27 | 10 |
+| crm | 29 | 28 | 1 | 0 | 28 | 11 |
 | documents | 29 | 29 | 0 | 0 | 29 | 4 |
 | harness | 1 | 1 | 0 | 0 | 1 | 0 |
 | hr | 26 | 26 | 0 | 0 | 26 | 6 |
@@ -67,7 +68,7 @@ of the catalog.
 | skills | 2 | 2 | 0 | 0 | 2 | 2 |
 | support | 18 | 16 | 0 | 2 | 16 | 5 |
 
-The matrix counts 368 supported capabilities. `iam.bootstrapOrganization` is a
+The matrix counts 370 supported capabilities. `iam.bootstrapOrganization` is a
 pre-organization capability and is intentionally outside the organization
 executor, so it is not included.
 
@@ -75,8 +76,9 @@ executor, so it is not included.
 
 `humanOnly`:
 
-- `crm.listCustomerCollection`: the CRM page's rich 500-row profile collection.
-  Agents use `crm.listCustomers` and `crm.customerTimeline` instead.
+- `crm.listCustomerCollection`: the CRM page's rich 500-row collection.
+  Agents use `crm.listCustomers`, `crm.customerTimeline`, and
+  `crm.getCustomerProfile` for one customer.
 - `creator.reviewProposal`: a terminal human decision. An inverse would erase
   the decision.
 - `harness.listCompositions`: the human approval queue for composed runtime

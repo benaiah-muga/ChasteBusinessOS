@@ -49,10 +49,10 @@ An audit of the Go registry found a wider version of the same problem:
    (deliberately outside model discovery while still callable by a human or a
    system actor). `TestEveryCapabilityIsDiscoverableOrReviewedHidden` requires
    every exception to appear in a reviewed map with a reason. The current
-   exceptions are the rich CRM collection read, creator proposal review, the
-   harness approval queue, SCIM and SSO credential/identity operations, support
-   widget credential settings, and the internal sales-draft and persona inverse
-   checkpoints.
+   exceptions are the rich 500-row CRM collection read (one customer is served
+   by `crm.getCustomerProfile`), creator proposal review, the harness approval
+   queue, SCIM and SSO credential/identity operations, support widget credential
+   settings, and the internal sales-draft and persona inverse checkpoints.
    Every other capability is visible.
 
 4. **The organization persona is a governed capability.** The admin write to
