@@ -105,6 +105,8 @@ the next number; superseded ones get a Status update, never deletion.
 | 0098 | Capability parity by default and resumable Workmate sessions | accepted |
 | 0099 | Workflow continuity through durable links, not a second orchestration engine | accepted |
 | 0100 | Deterministic Workmate turn contract, enforced outside the prompt | accepted |
+| 0101 | Resolve a customer to the surviving identity, with evidence | accepted |
+| 0102 | Advertise three meta tools to coding agents, not the catalog | accepted |
 
 Gaps in numbering are intentional placeholders for decisions not yet
 written down, if you made one of those calls, write the ADR.

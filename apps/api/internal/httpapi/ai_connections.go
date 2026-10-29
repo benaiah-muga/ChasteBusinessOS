@@ -726,6 +726,9 @@ func (c *httpAIOpenCodeClient) ConfigureMCP(ctx context.Context, endpoint, usern
 	if len(identifier) > 12 {
 		identifier = identifier[:12]
 	}
+	// An empty direct-tool allowlist is deliberate: the bridge advertises the
+	// discover, describe, dispatch surface and reaches the governed catalog
+	// through it, so the coding agent's context does not carry every tool.
 	accessToken, err := signAIToolAccessToken(aiToolAccessClaims{
 		OrgID: orgID, UserID: userID, ConnectionID: connectionID, AllowedTools: []string{},
 	}, time.Now())

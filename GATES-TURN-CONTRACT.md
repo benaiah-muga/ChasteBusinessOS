@@ -42,7 +42,7 @@ call, instead of adding more sentences to the prompt.
   EXPECT: /ok\s+github\.com\/benaiah-muga\/ChasteBusinessOS\/apps\/api/
   EVIDENCE: With DATABASE_URL sourced from .env, go test ./... reported ok for every package (agentturn cached, capability 297s, httpapi 87s, ledger 118s, jobs 25s, signals, policy, session, authn, crm, dashboard, dbx, metrics, outbox, and the cmd binaries) and go vet ./... was clean.
 
-- [ ] T8 (open): the Workmate route loads with no new console or request errors
+- [x] T8: the Workmate route loads with no new console or request errors
   CHECK: focused browser pass on the Workmate route against the built app
   EXPECT: BROWSER CHECK PASS
-  EVIDENCE: NOT RUN. No in-app browser tool is available in this session, so the runtime interaction gate stays open. The changed client path is exercised in jsdom by src/chat-store.test.ts.
+  EVIDENCE: agent-browser opened http://localhost:3000/chat with a seeded verified session and the active organization. The approvals question answered from the facts block ("Nothing is waiting for your sign-off"), a customer write under an autonomy-capped policy streamed and then reported the pending approval with its id, and the stored user events carried the facts digest (pendingApprovals 0). console, page errors, and 4xx/5xx request checks were all empty.

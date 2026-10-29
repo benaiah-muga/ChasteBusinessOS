@@ -13,6 +13,11 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Added
 
+- Customer identity resolution now normalizes and ranks evidence instead of substring matching. `resolve_entity` matches normalized email, the last nine digits of a phone, names in any token order, company suffixes ignored, and a conservative typo rule, and reports why each customer matched.
+- A customer that was merged now resolves to the surviving record and reports the duplicate name in `mergedFrom`. The assistant can no longer receive a tombstoned customer id and be refused by the executor after confidently naming it.
+- The coding-agent MCP bridge advertises three meta tools, `chaste_discover`, `chaste_describe`, and `chaste_dispatch`, instead of every capability definition. Discovery returns short ranked matches without schemas, describe returns one contract with its advisory skills, and dispatch runs through the same governed executor with agent claims, approvals, and audit.
+- A production coding-agent connection with no pinned tools now reaches the whole governed catalog through the meta surface. Previously its empty allowlist advertised no tools at all.
+
 - Every Workmate turn now starts with a code-computed `<turn_facts>` block: read time, pending approvals with capability, risk class, rationale, raiser, age, and approval id, and the unread notification count with its latest title. A read that fails renders as unknown, never as zero, so the assistant can no longer claim nothing is waiting when the inbox was never read.
 - Workmate records one effect per capability execution from the executor's verdict and verifies the final answer against it. A pending approval the answer omitted gains an explicit notice, a failed material action the answer skipped gains the executor's error and a no-change statement, and dash characters are rewritten to allowed punctuation in both the stream and the stored text. Each correction is counted on the stored assistant event and logged.
 - The turn facts digest (read time, pending approval ids, unread count) is stored on the user event, so session replay shows the context the model was given.
@@ -161,7 +166,10 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
-- The Workmate client now treats the `done` reply as authoritative and replaces streamed text with it. A deterministic correction or an appended approval notice is what the person sees, and it matches the stored transcript.
+- Capability discovery ranks natural-language queries better: filler words are ignored, a match in the id or title outweighs a match in prose, the id's object segment outweighs both, common asking verbs map to capability verbs, and ties prefer the shorter id. This makes `find a customer` reach `crm.listCustomers` before `crm.listDeals`.
+- MCP connections still support direct pinned tools, and `tools/call` still accepts their names, so a cached client keeps working. The connection allowlist now controls direct advertisement only; the executor remains the authority boundary.
+- `resolve_entity` describes the merge behavior in its contract so the model knows a surviving record may be returned for an old name.
+- - The Workmate client now treats the `done` reply as authoritative and replaces streamed text with it. A deterministic correction or an appended approval notice is what the person sees, and it matches the stored transcript.
 - Three long approval and notification rules left the Workmate system prompt. The facts block and post-turn enforcement now guarantee that behavior, so the prompt carries phrasing guidance instead of rules the runtime can enforce.
 - `accounting.acceptQuote` remains available for deliberate invoice-first service work, but the Sales workspace now presents "Create sales order" as the primary action and labels invoice-first as "Invoice immediately" so shipped goods do not silently skip credit, stock reservation, and fulfilment.
 - Sales order reads include their source quote, delivery invoices link to their order, and the Sales workspace shows the quote an order came from.
@@ -194,7 +202,9 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Fixed
 
-- Follow-ups no longer lose the ids and rows returned by earlier tool calls; the recent conversation window now includes structured tool messages.
+- `resolve_entity` could return a merged customer as the id to act on, because it matched the tombstone row and ignored `merged_into_customer_id`. It now follows the merge root and returns the survivor.
+- A coding-agent MCP connection configured with an empty direct-tool allowlist advertised zero tools. It now advertises the discover, describe, dispatch surface.
+- - Follow-ups no longer lose the ids and rows returned by earlier tool calls; the recent conversation window now includes structured tool messages.
 - DeepSeek requests no longer fall back to an unverified NIM model, and the default provider no longer rate-limits a normal multi-step brief.
 
 - Workmate no longer appends "No registered capability can do this" to every user request, and no longer files a ticket merely because no single brief tool exists.

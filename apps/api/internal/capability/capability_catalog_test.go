@@ -81,3 +81,23 @@ func TestSearchAgentCapabilitiesFindsNotificationMarkRead(t *testing.T) {
 	}
 	t.Fatalf("notifications.markRead missing from capability search: %+v", results)
 }
+
+func TestSearchAgentCapabilitiesRanksNaturalLanguageDiscovery(t *testing.T) {
+	results := SearchAgentCapabilities(map[string]bool{"*": true}, "find a customer", 8)
+	if len(results) == 0 {
+		t.Fatal("natural-language discovery returned nothing")
+	}
+	if results[0].ID != "crm.listCustomers" {
+		ids := make([]string, 0, len(results))
+		for _, result := range results {
+			ids = append(ids, result.ID)
+		}
+		t.Fatalf("discovery ranked %q first, want crm.listCustomers: %v", results[0].ID, ids)
+	}
+	if results := SearchAgentCapabilities(map[string]bool{"*": true}, "the a of", 8); results != nil {
+		t.Fatalf("a query of filler words should not match the whole catalog: %+v", results)
+	}
+	if results := SearchAgentCapabilities(map[string]bool{"*": true}, "...", 8); results != nil {
+		t.Fatalf("a query of punctuation should not match the whole catalog: %+v", results)
+	}
+}

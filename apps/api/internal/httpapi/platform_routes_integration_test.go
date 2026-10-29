@@ -392,6 +392,24 @@ func TestAIToolsMCPStoreIntegration(t *testing.T) {
 		t.Fatalf("ActiveAuthSession=%q found=%v err=%v, want the fixture session", authSession, found, err)
 	}
 
+	// The connection the product configures carries an empty direct-tool
+	// allowlist. It must still reach the governed catalog through the three
+	// meta tools, not advertise nothing.
+	handler := newAIToolsMCPHandler(store, &platformTestExecutor{}, platformTestLogger(), newAIToolsRateLimiter())
+	token, err := signAIToolAccessToken(aiToolAccessClaims{
+		OrgID: fixture.orgA, UserID: fixture.userID, ConnectionID: connectionID, AllowedTools: []string{},
+	}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := aiToolsTestCall(handler, token, aiToolsTestRPC(t, "tools/list", nil))
+	body := platformTestDecode(t, response)
+	result, _ := body["result"].(map[string]any)
+	tools, _ := result["tools"].([]any)
+	if len(tools) != 3 {
+		t.Fatalf("production bridge advertised %d tools, want the three meta tools: %s", len(tools), response.Body.String())
+	}
+
 	if err := store.AppendSessionEvent(ctx, fixture.orgA, sessionID, "tool_call", map[string]any{"name": "crm.listCustomers", "args": map[string]any{}}); err != nil {
 		t.Fatalf("AppendSessionEvent: %v", err)
 	}

@@ -27,6 +27,8 @@ The sequence is evidence-gated, not date-gated.
 - [x] Live agent evaluation harness with a Settings Quality surface, durable run history, pass-rate trends, an 80% baseline, stored-run detail, a four-scenario scripted baseline, and DeepSeek flash scenarios.
 - [x] Scheduled nightly evaluation, configurable regression baseline, bounded retention, release metrics, model comparison, and seven scenarios.
 - [x] Deterministic Workmate turn contract: code-read `<turn_facts>` for approvals, notifications, and read time; post-turn verification of the answer against executor effects; approval and failure notices the model cannot omit; dash-free prose; and an authoritative final reply in the client.
+- [x] Customer identity resolution: normalized email, phone, and name-token evidence; merged duplicates resolve to the surviving record with the old name reported; a pure ranker with unit and migrated-database proofs.
+- [x] Progressive coding-agent tool surface: three MCP meta tools (discover, describe, dispatch), direct tools only when pinned, deterministic ranked discovery, and the full governed catalog reachable without advertising it.
 
 ## M0, Foundation (current sprint)
 - [x] Monorepo scaffold: Turborepo, pnpm, TS strict, Next.js 15 web app

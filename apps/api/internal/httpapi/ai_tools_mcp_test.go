@@ -175,12 +175,22 @@ func TestAIToolsMCPBridgeContract(t *testing.T) {
 	body = platformTestDecode(t, response)
 	result, _ = body["result"].(map[string]any)
 	tools, _ := result["tools"].([]any)
-	if response.Code != http.StatusOK || len(tools) != 1 {
-		t.Fatalf("tools/list status=%d body=%s, want the single allowed tool", response.Code, response.Body.String())
+	if response.Code != http.StatusOK || len(tools) != 4 {
+		t.Fatalf("tools/list status=%d body=%s, want three meta tools plus the pinned tool", response.Code, response.Body.String())
 	}
-	tool, _ := tools[0].(map[string]any)
-	if tool["name"] != "crm_listCustomers" || tool["inputSchema"] == nil {
-		t.Fatalf("tool=%v, want crm_listCustomers with an input schema", tool)
+	advertised := map[string]map[string]any{}
+	for _, entry := range tools {
+		tool, _ := entry.(map[string]any)
+		name, _ := tool["name"].(string)
+		advertised[name] = tool
+	}
+	for _, name := range []string{aiToolsDiscoverToolName, aiToolsDescribeToolName, aiToolsDispatchToolName} {
+		if advertised[name] == nil || advertised[name]["inputSchema"] == nil {
+			t.Fatalf("meta tool %q missing from %v", name, tools)
+		}
+	}
+	if tool := advertised["crm_listCustomers"]; tool == nil || tool["inputSchema"] == nil {
+		t.Fatalf("pinned direct tool missing from %v", tools)
 	}
 
 	call := map[string]any{"name": "crm_listCustomers", "arguments": map[string]any{"query": "acme"}}
@@ -281,8 +291,17 @@ func TestAIToolsMCPToolFilteringAndRateLimit(t *testing.T) {
 	body := platformTestDecode(t, response)
 	result, _ := body["result"].(map[string]any)
 	tools, _ := result["tools"].([]any)
-	if response.Code != http.StatusOK || len(tools) != 0 {
-		t.Fatalf("empty allowlist status=%d tools=%v, want no advertised tools", response.Code, result["tools"])
+	if response.Code != http.StatusOK || len(tools) != 3 {
+		t.Fatalf("empty allowlist status=%d tools=%v, want the three meta tools only", response.Code, result["tools"])
+	}
+	names := map[string]bool{}
+	for _, entry := range tools {
+		tool, _ := entry.(map[string]any)
+		name, _ := tool["name"].(string)
+		names[name] = true
+	}
+	if !names[aiToolsDiscoverToolName] || !names[aiToolsDescribeToolName] || !names[aiToolsDispatchToolName] {
+		t.Fatalf("meta tools=%v", names)
 	}
 
 	limiter := newAIToolsRateLimiter()
@@ -308,5 +327,95 @@ func TestAIToolsMCPToolFilteringAndRateLimit(t *testing.T) {
 	body = platformTestDecode(t, response)
 	if response.Code != http.StatusTooManyRequests || aiToolsTestErrorCode(t, body) != -32029 {
 		t.Fatalf("limited status=%d body=%s, want 429 -32029", response.Code, response.Body.String())
+	}
+}
+
+func TestAIToolsMCPProgressiveDisclosure(t *testing.T) {
+	t.Setenv("AI_CONFIG_ENCRYPTION_KEY", "unit-test-ai-key")
+	store := aiToolsTestStoreReady()
+	executor := &platformTestExecutor{fn: func(context.Context, authbridge.CapabilityClaims, string, json.RawMessage) (capability.Result, error) {
+		return capability.Result{OK: true, Data: json.RawMessage(`{"customers":[]}`)}, nil
+	}}
+	handler := newAIToolsMCPHandler(store, executor, platformTestLogger(), newAIToolsRateLimiter())
+	token := aiToolsTestToken(t, "session-progressive")
+
+	call := func(name string, arguments map[string]any) (string, bool) {
+		t.Helper()
+		response := aiToolsTestCall(handler, token, aiToolsTestRPC(t, "tools/call", map[string]any{"name": name, "arguments": arguments}))
+		body := platformTestDecode(t, response)
+		text, isError := aiToolsTestToolText(t, body)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", name, response.Code, response.Body.String())
+		}
+		return text, isError
+	}
+
+	text, isError := call(aiToolsDiscoverToolName, map[string]any{"query": "find a customer"})
+	if isError {
+		t.Fatalf("discover refused: %s", text)
+	}
+	var discovery struct {
+		Count        int `json:"count"`
+		Capabilities []struct {
+			ID     string `json:"id"`
+			Intent string `json:"intent"`
+			Risk   string `json:"risk"`
+		} `json:"capabilities"`
+	}
+	if err := json.Unmarshal([]byte(text), &discovery); err != nil {
+		t.Fatalf("discover returned invalid JSON: %v (%s)", err, text)
+	}
+	if discovery.Count == 0 {
+		t.Fatalf("discover found nothing for a customer query: %s", text)
+	}
+	found := false
+	for _, row := range discovery.Capabilities {
+		if row.ID == "crm.listCustomers" {
+			found = true
+		}
+		if row.Intent == "" {
+			t.Fatalf("discover row is missing its intent: %+v", row)
+		}
+	}
+	if !found {
+		t.Fatalf("discover did not return crm.listCustomers: %s", text)
+	}
+	if strings.Contains(text, "inputSchema") {
+		t.Fatalf("discover must stay short and leave schemas to describe: %s", text)
+	}
+
+	text, isError = call(aiToolsDescribeToolName, map[string]any{"capabilityId": "crm.listCustomers"})
+	if isError {
+		t.Fatalf("describe refused: %s", text)
+	}
+	for _, want := range []string{`"id":"crm.listCustomers"`, `"permission":"crm.read"`, `"risk":"read"`, `"inputSchema"`, `"skills"`} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("describe missing %q: %s", want, text)
+		}
+	}
+
+	text, isError = call(aiToolsDispatchToolName, map[string]any{"capabilityId": "crm.listCustomers", "input": map[string]any{"query": "acme"}})
+	if isError || text != `{"customers":[]}` {
+		t.Fatalf("dispatch text=%q isError=%v", text, isError)
+	}
+	if executor.lastCapability != "crm.listCustomers" || executor.lastClaims.ActorType != "agent" {
+		t.Fatalf("execution capability=%q actor=%q", executor.lastCapability, executor.lastClaims.ActorType)
+	}
+	if len(store.events) != 2 || store.events[0].role != "tool_call" || store.events[1].role != "tool_result" {
+		t.Fatalf("a dispatched capability must be in the trajectory: %+v", store.events)
+	}
+
+	if text, isError = call(aiToolsDispatchToolName, map[string]any{"capabilityId": "crm.notARealCapability", "input": map[string]any{}}); !isError {
+		t.Fatalf("an unknown capability must be refused, got %s", text)
+	}
+	if text, isError = call(aiToolsDescribeToolName, map[string]any{"capabilityId": "crm.notARealCapability"}); !isError {
+		t.Fatalf("describing an unknown capability must be refused, got %s", text)
+	}
+	response := aiToolsTestCall(handler, token, aiToolsTestRPC(t, "tools/call", map[string]any{
+		"name":      aiToolsDispatchToolName,
+		"arguments": map[string]any{"capabilityId": "crm.listCustomers", "input": "not-an-object"},
+	}))
+	if code := aiToolsTestErrorCode(t, platformTestDecode(t, response)); code != -32602 {
+		t.Fatalf("non-object input error code=%v, want -32602", code)
 	}
 }

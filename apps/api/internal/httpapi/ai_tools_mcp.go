@@ -25,6 +25,20 @@ import (
 
 const aiToolsMCPBodyLimit = 64 << 10
 
+// The bridge advertises a tiny, stable surface instead of every governed
+// capability. Each tool definition is sent on every model request, so a catalog
+// of hundreds would spend the context the coding agent needs for the work.
+const (
+	aiToolsDiscoverToolName = "chaste_discover"
+	aiToolsDescribeToolName = "chaste_describe"
+	aiToolsDispatchToolName = "chaste_dispatch"
+
+	aiToolsDiscoverDefaultLimit = 8
+	aiToolsDiscoverMaxLimit     = 20
+	aiToolsDiscoverMaxQuery     = 200
+	aiToolsDescribeMaxID        = 120
+)
+
 type aiToolsMCPStore interface {
 	ActiveConnection(context.Context, string, string, string) (bool, error)
 	Member(context.Context, string, string) (bool, error)
@@ -120,7 +134,7 @@ func (h *aiToolsMCPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"protocolVersion": "2025-11-25",
 			"capabilities":    map[string]any{"tools": map[string]any{"listChanged": false}},
 			"serverInfo":      map[string]any{"name": "chaste-businessos", "version": "1.0.0"},
-			"instructions":    "These tools are governed ChasteBusinessOS capabilities. Their organization data is scoped to the connected user; permission, policy, approval, ledger, and reversibility controls remain active.",
+			"instructions":    "These tools are governed ChasteBusinessOS capabilities. Start with " + aiToolsDiscoverToolName + " to find the right capability, call " + aiToolsDescribeToolName + " for its contract, then " + aiToolsDispatchToolName + " to run it. Organization data is scoped to the connected user; permission, policy, approval, ledger, and reversibility controls remain active.",
 		})
 		return
 	}
@@ -209,6 +223,10 @@ func (h *aiToolsMCPHandler) call(w http.ResponseWriter, r *http.Request, claims 
 	advertised := make([]capability.AgentToolSpec, 0, len(tools))
 	for _, tool := range tools {
 		name := aiToolsToolName(tool.ID)
+		if aiToolsIsMetaTool(name) {
+			aiToolsRPCError(w, id, -32603, "Business tool names are ambiguous. Contact your workspace administrator.", http.StatusOK)
+			return
+		}
 		if !aiToolsAllowed(claims.AllowedTools, name) {
 			continue
 		}
@@ -221,7 +239,7 @@ func (h *aiToolsMCPHandler) call(w http.ResponseWriter, r *http.Request, claims 
 	}
 	switch method {
 	case "tools/list":
-		list := make([]map[string]any, 0, len(advertised))
+		list := aiToolsMetaToolSpecs()
 		for _, tool := range advertised {
 			list = append(list, map[string]any{
 				"name":        aiToolsToolName(tool.ID),
@@ -234,6 +252,38 @@ func (h *aiToolsMCPHandler) call(w http.ResponseWriter, r *http.Request, claims 
 		h.callTool(w, ctx, claims, id, params, names, permissions, authSession, executionSessionID)
 	default:
 		aiToolsRPCError(w, id, -32601, "This Chaste tool bridge does not support that method.", http.StatusOK)
+	}
+}
+
+// aiToolsMetaToolSpecs is the discover, describe, dispatch surface. Direct
+// capability tools are only added when a connection explicitly pins them.
+func aiToolsMetaToolSpecs() []map[string]any {
+	return []map[string]any{
+		{
+			"name": aiToolsDiscoverToolName,
+			"description": "Search the governed ChasteBusinessOS capability catalog by what you want to do. Returns short matches with id, title, intent, module, and risk, never the full schemas. Follow with " +
+				aiToolsDescribeToolName + " for the contract, then " + aiToolsDispatchToolName + " to run it.",
+			"inputSchema": json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","minLength":2,"maxLength":200,"description":"Plain-language description of the job."},"limit":{"type":"integer","minimum":1,"maximum":20,"default":8}},"required":["query"],"additionalProperties":false}`),
+		},
+		{
+			"name":        aiToolsDescribeToolName,
+			"description": "Read one governed capability's contract: title, intent, module, permission, risk, closed input schema, and the advisory skills that include it. Call this before dispatch when the input fields are not obvious.",
+			"inputSchema": json.RawMessage(`{"type":"object","properties":{"capabilityId":{"type":"string","minLength":3,"maxLength":120,"description":"Capability id returned by ` + aiToolsDiscoverToolName + `."}},"required":["capabilityId"],"additionalProperties":false}`),
+		},
+		{
+			"name":        aiToolsDispatchToolName,
+			"description": "Run one governed capability by id with schema-valid input. Permissions, policy, approvals, audit, and reversibility apply exactly as they do for a person. A pendingApproval result means nothing has changed yet.",
+			"inputSchema": json.RawMessage(`{"type":"object","properties":{"capabilityId":{"type":"string","minLength":3,"maxLength":120},"input":{"type":"object","description":"Capability input matching the schema from ` + aiToolsDescribeToolName + `."}},"required":["capabilityId"],"additionalProperties":false}`),
+		},
+	}
+}
+
+func aiToolsIsMetaTool(name string) bool {
+	switch name {
+	case aiToolsDiscoverToolName, aiToolsDescribeToolName, aiToolsDispatchToolName:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -251,6 +301,17 @@ func (h *aiToolsMCPHandler) callTool(w http.ResponseWriter, ctx context.Context,
 	if raw, present := params["arguments"]; present && !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		arguments = raw
 	}
+	switch name {
+	case aiToolsDiscoverToolName:
+		h.discoverTool(w, id, arguments, permissions)
+		return
+	case aiToolsDescribeToolName:
+		h.describeTool(w, id, arguments, permissions)
+		return
+	case aiToolsDispatchToolName:
+		h.dispatchTool(w, ctx, claims, id, arguments, permissions, authSession, executionSessionID)
+		return
+	}
 	capabilityID, known := names[name]
 	if !known {
 		aiToolsToolResult(w, id, true, "That business action is not available to this user.")
@@ -264,6 +325,114 @@ func (h *aiToolsMCPHandler) callTool(w http.ResponseWriter, ctx context.Context,
 		}
 	}
 	output, executionError, ok, pending := h.executeTool(ctx, claims, capabilityID, arguments, permissions, authSession, executionSessionID)
+	if claims.SessionID != "" {
+		event := map[string]any{"name": capabilityID, "ok": ok, "pendingApproval": pending, "error": executionError}
+		if err := h.store.AppendSessionEvent(ctx, claims.OrgID, claims.SessionID, "tool_result", event); err != nil {
+			h.logger.Error("append MCP tool_result event", "error", err)
+		}
+	}
+	aiToolsToolResult(w, id, !ok && !pending, aiToolsJSONText(output))
+}
+
+func (h *aiToolsMCPHandler) discoverTool(w http.ResponseWriter, id json.RawMessage, arguments json.RawMessage, permissions map[string]bool) {
+	var input struct {
+		Query string `json:"query"`
+		Limit int    `json:"limit"`
+	}
+	if err := json.Unmarshal(arguments, &input); err != nil {
+		aiToolsRPCError(w, id, -32602, "discover needs a plain-language query.", http.StatusOK)
+		return
+	}
+	query := strings.TrimSpace(input.Query)
+	if len([]rune(query)) < 2 || len([]rune(query)) > aiToolsDiscoverMaxQuery {
+		aiToolsRPCError(w, id, -32602, "The discovery query must be between 2 and 200 characters.", http.StatusOK)
+		return
+	}
+	limit := input.Limit
+	if limit < 1 {
+		limit = aiToolsDiscoverDefaultLimit
+	}
+	if limit > aiToolsDiscoverMaxLimit {
+		limit = aiToolsDiscoverMaxLimit
+	}
+	found := capability.SearchAgentCapabilities(permissions, query, limit)
+	type discovered struct {
+		ID     string `json:"id"`
+		Title  string `json:"title"`
+		Intent string `json:"intent"`
+		Module string `json:"module"`
+		Risk   string `json:"risk"`
+	}
+	candidates := make([]discovered, 0, len(found))
+	for _, row := range found {
+		candidates = append(candidates, discovered{ID: row.ID, Title: row.Title, Intent: row.Intent, Module: row.Module, Risk: row.Risk})
+	}
+	aiToolsToolResult(w, id, false, aiToolsJSONText(map[string]any{
+		"count":        len(candidates),
+		"capabilities": candidates,
+		"next":         "Call " + aiToolsDescribeToolName + " with the id you want, then " + aiToolsDispatchToolName + ".",
+	}))
+}
+
+func (h *aiToolsMCPHandler) describeTool(w http.ResponseWriter, id json.RawMessage, arguments json.RawMessage, permissions map[string]bool) {
+	var input struct {
+		CapabilityID string `json:"capabilityId"`
+	}
+	if err := json.Unmarshal(arguments, &input); err != nil || strings.TrimSpace(input.CapabilityID) == "" || len(input.CapabilityID) > aiToolsDescribeMaxID {
+		aiToolsRPCError(w, id, -32602, "describe needs a capability id from "+aiToolsDiscoverToolName+".", http.StatusOK)
+		return
+	}
+	spec, available := capability.AgentCapabilityByID(permissions, input.CapabilityID)
+	if !available {
+		aiToolsToolResult(w, id, true, "That capability is not available to this user.")
+		return
+	}
+	schema := spec.InputSchema
+	if len(bytes.TrimSpace(schema)) == 0 {
+		schema = json.RawMessage(`{"type":"object","properties":{}}`)
+	}
+	aiToolsToolResult(w, id, false, aiToolsJSONText(map[string]any{
+		"id":          spec.ID,
+		"title":       spec.Title,
+		"intent":      spec.Intent,
+		"module":      spec.Module,
+		"permission":  spec.Permission,
+		"risk":        spec.Risk,
+		"inputSchema": json.RawMessage(schema),
+		"skills":      capability.SkillsForCapability(spec.ID),
+	}))
+}
+
+func (h *aiToolsMCPHandler) dispatchTool(w http.ResponseWriter, ctx context.Context, claims *aiToolAccessClaims, id json.RawMessage, arguments json.RawMessage, permissions map[string]bool, authSession, executionSessionID string) {
+	var input struct {
+		CapabilityID string          `json:"capabilityId"`
+		Input        json.RawMessage `json:"input"`
+	}
+	if err := json.Unmarshal(arguments, &input); err != nil || strings.TrimSpace(input.CapabilityID) == "" {
+		aiToolsRPCError(w, id, -32602, "dispatch needs a capabilityId and its input.", http.StatusOK)
+		return
+	}
+	capabilityID := strings.TrimSpace(input.CapabilityID)
+	if _, available := capability.AgentCapabilityByID(permissions, capabilityID); !available {
+		aiToolsToolResult(w, id, true, "That capability is not available to this user.")
+		return
+	}
+	capabilityInput := bytes.TrimSpace(input.Input)
+	if len(capabilityInput) == 0 || bytes.Equal(capabilityInput, []byte("null")) {
+		capabilityInput = []byte(`{}`)
+	}
+	if capabilityInput[0] != '{' || !json.Valid(capabilityInput) {
+		aiToolsRPCError(w, id, -32602, "Capability input must be a JSON object.", http.StatusOK)
+		return
+	}
+	if claims.SessionID != "" {
+		if err := h.store.AppendSessionEvent(ctx, claims.OrgID, claims.SessionID, "tool_call", map[string]any{
+			"name": capabilityID, "args": json.RawMessage(capabilityInput),
+		}); err != nil {
+			h.logger.Error("append MCP tool_call event", "error", err)
+		}
+	}
+	output, executionError, ok, pending := h.executeTool(ctx, claims, capabilityID, json.RawMessage(capabilityInput), permissions, authSession, executionSessionID)
 	if claims.SessionID != "" {
 		event := map[string]any{"name": capabilityID, "ok": ok, "pendingApproval": pending, "error": executionError}
 		if err := h.store.AppendSessionEvent(ctx, claims.OrgID, claims.SessionID, "tool_result", event); err != nil {

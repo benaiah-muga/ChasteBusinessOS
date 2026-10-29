@@ -100,8 +100,49 @@ func AgentCapabilityByID(permissions map[string]bool, id string) (AgentCapabilit
 	}, true
 }
 
+var capabilitySearchStopwords = map[string]bool{
+	"a": true, "an": true, "and": true, "for": true, "i": true, "in": true, "me": true,
+	"my": true, "of": true, "on": true, "or": true, "our": true, "please": true,
+	"the": true, "to": true, "we": true, "with": true,
+}
+
+// capabilitySearchVerbs maps the verb a person uses to the verbs capability ids
+// and titles use. It is deliberately small: these are the asking verbs, and a
+// synonym counts for less than the literal word.
+var capabilitySearchVerbs = map[string][]string{
+	"find":   {"list", "get", "search", "read"},
+	"look":   {"get", "read", "search"},
+	"show":   {"list", "get", "read", "report"},
+	"search": {"search", "find", "list"},
+	"list":   {"list", "get", "read"},
+	"get":    {"get", "read"},
+	"create": {"create", "add"},
+	"add":    {"add", "create"},
+	"new":    {"create", "add"},
+	"update": {"update", "edit"},
+	"edit":   {"update", "edit"},
+	"delete": {"delete", "remove", "deactivate"},
+	"remove": {"delete", "remove", "deactivate"},
+}
+
+func capabilitySearchTerms(query string) []string {
+	fields := strings.Fields(strings.ToLower(strings.TrimSpace(query)))
+	terms := make([]string, 0, len(fields))
+	for _, field := range fields {
+		term := strings.Trim(field, `.,;:!?"'`)
+		if len(term) < 2 || capabilitySearchStopwords[term] {
+			continue
+		}
+		terms = append(terms, term)
+	}
+	return terms
+}
+
 // SearchAgentCapabilities is the model-facing discovery surface. It ranks by
 // literal term matches and returns only capabilities the caller may invoke.
+// A match in the id or title counts for more than a match in prose, and common
+// filler words are ignored, so "find a customer" reaches the customer read
+// instead of every intent that contains the letter "a".
 func SearchAgentCapabilities(permissions map[string]bool, query string, limit int) []AgentCapability {
 	ensureCapabilityCatalog()
 	if limit < 1 {
@@ -110,7 +151,7 @@ func SearchAgentCapabilities(permissions map[string]bool, query string, limit in
 	if limit > 20 {
 		limit = 20
 	}
-	terms := strings.Fields(strings.ToLower(strings.TrimSpace(query)))
+	terms := capabilitySearchTerms(query)
 	if len(terms) == 0 {
 		return nil
 	}
@@ -123,11 +164,32 @@ func SearchAgentCapabilities(permissions map[string]bool, query string, limit in
 		if !capabilityAllowed(permissions, id) {
 			continue
 		}
-		haystack := strings.ToLower(id + " " + entry.Title + " " + entry.Intent + " " + entry.Module)
+		identity := strings.ToLower(id + " " + entry.Title)
+		description := strings.ToLower(entry.Intent + " " + entry.Module)
+		object := id
+		if index := strings.LastIndex(id, "."); index >= 0 {
+			object = id[index+1:]
+		}
+		object = strings.ToLower(object)
 		score := 0
 		for _, term := range terms {
-			if strings.Contains(haystack, term) {
+			if strings.Contains(identity, term) {
+				score += 4
+			} else {
+				for _, synonym := range capabilitySearchVerbs[term] {
+					if strings.Contains(identity, synonym) {
+						score++
+						break
+					}
+				}
+			}
+			if strings.Contains(description, term) {
 				score++
+			}
+			// A term in the id's last segment names the object the capability
+			// acts on, which is the strongest signal that it is the right tool.
+			if strings.Contains(object, term) {
+				score += 3
 			}
 		}
 		if score == 0 {
@@ -142,6 +204,11 @@ func SearchAgentCapabilities(permissions map[string]bool, query string, limit in
 	sort.Slice(hits, func(i, j int) bool {
 		if hits[i].score != hits[j].score {
 			return hits[i].score > hits[j].score
+		}
+		// On equal evidence the shorter id is the more direct answer to the
+		// question; "crm.listCustomers" beats "crm.listCustomerViews".
+		if len(hits[i].capability.ID) != len(hits[j].capability.ID) {
+			return len(hits[i].capability.ID) < len(hits[j].capability.ID)
 		}
 		return hits[i].capability.ID < hits[j].capability.ID
 	})

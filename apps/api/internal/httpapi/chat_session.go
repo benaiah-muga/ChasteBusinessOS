@@ -19,6 +19,7 @@ import (
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/agentturn"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/authbridge"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/capability"
+	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/crm"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/dbx"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/ledger"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/session"
@@ -1236,13 +1237,22 @@ func (h *chatSessionHandler) notificationsInbox(ctx context.Context, user *sessi
 func chatResolveEntityToolSpec() chatToolSpec {
 	return chatToolSpec{
 		Name:        "resolve_entity",
-		Description: "Find the canonical id for a customer, vendor, item, employee, project, invoice, bill, receipt, or document by name, email, SKU, code, or number. Use before a write that needs an id; returns up to 10 matches with ids and the fields that identify them.",
+		Description: "Find the canonical id for a customer, vendor, item, employee, project, invoice, bill, receipt, or document by name, email, SKU, code, or number. Customer duplicates that were merged resolve to the surviving record and report the old name in mergedFrom. Use before a write that needs an id; returns up to 10 matches with ids and the fields that identify them.",
 		Parameters: json.RawMessage(`{"type":"object","properties":{
 			"type":{"type":"string","enum":["customer","vendor","item","employee","project","invoice","bill","receipt","document"]},
 			"query":{"type":"string","minLength":1,"maxLength":120},
 			"limit":{"type":"integer","minimum":1,"maximum":10,"default":5}
 		},"required":["type","query"],"additionalProperties":false}`),
 	}
+}
+
+type chatEntityMatch struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Detail      string `json:"detail,omitempty"`
+	MatchedOn   string `json:"matchedOn,omitempty"`
+	MergedFrom  string `json:"mergedFrom,omitempty"`
+	Deactivated bool   `json:"deactivated,omitempty"`
 }
 
 func (h *chatSessionHandler) resolveEntity(ctx context.Context, user *session.ResolvedUser, call chatToolCall) (string, bool, string) {
@@ -1280,18 +1290,19 @@ func (h *chatSessionHandler) resolveEntity(ctx context.Context, user *session.Re
 		return chatMustEncode(chatToolRefusal{Error: "missing permission: " + permission}), false, "missing permission: " + permission
 	}
 	query := "%" + input.Query + "%"
-	type match struct {
-		ID     string `json:"id"`
-		Name   string `json:"name"`
-		Detail string `json:"detail,omitempty"`
-	}
-	matches := make([]match, 0, input.Limit)
+	matches := make([]chatEntityMatch, 0, input.Limit)
 	_, err := dbx.WithOrgTx(ctx, h.pool, *user.OrgID, func(tx pgx.Tx) (struct{}, error) {
+		if input.Type == "customer" {
+			found, err := resolveCustomerEntityMatches(ctx, tx, *user.OrgID, input.Query, input.Limit)
+			if err != nil {
+				return struct{}{}, err
+			}
+			matches = append(matches, found...)
+			return struct{}{}, nil
+		}
 		var rows pgx.Rows
 		var err error
 		switch input.Type {
-		case "customer":
-			rows, err = tx.Query(ctx, `SELECT id::text, name, COALESCE(email,'') FROM customers WHERE org_id=$1::uuid AND (name ILIKE $2 OR email ILIKE $2) ORDER BY name LIMIT $3`, *user.OrgID, query, input.Limit)
 		case "vendor":
 			rows, err = tx.Query(ctx, `SELECT id::text, name, COALESCE(email,'') FROM vendors WHERE org_id=$1::uuid AND (name ILIKE $2 OR email ILIKE $2) ORDER BY name LIMIT $3`, *user.OrgID, query, input.Limit)
 		case "item":
@@ -1314,7 +1325,7 @@ func (h *chatSessionHandler) resolveEntity(ctx context.Context, user *session.Re
 		}
 		defer rows.Close()
 		for rows.Next() {
-			var item match
+			var item chatEntityMatch
 			if err := rows.Scan(&item.ID, &item.Name, &item.Detail); err != nil {
 				return struct{}{}, err
 			}
@@ -1330,4 +1341,74 @@ func (h *chatSessionHandler) resolveEntity(ctx context.Context, user *session.Re
 		return chatMustEncode(chatToolRefusal{Error: "could not encode entity matches"}), false, "could not encode entity matches"
 	}
 	return string(encoded), true, ""
+}
+
+// resolveCustomerMatchesSQL offers a wider candidate set than one substring
+// match: the full text, the subscriber digits of a phone, and every name token
+// in any order. It also resolves each candidate to its merge root, so a
+// tombstoned duplicate can never come back as the id to act on.
+const resolveCustomerMatchesSQL = `
+WITH RECURSIVE customer_roots AS (
+    SELECT c.id, c.id AS root_id, 0 AS depth
+    FROM customers c
+    WHERE c.org_id = $1::uuid AND c.merged_into_customer_id IS NULL
+    UNION ALL
+    SELECT c.id, r.root_id, r.depth + 1
+    FROM customers c
+    JOIN customer_roots r ON c.merged_into_customer_id = r.id
+    WHERE c.org_id = $1::uuid AND r.depth < 8
+)
+SELECT c.id::text, c.name, COALESCE(c.email, ''), COALESCE(c.phone, ''),
+       (c.deactivated_at IS NOT NULL), canon.id::text, canon.name, (canon.deactivated_at IS NOT NULL)
+FROM customers c
+JOIN customer_roots r ON r.id = c.id
+JOIN customers canon ON canon.org_id = c.org_id AND canon.id = r.root_id
+WHERE c.org_id = $1::uuid
+  AND (
+    c.name ILIKE $2
+    OR c.email ILIKE $2
+    OR ($3 <> '' AND right(regexp_replace(COALESCE(c.phone, ''), '[^0-9]', '', 'g'), 9) = $3)
+    OR (cardinality($4::text[]) > 0 AND c.name ILIKE ALL ($4::text[]))
+  )
+ORDER BY c.name, c.id
+LIMIT $5`
+
+func resolveCustomerEntityMatches(ctx context.Context, tx pgx.Tx, orgID, query string, limit int) ([]chatEntityMatch, error) {
+	parsed := crm.ParseCustomerQuery(query)
+	tokens := make([]string, 0, len(parsed.Tokens))
+	for _, token := range parsed.Tokens {
+		tokens = append(tokens, "%"+token+"%")
+	}
+	rows, err := tx.Query(ctx, resolveCustomerMatchesSQL, orgID, "%"+query+"%", parsed.Phone, tokens, limit*4)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	candidates := make([]crm.CustomerMatchCandidate, 0, limit*4)
+	for rows.Next() {
+		var candidate crm.CustomerMatchCandidate
+		if err := rows.Scan(
+			&candidate.ID, &candidate.Name, &candidate.Email, &candidate.Phone,
+			&candidate.Deactivated, &candidate.CanonicalID, &candidate.CanonicalName, &candidate.CanonicalDeactivated,
+		); err != nil {
+			return nil, err
+		}
+		candidates = append(candidates, candidate)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	ranked := crm.RankCustomerMatches(query, candidates, limit)
+	matches := make([]chatEntityMatch, 0, len(ranked))
+	for _, match := range ranked {
+		matches = append(matches, chatEntityMatch{
+			ID:          match.ID,
+			Name:        match.Name,
+			Detail:      match.Detail,
+			MatchedOn:   match.MatchedOn,
+			MergedFrom:  match.MatchedRecordName,
+			Deactivated: match.Deactivated,
+		})
+	}
+	return matches, nil
 }

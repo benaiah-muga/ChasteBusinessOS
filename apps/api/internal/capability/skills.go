@@ -305,3 +305,25 @@ func skillsLoad(input SkillsLoadInput) (SkillsLoadOutput, error) {
 	}
 	return SkillsLoadOutput{}, errors.New(`unknown skill "` + input.ID + `". Call skills.find to see what exists.`)
 }
+
+// SkillReference is the compact form of a playbook that mentions a capability.
+// It lets a caller point at the ordered steps without repeating them.
+type SkillReference struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// SkillsForCapability lists the advisory playbooks that include one capability,
+// so an agent that discovered a tool can also find the workflow it belongs to.
+func SkillsForCapability(capabilityID string) []SkillReference {
+	references := make([]SkillReference, 0, 2)
+	for _, skill := range skillsCatalog {
+		for _, id := range skill.Capabilities {
+			if id == capabilityID {
+				references = append(references, SkillReference{ID: skill.ID, Name: skill.Name})
+				break
+			}
+		}
+	}
+	return references
+}
