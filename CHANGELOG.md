@@ -13,6 +13,9 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Added
 
+- Vendor and employee lookups now use the same normalized identity rules as customers: exact email, name tokens in any order, company suffixes ignored for vendors, and person normalization for employees. `resolve_entity` reports why each vendor or employee matched.
+- A gated action that is not a purchase order now renders as an "Approval required" card in the conversation. It shows the capability, risk class, rationale, and up to six stored payload fields with sensitive keys redacted, and it supports approve and reject with an honest outcome. Purchase orders keep the line-item proposal card.
+
 - Customer identity resolution now normalizes and ranks evidence instead of substring matching. `resolve_entity` matches normalized email, the last nine digits of a phone, names in any token order, company suffixes ignored, and a conservative typo rule, and reports why each customer matched.
 - A customer that was merged now resolves to the surviving record and reports the duplicate name in `mergedFrom`. The assistant can no longer receive a tombstoned customer id and be refused by the executor after confidently naming it.
 - The coding-agent MCP bridge advertises three meta tools, `chaste_discover`, `chaste_describe`, and `chaste_dispatch`, instead of every capability definition. Discovery returns short ranked matches without schemas, describe returns one contract with its advisory skills, and dispatch runs through the same governed executor with agent claims, approvals, and audit.
@@ -166,6 +169,9 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- The in-conversation approval card chooses its presentation from the approval's capability instead of whether the payload happens to contain lines. Only `purchasing.createPurchaseOrder` renders as a purchase proposal; every other governed action uses the generic card.
+- The approvals page and the conversation card now share one payload presentation module, so both redact the same sensitive keys and label fields the same way.
+
 - Capability discovery ranks natural-language queries better: filler words are ignored, a match in the id or title outweighs a match in prose, the id's object segment outweighs both, common asking verbs map to capability verbs, and ties prefer the shorter id. This makes `find a customer` reach `crm.listCustomers` before `crm.listDeals`.
 - MCP connections still support direct pinned tools, and `tools/call` still accepts their names, so a cached client keeps working. The connection allowlist now controls direct advertisement only; the executor remains the authority boundary.
 - `resolve_entity` describes the merge behavior in its contract so the model knows a surviving record may be returned for an old name.
@@ -201,6 +207,9 @@ The full v1 changelog is preserved at the bottom of this file.
 - CRM startup no longer shows a permission-looking error banner while the active organization is still loading.
 
 ### Fixed
+
+- A customer creation or other non-purchase approval in the conversation was labeled "Purchase proposal" and told the person the card could not review it. It now renders as a reviewable "Approval required" card.
+- `resolve_entity` returned vendors and employees on a literal substring only, so reordered names and formatted emails missed the record. They now use the ranked resolver.
 
 - `resolve_entity` could return a merged customer as the id to act on, because it matched the tombstone row and ignored `merged_into_customer_id`. It now follows the merge root and returns the survivor.
 - A coding-agent MCP connection configured with an empty direct-tool allowlist advertised zero tools. It now advertises the discover, describe, dispatch surface.

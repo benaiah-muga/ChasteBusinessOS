@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,7 +18,7 @@ import (
 // TestResolveEntityFollowsCustomerMerges proves the identity resolver against a
 // migrated database: a duplicate that was merged away never comes back as the
 // id to act on, and the evidence that matched is reported.
-func TestResolveEntityFollowsCustomerMerges(t *testing.T) {
+func TestResolveEntityFollowsMergesAndRanksEntities(t *testing.T) {
 	secret := os.Getenv("BETTER_AUTH_SECRET")
 	if secret == "" {
 		if os.Getenv("GO_RUNTIME_INTEGRATION_REQUIRED") == "1" {
@@ -64,10 +65,10 @@ func TestResolveEntityFollowsCustomerMerges(t *testing.T) {
 	}
 
 	handler := &chatSessionHandler{pool: runtime}
-	user := &session.ResolvedUser{UserID: fixture.userID, OrgID: &fixture.orgA, Permissions: map[string]bool{"crm.read": true}}
-	resolve := func(query string) (int, []chatEntityMatch) {
+	user := &session.ResolvedUser{UserID: fixture.userID, OrgID: &fixture.orgA, Permissions: map[string]bool{"crm.read": true, "purchasing.read": true, "hr.read": true}}
+	resolve := func(entityType, query string) (int, []chatEntityMatch) {
 		t.Helper()
-		arguments, err := json.Marshal(map[string]any{"type": "customer", "query": query})
+		arguments, err := json.Marshal(map[string]any{"type": entityType, "query": query})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -85,7 +86,7 @@ func TestResolveEntityFollowsCustomerMerges(t *testing.T) {
 		return decoded.Count, decoded.Matches
 	}
 
-	count, matches := resolve("Acme Supply")
+	count, matches := resolve("customer", "Acme Supply")
 	if count != 1 || len(matches) != 1 {
 		t.Fatalf("merged name count=%d matches=%+v", count, matches)
 	}
@@ -99,17 +100,17 @@ func TestResolveEntityFollowsCustomerMerges(t *testing.T) {
 		t.Fatalf("the survivor is active, got %+v", matches[0])
 	}
 
-	count, matches = resolve("Supplies Acme")
+	count, matches = resolve("customer", "Supplies Acme")
 	if count != 1 || matches[0].ID != survivorID || matches[0].MatchedOn != "name tokens" {
 		t.Fatalf("token order count=%d matches=%+v", count, matches)
 	}
 
-	count, matches = resolve("+256 772 123 456")
+	count, matches = resolve("customer", "+256 772 123 456")
 	if count != 1 || matches[0].ID != survivorID || matches[0].MatchedOn != "phone" {
 		t.Fatalf("phone count=%d matches=%+v", count, matches)
 	}
 
-	count, matches = resolve("BILLING@ACME.TEST")
+	count, matches = resolve("customer", "BILLING@ACME.TEST")
 	if count != 1 || matches[0].ID != survivorID || matches[0].MatchedOn != "email" {
 		t.Fatalf("email count=%d matches=%+v", count, matches)
 	}
@@ -134,13 +135,46 @@ func TestResolveEntityFollowsCustomerMerges(t *testing.T) {
 		fixture.orgA, chainMiddleID).Scan(&chainLeafID); err != nil {
 		t.Fatalf("seed chain leaf: %v", err)
 	}
-	count, matches = resolve("Zeta Ltd")
+	count, matches = resolve("customer", "Zeta Ltd")
 	if count != 1 || matches[0].ID != chainRootID {
 		t.Fatalf("a chain of merges must resolve to the root: count=%d matches=%+v root=%s middle=%s leaf=%s", count, matches, chainRootID, chainMiddleID, chainLeafID)
 	}
 
+	// Vendors and employees use the same evidence rules, with a person's name
+	// normalized without company suffix stripping.
+	var vendorID, employeeID string
+	if err := owner.QueryRow(ctx,
+		`INSERT INTO vendors (org_id, name, email) VALUES ($1::uuid, 'Acme Industrial Supplies', 'orders@acme-industrial.test') RETURNING id::text`,
+		fixture.orgA).Scan(&vendorID); err != nil {
+		t.Fatalf("seed vendor: %v", err)
+	}
+	if err := owner.QueryRow(ctx,
+		`INSERT INTO employees (org_id, name, email, title, monthly_salary_minor) VALUES ($1::uuid, 'Harper Clark', 'harper@example.test', 'Engineer', 500000) RETURNING id::text`,
+		fixture.orgA).Scan(&employeeID); err != nil {
+		t.Fatalf("seed employee: %v", err)
+	}
+	count, matches = resolve("vendor", "Supplies Industrial Acme")
+	if count != 1 || matches[0].ID != vendorID || matches[0].MatchedOn != "name tokens" {
+		t.Fatalf("vendor token order count=%d matches=%+v", count, matches)
+	}
+	count, matches = resolve("vendor", "ORDERS@ACME-INDUSTRIAL.TEST")
+	if count != 1 || matches[0].ID != vendorID || matches[0].MatchedOn != "email" {
+		t.Fatalf("vendor email count=%d matches=%+v", count, matches)
+	}
+	count, matches = resolve("employee", "Clark Harper")
+	if count != 1 || matches[0].ID != employeeID || matches[0].MatchedOn != "name tokens" {
+		t.Fatalf("employee token order count=%d matches=%+v", count, matches)
+	}
+	if !strings.Contains(matches[0].Detail, "Engineer") || !strings.Contains(matches[0].Detail, "harper@example.test") {
+		t.Fatalf("employee detail=%q, want email and title", matches[0].Detail)
+	}
+	count, matches = resolve("employee", "harper@example.test")
+	if count != 1 || matches[0].ID != employeeID || matches[0].MatchedOn != "email" {
+		t.Fatalf("employee email count=%d matches=%+v", count, matches)
+	}
+
 	for _, query := range []string{"Acme", "acme supplies", "+256 772 123 456"} {
-		_, matches := resolve(query)
+		_, matches := resolve("customer", query)
 		for _, match := range matches {
 			if match.ID == mergedID {
 				t.Fatalf("query %q returned the merged record as an actionable id: %+v", query, match)

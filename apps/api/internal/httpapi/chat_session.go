@@ -1292,8 +1292,9 @@ func (h *chatSessionHandler) resolveEntity(ctx context.Context, user *session.Re
 	query := "%" + input.Query + "%"
 	matches := make([]chatEntityMatch, 0, input.Limit)
 	_, err := dbx.WithOrgTx(ctx, h.pool, *user.OrgID, func(tx pgx.Tx) (struct{}, error) {
-		if input.Type == "customer" {
-			found, err := resolveCustomerEntityMatches(ctx, tx, *user.OrgID, input.Query, input.Limit)
+		switch input.Type {
+		case "customer", "vendor", "employee":
+			found, err := resolveRankedEntityMatches(ctx, tx, input.Type, *user.OrgID, input.Query, input.Limit)
 			if err != nil {
 				return struct{}{}, err
 			}
@@ -1303,12 +1304,8 @@ func (h *chatSessionHandler) resolveEntity(ctx context.Context, user *session.Re
 		var rows pgx.Rows
 		var err error
 		switch input.Type {
-		case "vendor":
-			rows, err = tx.Query(ctx, `SELECT id::text, name, COALESCE(email,'') FROM vendors WHERE org_id=$1::uuid AND (name ILIKE $2 OR email ILIKE $2) ORDER BY name LIMIT $3`, *user.OrgID, query, input.Limit)
 		case "item":
 			rows, err = tx.Query(ctx, `SELECT id::text, name, sku FROM items WHERE org_id=$1::uuid AND (name ILIKE $2 OR sku ILIKE $2) ORDER BY name LIMIT $3`, *user.OrgID, query, input.Limit)
-		case "employee":
-			rows, err = tx.Query(ctx, `SELECT id::text, name, COALESCE(email,'') || CASE WHEN COALESCE(title,'') = '' THEN '' ELSE ' · ' || title END FROM employees WHERE org_id=$1::uuid AND (name ILIKE $2 OR email ILIKE $2) ORDER BY name LIMIT $3`, *user.OrgID, query, input.Limit)
 		case "project":
 			rows, err = tx.Query(ctx, `SELECT id::text, name, status FROM projects WHERE org_id=$1::uuid AND name ILIKE $2 ORDER BY name LIMIT $3`, *user.OrgID, query, input.Limit)
 		case "invoice":
@@ -1373,20 +1370,58 @@ WHERE c.org_id = $1::uuid
 ORDER BY c.name, c.id
 LIMIT $5`
 
-func resolveCustomerEntityMatches(ctx context.Context, tx pgx.Tx, orgID, query string, limit int) ([]chatEntityMatch, error) {
-	parsed := crm.ParseCustomerQuery(query)
-	tokens := make([]string, 0, len(parsed.Tokens))
-	for _, token := range parsed.Tokens {
-		tokens = append(tokens, "%"+token+"%")
+// resolveVendorMatchesSQL and resolveEmployeeMatchesSQL widen the candidate
+// set the same way the customer query does, without a merge root: neither
+// entity has a merge model.
+const resolveVendorMatchesSQL = `
+SELECT id::text, name, COALESCE(email, ''), COALESCE(email, ''), (deactivated_at IS NOT NULL)
+FROM vendors
+WHERE org_id = $1::uuid
+  AND (
+    name ILIKE $2
+    OR email ILIKE $2
+    OR (cardinality($3::text[]) > 0 AND name ILIKE ALL ($3::text[]))
+  )
+ORDER BY name, id
+LIMIT $4`
+
+const resolveEmployeeMatchesSQL = `
+SELECT id::text, name, COALESCE(email, ''),
+       trim(both ' ·' from COALESCE(email, '') || CASE WHEN COALESCE(title, '') = '' THEN '' ELSE ' · ' || title END),
+       (deactivated_at IS NOT NULL)
+FROM employees
+WHERE org_id = $1::uuid
+  AND (
+    name ILIKE $2
+    OR email ILIKE $2
+    OR (cardinality($3::text[]) > 0 AND name ILIKE ALL ($3::text[]))
+  )
+ORDER BY name, id
+LIMIT $4`
+
+func resolveRankedEntityMatches(ctx context.Context, tx pgx.Tx, entityType, orgID, text string, limit int) ([]chatEntityMatch, error) {
+	switch entityType {
+	case "customer":
+		return resolveCustomerEntityMatches(ctx, tx, orgID, text, limit)
+	case "vendor":
+		return resolveVendorEntityMatches(ctx, tx, orgID, text, limit)
+	case "employee":
+		return resolveEmployeeEntityMatches(ctx, tx, orgID, text, limit)
+	default:
+		return nil, nil
 	}
-	rows, err := tx.Query(ctx, resolveCustomerMatchesSQL, orgID, "%"+query+"%", parsed.Phone, tokens, limit*4)
+}
+
+func resolveCustomerEntityMatches(ctx context.Context, tx pgx.Tx, orgID, text string, limit int) ([]chatEntityMatch, error) {
+	parsed := crm.ParseCompanyQuery(text)
+	rows, err := tx.Query(ctx, resolveCustomerMatchesSQL, orgID, "%"+text+"%", parsed.Phone, likeTokens(parsed.Tokens), limit*4)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	candidates := make([]crm.CustomerMatchCandidate, 0, limit*4)
+	candidates := make([]crm.MatchCandidate, 0, limit*4)
 	for rows.Next() {
-		var candidate crm.CustomerMatchCandidate
+		var candidate crm.MatchCandidate
 		if err := rows.Scan(
 			&candidate.ID, &candidate.Name, &candidate.Email, &candidate.Phone,
 			&candidate.Deactivated, &candidate.CanonicalID, &candidate.CanonicalName, &candidate.CanonicalDeactivated,
@@ -1398,7 +1433,60 @@ func resolveCustomerEntityMatches(ctx context.Context, tx pgx.Tx, orgID, query s
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	ranked := crm.RankCustomerMatches(query, candidates, limit)
+	return toChatEntityMatches(crm.RankMatches(parsed, candidates, limit)), nil
+}
+
+func resolveVendorEntityMatches(ctx context.Context, tx pgx.Tx, orgID, text string, limit int) ([]chatEntityMatch, error) {
+	parsed := crm.ParseCompanyQuery(text)
+	rows, err := tx.Query(ctx, resolveVendorMatchesSQL, orgID, "%"+text+"%", likeTokens(parsed.Tokens), limit*4)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	candidates := make([]crm.MatchCandidate, 0, limit*4)
+	for rows.Next() {
+		var candidate crm.MatchCandidate
+		if err := rows.Scan(&candidate.ID, &candidate.Name, &candidate.Email, &candidate.Detail, &candidate.Deactivated); err != nil {
+			return nil, err
+		}
+		candidates = append(candidates, candidate)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return toChatEntityMatches(crm.RankMatches(parsed, candidates, limit)), nil
+}
+
+func resolveEmployeeEntityMatches(ctx context.Context, tx pgx.Tx, orgID, text string, limit int) ([]chatEntityMatch, error) {
+	parsed := crm.ParsePersonQuery(text)
+	rows, err := tx.Query(ctx, resolveEmployeeMatchesSQL, orgID, "%"+text+"%", likeTokens(parsed.Tokens), limit*4)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	candidates := make([]crm.MatchCandidate, 0, limit*4)
+	for rows.Next() {
+		var candidate crm.MatchCandidate
+		if err := rows.Scan(&candidate.ID, &candidate.Name, &candidate.Email, &candidate.Detail, &candidate.Deactivated); err != nil {
+			return nil, err
+		}
+		candidates = append(candidates, candidate)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return toChatEntityMatches(crm.RankMatches(parsed, candidates, limit)), nil
+}
+
+func likeTokens(tokens []string) []string {
+	like := make([]string, 0, len(tokens))
+	for _, token := range tokens {
+		like = append(like, "%"+token+"%")
+	}
+	return like
+}
+
+func toChatEntityMatches(ranked []crm.Match) []chatEntityMatch {
 	matches := make([]chatEntityMatch, 0, len(ranked))
 	for _, match := range ranked {
 		matches = append(matches, chatEntityMatch{
@@ -1410,5 +1498,5 @@ func resolveCustomerEntityMatches(ctx context.Context, tx pgx.Tx, orgID, query s
 			Deactivated: match.Deactivated,
 		})
 	}
-	return matches, nil
+	return matches
 }

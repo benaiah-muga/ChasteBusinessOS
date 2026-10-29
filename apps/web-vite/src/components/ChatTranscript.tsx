@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { ArrowUp, Check, Copy, Layers3 } from "lucide-react";
 import { answerChatAsk, chatStore, useChat, type AskPayload, type ChatMsg } from "../chat-store";
 import { CHAT_MESSAGE_MAX_UNITS, type ChatUsage } from "../api/chat";
-import { ProposalCard } from "./ProposalCard";
+import { ApprovalCard } from "./ApprovalCard";
 import { WorkmateRecordCard } from "./WorkmateRecordCard";
 import { BrandMark } from "../ui/brand-mark";
 import "./ChatTranscript.css";
@@ -296,7 +296,7 @@ export function MessageList({
               )}
               {message.ask && <AskCard ask={message.ask} answered={message.answered} />}
               {message.card && <WorkmateRecordCard card={message.card} />}
-              {message.proposal && <ProposalCard proposal={message.proposal} organizationId={organizationId} />}
+              {message.proposal && <ApprovalCard proposal={message.proposal} organizationId={organizationId} />}
               <div className="chat-message-footer">
                 {message.usage && <UsageChip usage={message.usage} />}
                 {message.role === "assistant" && message.text && !message.error && (

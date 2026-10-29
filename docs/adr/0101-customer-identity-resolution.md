@@ -63,9 +63,12 @@ pulling at most four times the requested limit and ranking down to the limit.
 
 ### Scope
 
-Customers only. Vendors and employees keep their existing substring lookup:
-they have no merge model and much lower duplicate pressure. If vendor merges are
-ever added, the same ranker applies, because it takes no customer-specific input.
+Customers resolve through the merge graph described above, because they are the
+only entity with a merge model. Vendors and employees use the same evidence
+rules and candidate widening without a merge root, so they get normalized
+matching and reported provenance without inventing a link the schema does not
+have. Employees are parsed as people: a surname that looks like a company suffix
+is part of the name, not a legal form to strip.
 
 ## Consequences
 
@@ -80,3 +83,6 @@ ever added, the same ranker applies, because it takes no customer-specific input
   denormalized profile, remains the single source of identity.
 - Similar names are the weakest signal and are only compared after exact and
   token evidence fail, so a typo cannot outrank a real match.
+- Every ranked entity uses one ranker: company names for customers and vendors,
+  person names for employees. Adding a merge model to vendors later means
+  passing the same canonical fields, not writing a second resolver.

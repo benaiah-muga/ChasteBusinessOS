@@ -34,19 +34,7 @@ var nameSuffixes = [...]string{
 }
 
 func NormalizeCustomerName(name string) string {
-	lower := cases.Lower(language.Und).String(name)
-	var normalized strings.Builder
-	lastWasSpace := true
-	for _, r := range lower {
-		if isASCIIAlphaNumeric(r) {
-			normalized.WriteRune(r)
-			lastWasSpace = false
-		} else if !lastWasSpace {
-			normalized.WriteByte(' ')
-			lastWasSpace = true
-		}
-	}
-	key := strings.TrimSpace(normalized.String())
+	key := normalizeNameKey(name)
 	for {
 		changed := false
 		for _, suffix := range nameSuffixes {
@@ -62,6 +50,26 @@ func NormalizeCustomerName(name string) string {
 			return key
 		}
 	}
+}
+
+func NormalizePersonName(name string) string {
+	return normalizeNameKey(name)
+}
+
+func normalizeNameKey(name string) string {
+	lower := cases.Lower(language.Und).String(name)
+	var normalized strings.Builder
+	lastWasSpace := true
+	for _, r := range lower {
+		if isASCIIAlphaNumeric(r) {
+			normalized.WriteRune(r)
+			lastWasSpace = false
+		} else if !lastWasSpace {
+			normalized.WriteByte(' ')
+			lastWasSpace = true
+		}
+	}
+	return strings.TrimSpace(normalized.String())
 }
 
 func NormalizeEmail(email *string) *string {

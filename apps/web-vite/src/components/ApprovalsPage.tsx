@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApprovalApiError, fetchApprovals, submitApprovalDecision, type Approval, type ApprovalList } from "../api/approvals";
+import { actionTitle, humanizeFieldKey, isRecord, previewFields, safePayload } from "./approval-payload";
 import "./ApprovalsPage.css";
 
 type CurrencyStyle = { symbol: string; minorUnits: number };
@@ -14,8 +15,6 @@ const CURRENCY_STYLES: Record<string, CurrencyStyle> = {
   TZS: { symbol: "TSh", minorUnits: 0 },
   UGX: { symbol: "USh", minorUnits: 0 },
 };
-const SENSITIVE_KEY = /(password|secret|token|credential|base64|api[_-]?key|private[_-]?key|authorization|bearer)/i;
-
 function currencyFor(baseCurrency: string | null): CurrencyStyle {
   let preference: string | null = null;
   try {
@@ -54,33 +53,6 @@ function friendlyError(error: unknown): string {
   if (error instanceof ApprovalApiError) return error.message;
   if (error instanceof DOMException && error.name === "TimeoutError") return "The approvals service took too long. Try again.";
   return "Could not reach the approvals service. Check your connection and try again.";
-}
-
-function actionTitle(capabilityId: string): string {
-  const action = capabilityId.split(".").at(-1) ?? capabilityId;
-  return action.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/^./, (letter) => letter.toUpperCase());
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function previewFields(payload: unknown): Array<[string, unknown]> {
-  if (!isRecord(payload)) return [];
-  return Object.entries(payload)
-    .filter(([key]) => !SENSITIVE_KEY.test(key) && !["intentId", "sessionId"].includes(key))
-    .slice(0, 8);
-}
-
-function safePayload(value: unknown, key = "", depth = 0): unknown {
-  if (SENSITIVE_KEY.test(key)) return "[hidden]";
-  if (typeof value === "string") return value.length > 500 ? `${value.slice(0, 497)}…` : value;
-  if (depth >= 5) return "[nested details hidden]";
-  if (Array.isArray(value)) return value.slice(0, 20).map((entry) => safePayload(entry, "", depth + 1));
-  if (isRecord(value)) {
-    return Object.fromEntries(Object.entries(value).slice(0, 30).map(([childKey, entry]) => [childKey, safePayload(entry, childKey, depth + 1)]));
-  }
-  return value;
 }
 
 function friendlyValue(key: string, value: unknown, currency: CurrencyStyle): string {
@@ -260,7 +232,7 @@ function ApprovalCard({
         {fields.length > 0 && (
           <section className="approval-preview" aria-label="Affected record preview">
             <h3>Affected record preview</h3>
-            <dl>{fields.map(([key, value]) => <div key={key}><dt>{key.replace(/([a-z0-9])([A-Z])/g, "$1 $2")}</dt><dd>{friendlyValue(key, value, currency)}</dd></div>)}</dl>
+            <dl>{fields.map(([key, value]) => <div key={key}><dt>{humanizeFieldKey(key)}</dt><dd>{friendlyValue(key, value, currency)}</dd></div>)}</dl>
           </section>
         )}
 

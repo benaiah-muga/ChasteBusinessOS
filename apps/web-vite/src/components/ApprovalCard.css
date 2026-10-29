@@ -183,3 +183,43 @@
   cursor: progress;
   opacity: 0.65;
 }
+
+.chat-approval-risk {
+  border: 1px solid var(--line, #d8d4cc);
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted, #6f6a61);
+  white-space: nowrap;
+}
+
+.chat-approval-fields {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0.7rem 0 0;
+  padding: 0.65rem 0.75rem;
+  border-radius: 0.6rem;
+  background: var(--surface-muted, #f4f0e8);
+}
+
+.chat-approval-field {
+  display: grid;
+  grid-template-columns: minmax(7rem, 34%) 1fr;
+  gap: 0.75rem;
+  font-size: 0.84rem;
+  line-height: 1.4;
+}
+
+.chat-approval-field dt {
+  margin: 0;
+  color: var(--muted, #6f6a61);
+}
+
+.chat-approval-field dd {
+  margin: 0;
+  color: var(--ink, #26231d);
+  overflow-wrap: anywhere;
+}

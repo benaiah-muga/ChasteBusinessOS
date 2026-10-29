@@ -18,23 +18,25 @@ const (
 	minPartialQueryRune = 3
 )
 
-// CustomerMatchCandidate is one row the database offered as a possible match.
-// Canonical fields are set when the row was merged into a surviving record: the
-// resolver returns the survivor, never the tombstone.
-type CustomerMatchCandidate struct {
+// MatchCandidate is one row the database offered as a possible match. Canonical
+// fields are set when the row was merged into a surviving record: the resolver
+// returns the survivor, never the tombstone. Detail is an optional presentation
+// string, such as an employee's email and title.
+type MatchCandidate struct {
 	ID                   string
 	Name                 string
 	Email                string
 	Phone                string
+	Detail               string
 	Deactivated          bool
 	CanonicalID          string
 	CanonicalName        string
 	CanonicalDeactivated bool
 }
 
-// CustomerMatch is a ranked, canonical identity. MatchedRecordID is only set
-// when the evidence came from a merged record, so the caller can say why.
-type CustomerMatch struct {
+// Match is a ranked identity. MatchedRecordID is only set when the evidence
+// came from a merged record, so the caller can say why.
+type Match struct {
 	ID                string
 	Name              string
 	Detail            string
@@ -45,46 +47,59 @@ type CustomerMatch struct {
 	Deactivated       bool
 }
 
-// CustomerQuery is one search text decomposed into the signals a resolver can
-// compare. The database uses Phone and Tokens to widen the candidate set; the
-// ranker uses all four to order it.
-type CustomerQuery struct {
+// Query is one search text decomposed into the signals a resolver can compare.
+// The database uses Phone and Tokens to widen the candidate set; the ranker
+// uses all of them to order it. Person keeps person names out of the company
+// suffix rules.
+type Query struct {
 	Email  string
 	Phone  string
 	Name   string
 	Tokens []string
+	Person bool
 }
 
-// ParseCustomerQuery normalizes a person's search text once so candidate
-// selection and ranking cannot disagree about what was typed.
-func ParseCustomerQuery(query string) CustomerQuery {
-	name := NormalizeCustomerName(query)
-	return CustomerQuery{
-		Email:  normalizedQueryEmail(query),
-		Phone:  normalizedQueryPhone(query),
+// ParseCompanyQuery normalizes a company or customer search text.
+func ParseCompanyQuery(text string) Query {
+	name := NormalizeCustomerName(text)
+	return Query{
+		Email:  normalizedQueryEmail(text),
+		Phone:  normalizedQueryPhone(text),
 		Name:   name,
 		Tokens: nameTokens(name),
 	}
 }
 
-// RankCustomerMatches orders candidates by how strongly they identify the
-// queried customer, collapses several rows that resolve to the same surviving
-// record, and never returns a merged record as the id to act on.
-func RankCustomerMatches(query string, candidates []CustomerMatchCandidate, limit int) []CustomerMatch {
+// ParsePersonQuery normalizes a person's search text. A surname that happens to
+// look like a company suffix is part of the name.
+func ParsePersonQuery(text string) Query {
+	name := NormalizePersonName(text)
+	return Query{
+		Email:  normalizedQueryEmail(text),
+		Phone:  normalizedQueryPhone(text),
+		Name:   name,
+		Tokens: nameTokens(name),
+		Person: true,
+	}
+}
+
+// RankMatches orders candidates by how strongly they identify the queried
+// record, collapses several rows that resolve to the same surviving record, and
+// never returns a merged record as the id to act on.
+func RankMatches(query Query, candidates []MatchCandidate, limit int) []Match {
 	if limit < 1 {
 		limit = 5
 	}
 	if limit > 10 {
 		limit = 10
 	}
-	parsed := ParseCustomerQuery(query)
-	ranked := make([]CustomerMatch, 0, len(candidates))
+	ranked := make([]Match, 0, len(candidates))
 	for _, candidate := range candidates {
-		score, reason := scoreCustomerMatch(parsed, candidate)
+		score, reason := scoreMatch(query, candidate)
 		if score == 0 {
 			continue
 		}
-		match := CustomerMatch{
+		match := Match{
 			ID:          candidate.ID,
 			Name:        candidate.Name,
 			Detail:      matchDetail(candidate),
@@ -104,7 +119,7 @@ func RankCustomerMatches(query string, candidates []CustomerMatchCandidate, limi
 		ranked = append(ranked, match)
 	}
 
-	collapsed := make(map[string]CustomerMatch, len(ranked))
+	collapsed := make(map[string]Match, len(ranked))
 	order := make([]string, 0, len(ranked))
 	for _, match := range ranked {
 		existing, seen := collapsed[match.ID]
@@ -113,11 +128,11 @@ func RankCustomerMatches(query string, candidates []CustomerMatchCandidate, limi
 			order = append(order, match.ID)
 			continue
 		}
-		if betterCustomerMatch(match, existing) {
+		if betterMatch(match, existing) {
 			collapsed[match.ID] = match
 		}
 	}
-	out := make([]CustomerMatch, 0, len(order))
+	out := make([]Match, 0, len(order))
 	for _, id := range order {
 		out = append(out, collapsed[id])
 	}
@@ -136,7 +151,7 @@ func RankCustomerMatches(query string, candidates []CustomerMatchCandidate, limi
 	return out
 }
 
-func betterCustomerMatch(candidate, existing CustomerMatch) bool {
+func betterMatch(candidate, existing Match) bool {
 	if candidate.Score != existing.Score {
 		return candidate.Score > existing.Score
 	}
@@ -147,7 +162,7 @@ func betterCustomerMatch(candidate, existing CustomerMatch) bool {
 	return false
 }
 
-func scoreCustomerMatch(query CustomerQuery, candidate CustomerMatchCandidate) (int, string) {
+func scoreMatch(query Query, candidate MatchCandidate) (int, string) {
 	if query.Email != "" && normalizedCandidateEmail(candidate.Email) == query.Email {
 		return 100, MatchOnEmail
 	}
@@ -158,6 +173,9 @@ func scoreCustomerMatch(query CustomerQuery, candidate CustomerMatchCandidate) (
 	}
 
 	candidateName := NormalizeCustomerName(candidate.Name)
+	if query.Person {
+		candidateName = NormalizePersonName(candidate.Name)
+	}
 	if query.Name == "" || candidateName == "" {
 		return 0, ""
 	}
@@ -206,7 +224,10 @@ func normalizedCandidateEmail(email string) string {
 	return derefString(NormalizeEmail(&email))
 }
 
-func matchDetail(candidate CustomerMatchCandidate) string {
+func matchDetail(candidate MatchCandidate) string {
+	if detail := strings.TrimSpace(candidate.Detail); detail != "" {
+		return detail
+	}
 	if email := strings.TrimSpace(candidate.Email); email != "" {
 		return email
 	}
