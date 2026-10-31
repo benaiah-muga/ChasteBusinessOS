@@ -4,56 +4,91 @@
 
 # ChasteBusinessOS
 
-**The agentic ERP. Describe your business, and an AI co-worker runs it under your authority.**
+**The governed, AI-native operating system for business operations.**
 
 [![Release](https://img.shields.io/github/v/release/benaiah-muga/ChasteBusinessOS?label=release&sort=semver)](https://github.com/benaiah-muga/ChasteBusinessOS/releases)
-[![CI](https://github.com/benaiah-muga/ChasteBusinessOS/actions/workflows/ci.yml/badge.svg)](https://github.com/benaiah-muga/ChasteBusinessOS/actions/workflows/ci.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/benaiah-muga/ChasteBusinessOS/ci.yml?branch=main&label=CI)](https://github.com/benaiah-muga/ChasteBusinessOS/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6.svg)](tsconfig.base.json)
+[![Go](https://img.shields.io/badge/Go-1.27-00ADD8.svg)](apps/api)
 [![Status](https://img.shields.io/badge/status-alpha-orange.svg)](ROADMAP.md)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-[![Vision](https://img.shields.io/badge/Vision-📖-8A2BE2)](VISION.md)
-[![Architecture](https://img.shields.io/badge/Architecture-📐-blue)](ARCHITECTURE.md)
-[![Roadmap](https://img.shields.io/badge/Roadmap-🗺️-green)](ROADMAP.md)
-[![Contributing](https://img.shields.io/badge/Contributing-🤝-orange)](CONTRIBUTING.md)
-[![Code of Conduct](https://img.shields.io/badge/Code_of_Conduct-🛡️-red)](CODE_OF_CONDUCT.md)
-[![Security](https://img.shields.io/badge/Security-🔒-black)](SECURITY.md)
-[![Changelog](https://img.shields.io/badge/Changelog-📜-yellow)](CHANGELOG.md)
-
-[Features](#features) · [Quick start](#quick-start) · [How it works](#how-it-works) · [Demos](#demo-proofs) · [Docs](#documentation) · [Contributing](#contributing) · [License](#license)
+[Vision](VISION.md) · [Architecture](ARCHITECTURE.md) · [Roadmap](ROADMAP.md) · [Quick start](#quick-start) · [Demos](#demo-proofs) · [Documentation](#documentation) · [Contributing](#contributing) · [Security](#security) · [License](#license)
 
 </div>
 
 ---
 
-Most ERPs fail at adoption, not at features. Teams spend months implementing them and years clicking through every screen by hand. ChasteBusinessOS takes a different position: you describe your business in plain language, an AI co-worker configures and operates as much as possible on your behalf, and every action it takes passes through the same governance yours does.
+ChasteBusinessOS is an open-source, AI-native business operating system. It gives a team one operating layer for finance, sales, purchasing, inventory, manufacturing, projects, customer relationships, support, documents, and people operations.
 
-It cannot spend above your approval threshold without sign-off. It cannot assign itself a role. When it meets something it can't do, it files a ticket instead of improvising.
+Work begins with an outcome described in plain language. The workmate gathers the relevant records, drafts or executes the permitted steps, and stops at the approval boundary. Every material action is permission-checked, evaluated against policy, recorded in an append-only audit ledger, and reversible where the capability declares an inverse.
+
+The result is not a chat layer added to an ERP. It is one execution path shared by people, agents, and workers, with deterministic business rules underneath and an explicit human decision wherever judgment, authority, or financial risk requires one.
+
+The project is in alpha. [ROADMAP.md](ROADMAP.md) records supported scope and the next milestones, and [CHANGELOG.md](CHANGELOG.md) records every behavioral change.
 
 ## Features
 
-| Area | What works today |
-|---|---|
-| **Accounting** | Double-entry GL with immutable postings and mirror reversals, AR/AP subledgers, period close, trial balance, P&L, balance sheet, direct-method cash flow, customer and supplier statements, 13-week cash forecast |
-| **Approvals** | Human-in-the-loop gates on money above thresholds; identity and destructive actions always require a person |
-| **Inbox** | One ranked queue for approvals, risks, and opportunities across accounting, inventory, CRM, people, documents, and support, with a governed next step and an AI brief |
-| **Audit** | Append-only hash-chained event ledger of everything humans and agents did; replayable agent session trajectories |
-| **Sales** | Reservation-anchored orders: confirming checks credit headroom and reserves stock, delivery consumes reservations and invoices exactly what shipped, oversell is refused |
-| **CRM** | Leads, deals pipeline with weighted forecasting, lead conversion, tasks with due dates, duplicate detection, and a customer 360 timeline merging invoices, payments, quotes, deals and tasks |
-| **POS** | Register sessions, atomic cash/card sales, drawer counting with variance flagging, always-gated full-sale returns, and per-register shift summaries |
-| **Purchasing** | Vendors, bills, purchase orders with goods receipts and three-way matching, payment terms, supplier price history and lead-time memory, close-with-backorder |
-| **Inventory** | Append-only stock ledger with moving-average valuation, reorder alerts, reservations, cycle counts, locations, lots, internal transfers, barcodes, and GL reconciliation |
-| **Manufacturing** | Multi-level BOMs with scrap allowances, work orders, production runs with full reversal, lot traceability, can-we-produce-N planning |
-| **People & projects** | Employee structure, attendance with late flags, derived leave balances, recruitment-lite through to hire, projects kanban, and expense claims with policy limits and duplicate detection |
-| **Marketing** | Saved deterministic segments, campaigns with opt-out honoured at send time, and the append-only send log as the analytics (no tracking pixels) |
-| **Support** | Helpdesk tickets with numbers, priority/category/SLA, canned responses, KB articles, and SLA-breach signals |
-| **Documents** | Folders, business-record links, and append-only version history with expiry signals |
-| **Understanding** | `analytics.explainChange` decomposes a revenue change into exact, property-tested contributions with drill-to-invoice; `askYourBusiness` answers from cited extracts and proposes a governed action |
-| **Signals** | Cross-module needs-attention registry: deterministic producers aggregated red-first with evidence and a suggested governed action |
-| **Routines** | The agent on a schedule in plain language, running headless under a least-privilege bundle, silent on `NO_ACTION`, triggerable by webhook |
-| **Messaging** | Team channels and DMs; the agent participates under its own authority |
-| **Creator Mode** | The agent proposes platform changes as governed artifacts; humans merge |
+| Area                  | What works today                                                                                                                                                                                                                                                              |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Accounting**        | Double-entry GL with immutable postings and mirror reversals, AR/AP subledgers, period close, trial balance, P&L, balance sheet, direct-method cash flow, customer and supplier statements, 13-week cash forecast                                                             |
+| **Approvals**         | Human-in-the-loop gates on money above thresholds; identity and destructive actions always require a person                                                                                                                                                                   |
+| **Inbox**             | One ranked queue for approvals, risks, and opportunities across accounting, inventory, CRM, people, documents, and support, with a governed next step and an AI brief                                                                                                         |
+| **Audit**             | Append-only hash-chained event ledger of everything humans and agents did; replayable agent session trajectories                                                                                                                                                              |
+| **Sales**             | Reservation-anchored orders: confirming checks credit headroom and reserves stock, delivery consumes reservations and invoices exactly what shipped, oversell is refused                                                                                                      |
+| **CRM**               | Leads, deals pipeline with weighted forecasting, lead conversion, tasks with due dates, duplicate detection, and a customer 360 timeline merging invoices, payments, quotes, deals and tasks                                                                                  |
+| **POS**               | Register sessions, atomic cash/card sales, drawer counting with variance flagging, always-gated full-sale returns, and per-register shift summaries                                                                                                                           |
+| **Purchasing**        | Vendors, bills, purchase orders with goods receipts and three-way matching, payment terms, supplier price history and lead-time memory, close-with-backorder                                                                                                                  |
+| **Inventory**         | Append-only stock ledger with moving-average valuation, reorder alerts, reservations, cycle counts, locations, lots, internal transfers, barcodes, and GL reconciliation                                                                                                      |
+| **Manufacturing**     | Multi-level BOMs with scrap allowances, work orders, production runs with full reversal, lot traceability, can-we-produce-N planning                                                                                                                                          |
+| **People & projects** | Employee structure, attendance with late flags, derived leave balances, recruitment-lite through to hire, projects kanban, and expense claims with policy limits and duplicate detection                                                                                      |
+| **Marketing**         | Saved deterministic segments, campaigns with opt-out honoured at send time, and the append-only send log as the analytics (no tracking pixels)                                                                                                                                |
+| **Support**           | A composable customer support app with horizontal Inbox, Overview, Knowledge, Channels, and Settings tabs, a three-pane desk with queue triage, ticket and SLA context, the customer's own invoice balance, canned replies, KB articles, and copilot drafts a person releases |
+| **Documents**         | Folders, business-record links, and append-only version history with expiry signals                                                                                                                                                                                           |
+| **Understanding**     | `analytics.explainChange` decomposes a revenue change into exact, property-tested contributions with drill-to-invoice; `askYourBusiness` answers from cited extracts and proposes a governed action                                                                           |
+| **Signals**           | Cross-module needs-attention registry: deterministic producers aggregated red-first with evidence and a suggested governed action                                                                                                                                             |
+| **Routines**          | The agent on a schedule in plain language, running headless under a least-privilege bundle, silent on `NO_ACTION`, triggerable by webhook                                                                                                                                     |
+| **Messaging**         | Team channels and DMs; the agent participates under its own authority                                                                                                                                                                                                         |
+| **Creator Mode**      | The agent proposes platform changes as governed artifacts; humans merge                                                                                                                                                                                                       |
+
+### Customer support app
+
+`/support` is the first app on the composable app surface. It keeps the global
+rail flat and owns horizontal Inbox, Overview, Knowledge, Channels, and Settings tabs,
+with deep links such as `/support/inbox/<conversation-id>`. The thread keeps the
+handoff reason visible, the context panel reads the customer's own ticket and
+invoice record, and the copilot draft stays in the composer until a person
+releases it. Unbound website-widget threads reach the same queue, so a widget
+handoff reaches a person without attaching unverified account facts. The app's
+live waiting status and New conversation action sit in the global top bar, and
+the horizontal tabs start directly below it. The support module still gates the
+app.
+
+Seed a reviewable desk into an existing workspace:
+
+```sh
+pnpm seed:support -- --org <workspace-slug-or-uuid> [--billing]
+# or
+SUPPORT_SEED_ORG=<workspace-slug-or-uuid> pnpm seed:support
+```
+
+The seed writes through the governed capability path and replaces only the
+Northwind demo conversations. It creates demo widget settings only when the
+workspace has none, so an existing embed token, auto-reply choice, or greeting
+is preserved. Use `--billing` to create one unpaid invoice for the refund
+conversation when Accounting is enabled.
+
+### Settings workspace
+
+`/settings` now uses the ChasteDesk-style settings anatomy: a grouped section
+index on the left and a focused configuration column on the right. The index has
+three groups, General, AI & automation, and Operations, with section URLs such as
+`/settings/modules`. Workspace and Governance keep their related views together:
+Workspace holds General and Print branding, and Governance holds Policy and
+Quality. Email and Agent are exposed as their own sections instead of being
+buried inside Workspace or AI. The support app has the same shape at
+`/support/settings`, with its own channel controls, personal support notification
+preference, shared-settings links, and audit trail.
 
 ## Quick start
 
@@ -133,11 +168,11 @@ measure.
 24.18.0, pnpm 11.9.0, and Go 1.27.1. Each command ran three times in sequence
 with shared dependency and compiler caches left warm between runs.
 
-| Build | Command | Median | p95 | Median peak RSS |
-| --- | --- | ---: | ---: | ---: |
-| Next.js | `pnpm --filter web build` | 34.90 s | 340.19 s | 886,408 kB |
-| Vite + React + TypeScript | `pnpm --filter @chaste/web-vite build` | 25.77 s | 27.20 s | 739,596 kB |
-| Go API and workers | `go -C apps/api build ./cmd/api ./cmd/jobs-worker ./cmd/outbox-worker` | 4.41 s | 4.59 s | 255,360 kB |
+| Build                     | Command                                                                |  Median |      p95 | Median peak RSS |
+| ------------------------- | ---------------------------------------------------------------------- | ------: | -------: | --------------: |
+| Next.js                   | `pnpm --filter web build`                                              | 34.90 s | 340.19 s |      886,408 kB |
+| Vite + React + TypeScript | `pnpm --filter @chaste/web-vite build`                                 | 25.77 s |  27.20 s |      739,596 kB |
+| Go API and workers        | `go -C apps/api build ./cmd/api ./cmd/jobs-worker ./cmd/outbox-worker` |  4.41 s |   4.59 s |      255,360 kB |
 
 In this sample, the Vite build median is about **26% lower** than the Next.js
 median, and its median peak memory use is about **17% lower**. The three Go
@@ -165,9 +200,9 @@ The separate development-server startup sample, measured 2026-10-01 on the
 same machine with three alternating runs and warm caches, recorded a lower
 Vite median in this sample:
 
-| Dev server | Command | Median process-spawn to TCP-listener time |
-| --- | --- | ---: |
-| React + Vite app | `pnpm dev:vite` | 2.767 s |
+| Dev server       | Command         | Median process-spawn to TCP-listener time |
+| ---------------- | --------------- | ----------------------------------------: |
+| React + Vite app | `pnpm dev:vite` |                                   2.767 s |
 
 The Next.js compatibility app those samples compared against was retired in the
 React/Go migration, so the benchmark now measures the Vite server alone.
@@ -419,6 +454,11 @@ Controls and safety nets:
 - [Capability coverage](docs/CAPABILITY_COVERAGE.md), module-by-module agent parity and the contract gate
 - [ADRs](docs/adr/), why things are the way they are
 - [Changelog](CHANGELOG.md), every behavioral change, per Keep a Changelog
+- [Search and AI discovery](docs/SEO.md), metadata, crawler rules, structured data, and `llms.txt`
+
+## Search and AI discovery
+
+The public site publishes canonical metadata, `SoftwareApplication` structured data, crawler rules, and a concise `llms.txt` for assistants and retrieval systems. The authenticated workspace is intentionally `noindex`; only the sign-in entry is crawlable. See [docs/SEO.md](docs/SEO.md) for the exact surface and the deployment-domain requirement for a sitemap.
 
 ## Contributing
 

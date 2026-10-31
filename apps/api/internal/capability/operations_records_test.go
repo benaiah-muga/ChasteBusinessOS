@@ -2,6 +2,7 @@ package capability
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -25,12 +26,13 @@ func TestOperationalRecordsPersistDeduplicateAndCard(t *testing.T) {
 		return result
 	}
 	execute(`{"kind":"exception","stableKey":"inventory:low-stock:CEM-1","status":"open","title":"CEM-1 below reorder point","summary":"Available stock is below the reorder point.","details":{"severity":"high","next":"Prepare a purchase proposal","evidence":{"sku":"CEM-1","available":5000}}} `)
-	second := execute(`{"kind":"exception","stableKey":"inventory:low-stock:CEM-1","status":"acknowledged","title":"CEM-1 below reorder point","summary":"Owner acknowledged the stock risk.","details":{"severity":"high","next":"Approve the proposal"}}`)
+	second := execute(`{"kind":"exception","stableKey":"inventory:low-stock:CEM-1","status":"acknowledged","title":"CEM-1 below reorder point","summary":"Owner acknowledged the stock risk.","details":{"severity":"high","next":"Approve the proposal"},"ownerUserId":"` + fx.userID + `"}`)
 	var record struct {
-		ID       string `json:"id"`
-		Revision int    `json:"revision"`
-		Status   string `json:"status"`
-		Card     struct {
+		ID          string  `json:"id"`
+		Revision    int     `json:"revision"`
+		Status      string  `json:"status"`
+		OwnerUserID *string `json:"ownerUserId"`
+		Card        struct {
 			Kind     string `json:"kind"`
 			Severity string `json:"severity"`
 			Next     string `json:"next"`
@@ -41,6 +43,22 @@ func TestOperationalRecordsPersistDeduplicateAndCard(t *testing.T) {
 	}
 	if record.Revision != 2 || record.Status != "acknowledged" || record.Card.Kind != "exception" || record.Card.Severity != "high" {
 		t.Fatalf("second record = %+v", record)
+	}
+	if record.OwnerUserID == nil || *record.OwnerUserID != fx.userID {
+		t.Fatalf("owner = %v, want the assigned member %s", record.OwnerUserID, fx.userID)
+	}
+
+	foreignUser := executorUUID(t)
+	if _, err := fx.owner.Exec(fx.ctx, `INSERT INTO users (id, email, name) VALUES ($1::uuid, $2, 'Foreign owner')`, foreignUser, "foreign-owner-"+foreignUser[:8]+"@fixture.test"); err != nil {
+		t.Fatal(err)
+	}
+	foreignRaw := json.RawMessage(`{"kind":"exception","stableKey":"inventory:low-stock:FOREIGN","status":"open","title":"Foreign owner probe","ownerUserId":"` + foreignUser + `"}`)
+	foreignClaims := fx.humanClaims(foreignRaw, "operations-foreign-owner-"+executorUUID(t))
+	foreignClaims.CapabilityID = upsertOperationalRecordCapabilityID
+	foreignClaims.Permissions = []string{"operations.write", "operations.read"}
+	_, foreignErr := fx.executor.Execute(fx.ctx, foreignClaims, upsertOperationalRecordCapabilityID, foreignRaw)
+	if foreignErr == nil || !strings.Contains(foreignErr.Error(), "owner must be a member of this organization") {
+		t.Fatalf("foreign owner error = %v, want membership refusal", foreignErr)
 	}
 	if got := fx.count(`SELECT count(*) FROM operational_records WHERE org_id = $1::uuid AND kind = 'exception'`, fx.orgID); got != 1 {
 		t.Fatalf("exception rows = %d, want one deduplicated record", got)

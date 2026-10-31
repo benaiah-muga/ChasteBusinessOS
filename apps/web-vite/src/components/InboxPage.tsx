@@ -16,6 +16,7 @@ import {
 import { fetchApprovals, type Approval } from "../api/approvals";
 import { fetchExceptions, saveException, type OperationalRecord } from "../api/operations";
 import { fetchSignals, type Signal } from "../api/signals";
+import { fetchTeam, type TeamData } from "../api/team";
 import { summarizeWork } from "../api/dashboard";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -25,7 +26,8 @@ import { PageHeader } from "../ui/page-header";
 import { useToast } from "../ui/toast";
 import "./inbox-page.css";
 
-type Filter = "all" | "red" | "orange" | "green" | "approval";
+type Filter = "all" | "red" | "orange" | "green" | "approval" | "mine";
+type TeamMember = TeamData["members"][number];
 
 type ExceptionStatus = "open" | "acknowledged" | "resolved";
 
@@ -234,6 +236,7 @@ function askPrompt(item: QueueItem): string {
 
 const FILTERS: { id: Filter; label: string }[] = [
   { id: "all", label: "Everything" },
+  { id: "mine", label: "Mine" },
   { id: "red", label: "Urgent" },
   { id: "orange", label: "Coming up" },
   { id: "green", label: "Opportunities" },
@@ -247,14 +250,16 @@ export function InboxPage({ organizationId = null, actorId = null }: { organizat
   const [brief, setBrief] = useState<string | null>(null);
   const [briefBusy, setBriefBusy] = useState(false);
   const [busyItemId, setBusyItemId] = useState<string | null>(null);
+  const [members, setMembers] = useState<TeamMember[]>([]);
   const { toast } = useToast();
 
   const load = useCallback(async (signal?: AbortSignal) => {
     setState({ status: "loading" });
-    const [signalsResult, approvalsResult, exceptionsResult] = await Promise.allSettled([
-      fetchSignals({}, signal), fetchApprovals(organizationId, signal), fetchExceptions(signal),
+    const [signalsResult, approvalsResult, exceptionsResult, teamResult] = await Promise.allSettled([
+      fetchSignals({}, signal), fetchApprovals(organizationId, signal), fetchExceptions(signal), fetchTeam(signal),
     ]);
     if (signal?.aborted) return;
+    setMembers(teamResult.status === "fulfilled" ? teamResult.value.members : []);
     if (signalsResult.status === "rejected" && approvalsResult.status === "rejected" && exceptionsResult.status === "rejected") {
       const reason = approvalsResult.reason instanceof Error ? approvalsResult.reason.message : "The inbox is unavailable. Try again.";
       setState({ status: "failed", message: reason });
@@ -289,24 +294,28 @@ export function InboxPage({ organizationId = null, actorId = null }: { organizat
     orange: items.filter((item) => item.severity === "orange").length,
     green: items.filter((item) => item.severity === "green").length,
     approval: items.filter((item) => item.kind === "approval").length,
-  }), [items]);
+    mine: items.filter((item) => item.record?.ownerUserId === actorId && item.kind !== "approval").length,
+  }), [actorId, items]);
+  const memberNames = useMemo(() => new Map(members.map((member) => [member.userId, member.name?.trim() || member.email])), [members]);
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return items.filter((item) => {
       if (filter === "approval" && item.kind !== "approval") return false;
-      if (filter !== "all" && filter !== "approval" && item.severity !== filter) return false;
+      if (filter === "mine" && (item.kind === "approval" || item.record?.ownerUserId !== actorId)) return false;
+      if (filter !== "all" && filter !== "approval" && filter !== "mine" && item.severity !== filter) return false;
       if (!needle) return true;
       return `${item.title} ${item.detail} ${item.module} ${item.capabilityId ?? ""}`.toLowerCase().includes(needle);
     });
   }, [filter, items, query]);
 
-  async function updateException(item: QueueItem, status: ExceptionStatus, assignToMe = false) {
+  async function updateException(item: QueueItem, status: ExceptionStatus, assignOwnerId?: string) {
     if (!item.stableKey) return;
     if (!actorId || !organizationId) {
       toast({ title: "Sign in to update this exception", description: "Exception ownership and decisions are recorded against your account.", tone: "danger" });
       return;
     }
+    const ownerUserId = assignOwnerId ?? item.record?.ownerUserId;
     setBusyItemId(item.id);
     try {
       const outcome = await saveException({
@@ -324,7 +333,7 @@ export function InboxPage({ organizationId = null, actorId = null }: { organizat
           href: item.href,
           stale: item.stale ?? false,
         },
-        ...(assignToMe && status === "acknowledged" ? { ownerUserId: actorId } : {}),
+        ...(ownerUserId ? { ownerUserId } : {}),
       }, { actorId, organizationId });
       if (outcome.kind === "pending") {
         toast({ title: "Exception update waiting for approval", description: outcome.reason, tone: "default" });
@@ -340,7 +349,7 @@ export function InboxPage({ organizationId = null, actorId = null }: { organizat
       });
       toast({
         title: status === "resolved" ? "Exception resolved" : status === "acknowledged" ? "Exception acknowledged" : "Exception reopened",
-        description: assignToMe ? "It is now assigned to you." : "The decision is recorded in the audit trail and can be reopened.",
+        description: assignOwnerId ? "Ownership is recorded in the audit trail." : "The decision is recorded in the audit trail and can be reopened.",
         tone: "success",
       });
     } catch (error) {
@@ -506,7 +515,11 @@ export function InboxPage({ organizationId = null, actorId = null }: { organizat
                           {item.status === "acknowledged" ? "Acknowledged" : "Resolved"}
                         </span>
                       )}
-                      {item.record?.ownerUserId && item.record.ownerUserId === actorId && <span className="inbox-item-owner">Assigned to you</span>}
+                      {item.record?.ownerUserId && (
+                        <span className="inbox-item-owner">
+                          Assigned to {item.record.ownerUserId === actorId ? "you" : memberNames.get(item.record.ownerUserId) ?? "a teammate"}
+                        </span>
+                      )}
                       <span>{timeAgo(item.createdAt)}</span>
                     </div>
                     <p className="inbox-item-title">{item.title}</p>
@@ -514,13 +527,30 @@ export function InboxPage({ organizationId = null, actorId = null }: { organizat
                     {item.capabilityId && <p className="inbox-item-action">Suggested next step <strong>{actionName(item.capabilityId) ?? item.capabilityId}</strong></p>}
                   </div>
                   <div className="inbox-item-actions">
+                    {item.kind !== "approval" && actorId && members.length > 0 && (
+                      <label className="inbox-item-assign">
+                        <span className="inbox-visually-hidden">Assign exception</span>
+                        <select
+                          aria-label="Assign exception"
+                          value={item.record?.ownerUserId ?? ""}
+                          disabled={busyItemId !== null}
+                          onChange={(event) => {
+                            const ownerUserId = event.currentTarget.value;
+                            if (ownerUserId) void updateException(item, "acknowledged", ownerUserId);
+                          }}
+                        >
+                          <option value="">Assign to...</option>
+                          {members.map((member) => <option key={member.userId} value={member.userId}>{member.name?.trim() || member.email}</option>)}
+                        </select>
+                      </label>
+                    )}
                     {item.kind !== "approval" && item.status === "open" && (
                       <>
                         <button type="button" className="ui-button ui-button-quiet ui-button-sm" disabled={busyItemId !== null} onClick={() => void updateException(item, "acknowledged")}>
                           Acknowledge
                         </button>
                         {actorId && (
-                          <button type="button" className="ui-button ui-button-quiet ui-button-sm" disabled={busyItemId !== null} onClick={() => void updateException(item, "acknowledged", true)}>
+                          <button type="button" className="ui-button ui-button-quiet ui-button-sm" disabled={busyItemId !== null} onClick={() => void updateException(item, "acknowledged", actorId)}>
                             Take it
                           </button>
                         )}

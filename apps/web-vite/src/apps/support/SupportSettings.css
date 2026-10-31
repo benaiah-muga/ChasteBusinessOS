@@ -1,0 +1,212 @@
+.support-settings-page {
+  padding: 0;
+  background: var(--paper-200);
+}
+
+.support-settings-overview {
+  display: grid;
+  gap: 14px;
+}
+
+.support-settings-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.support-settings-stat {
+  display: grid;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 13px 14px;
+  background: var(--paper-50);
+}
+
+.support-settings-stat > span {
+  color: var(--ink-400);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.support-settings-stat strong {
+  color: var(--ink-900);
+  font-family: var(--support-display, Georgia, "Times New Roman", serif);
+  font-size: 27px;
+  font-weight: 500;
+  letter-spacing: -0.04em;
+  line-height: 1.1;
+}
+
+.support-settings-stat small {
+  color: var(--ink-400);
+  font-size: 10px;
+}
+
+.support-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.support-settings-card {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  padding: 16px;
+  background: var(--paper-50);
+  box-shadow: 0 7px 22px rgb(48 45 36 / 4%);
+}
+
+.support-settings-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 10px;
+}
+
+.support-settings-card-head > svg {
+  flex: 0 0 auto;
+  color: var(--gold-600);
+}
+
+.support-settings-eyebrow {
+  margin: 0 0 4px;
+  color: var(--gold-700);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.support-settings-card h3 {
+  margin: 0;
+  color: var(--ink-900);
+  font-family: var(--support-display, Georgia, "Times New Roman", serif);
+  font-size: 20px;
+  font-weight: 500;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+}
+
+.support-settings-card > p {
+  margin: 0;
+  color: var(--ink-500);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+.support-settings-card .support-settings-muted {
+  color: var(--ink-400);
+}
+
+.support-settings-success {
+  margin: 0;
+  color: #4f6b52;
+  font-size: 10px;
+}
+
+.support-settings-error {
+  border: 1px solid #ecc6bd;
+  border-radius: 7px;
+  padding: 8px 10px;
+  background: #fbf0ed;
+  color: #9d4438;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.support-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+}
+
+.support-settings-link-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.support-settings-link {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: var(--paper-100);
+  color: var(--ink-600);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease;
+}
+
+.support-settings-link:hover {
+  border-color: var(--gold-300);
+  background: var(--gold-100);
+}
+
+.support-settings-link:focus-visible {
+  outline: 2px solid var(--gold-600);
+  outline-offset: 2px;
+}
+
+.support-settings-link span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.support-settings-link strong {
+  color: var(--ink-800);
+  font-size: 11.5px;
+  font-weight: 650;
+}
+
+.support-settings-link small {
+  color: var(--ink-400);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.support-settings-link > svg {
+  flex: 0 0 auto;
+  color: var(--gold-600);
+}
+
+.support-settings-channels {
+  display: grid;
+  gap: 12px;
+}
+
+.support-settings-page .support-channel-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (max-width: 1000px) {
+  .support-settings-card .support-settings-link-grid,
+  .support-settings-page .support-channel-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 680px) {
+  .support-settings-stat-grid,
+  .support-settings-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

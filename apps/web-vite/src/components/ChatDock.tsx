@@ -35,7 +35,9 @@ export function ChatDock({ pathname, organizationId = null, actorId = null }: { 
 
   // The chat page is the expanded form of this dock; showing both at once
   // would put two composers on the same conversation.
-  if (pathname === "/chat") return null;
+  // The support desk owns a full-height workspace and composer; a floating
+  // dock would cover the reply box. Workmate stays in the global rail.
+  if (pathname === "/chat" || pathname === "/support" || pathname.startsWith("/support/")) return null;
 
   const statusLine = busy
     ? step

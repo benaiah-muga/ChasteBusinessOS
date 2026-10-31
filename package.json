@@ -23,6 +23,7 @@
     "demo:m5": "tsx --tsconfig tsconfig.scripts.json --env-file-if-exists=.env scripts/demo-m5.ts",
     "demo:m6": "tsx --tsconfig tsconfig.scripts.json --env-file-if-exists=.env scripts/demo-m6.ts",
     "demo:support": "tsx --tsconfig tsconfig.scripts.json --env-file-if-exists=.env scripts/demo-support.ts",
+    "seed:support": "tsx --tsconfig tsconfig.scripts.json --env-file-if-exists=.env scripts/seed-support-desk.ts",
     "demo:m7": "tsx --tsconfig tsconfig.scripts.json --env-file-if-exists=.env scripts/demo-m7.ts",
     "demo:m8": "tsx --tsconfig tsconfig.scripts.json --env-file-if-exists=.env scripts/demo-m8.ts",
     "nl:test": "tsx --tsconfig tsconfig.scripts.json --env-file-if-exists=.env scripts/nl-tasks.ts",
@@ -73,7 +74,7 @@
     "typescript-eslint": "^8.43.0",
     "vitest": "^3.2.4"
   },
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "The agentic ERP: describe your business, and an AI co-worker runs it under your authority",
   "license": "Apache-2.0"
 }

@@ -345,3 +345,22 @@ exist rather than add another AI surface. The decision record is
 Still open: document unlink and correction, automated extraction lines in the
 Go runtime, reconciliation of a delivered order against the bank feed, and a
 cross-workflow case view that shows a single customer or supplier journey.
+
+## 9. Opportunity attribution and exception ownership (29 October)
+
+Two joins from the workflow continuity review are now explicit, recorded in
+[ADR 0103](../adr/0103-opportunity-attribution-and-exception-ownership.md).
+
+- Quotes carry the CRM deal they came from. A quote customer must match the
+  deal customer, quote reads expose the deal title, and the Sales workspace
+  links an opportunity at quote creation. Deal stage remains a separate
+  governed decision; the quote-to-cash playbook moves the deal to won only
+  after order confirmation.
+- Exceptions assign to any member of the workspace through the operational
+  record path. The record write now checks membership, so a foreign user id is
+  a typed refusal. The Inbox shows owner names, preserves ownership through
+  resolve, and adds a Mine queue.
+
+Still open: cash-constrained replenishment enforcement, cumulative purchase
+mandates, document unlink and correction, automated invoice-line extraction,
+and linking delivered orders to bank reconciliation.

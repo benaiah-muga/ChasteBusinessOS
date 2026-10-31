@@ -1,0 +1,25 @@
+# ChasteBusinessOS
+
+> Open-source, AI-native business operating system for governed operations. People, agents, and workers use one capability pipeline: permission-checked, policy-gated, recorded in an append-only audit ledger, and reversible where a capability declares an inverse.
+
+ChasteBusinessOS is an agentic ERP for finance, sales, purchasing, inventory, manufacturing, projects, CRM, customer support, documents, people operations, and analytics. It is built with a React and Vite client, Go APIs and workers, and PostgreSQL with pgvector.
+
+## Public entry
+
+- [Sign in](/login): the public entry to a workspace.
+
+## Source and product context
+
+- [GitHub repository](https://github.com/benaiah-muga/ChasteBusinessOS)
+- [README](https://github.com/benaiah-muga/ChasteBusinessOS/blob/main/README.md)
+- [Architecture](https://github.com/benaiah-muga/ChasteBusinessOS/blob/main/ARCHITECTURE.md)
+- [Roadmap](https://github.com/benaiah-muga/ChasteBusinessOS/blob/main/ROADMAP.md)
+- [Setup guide](https://github.com/benaiah-muga/ChasteBusinessOS/blob/main/docs/SETUP.md)
+- [ADRs](https://github.com/benaiah-muga/ChasteBusinessOS/tree/main/docs/adr)
+- [Changelog](https://github.com/benaiah-muga/ChasteBusinessOS/blob/main/CHANGELOG.md)
+
+## Notes
+
+- Authenticated workspace pages are private and intentionally noindex.
+- The product is open source under the Apache License 2.0.
+- The system is in alpha; the roadmap is the source of truth for supported scope.

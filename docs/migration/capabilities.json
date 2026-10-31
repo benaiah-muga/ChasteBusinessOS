@@ -1279,6 +1279,11 @@
           "customerId": {
             "type": "string"
           },
+          "dealId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Optional CRM deal UUID; the quote customer must match the deal customer when one is set."
+          },
           "memo": {
             "type": "string"
           },

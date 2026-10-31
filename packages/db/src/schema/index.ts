@@ -2538,6 +2538,8 @@ export const quotes = pgTable(
     taxMinor: integer("tax_minor").notNull(),
     totalMinor: integer("total_minor").notNull(),
     memo: text("memo"),
+    /** CRM opportunity this quote was written against, when one exists. */
+    dealId: uuid("deal_id").references(() => deals.id, { onDelete: "set null" }),
     convertedInvoiceId: uuid("converted_invoice_id").references(() => invoices.id, { onDelete: "set null" }),
     convertedOrderId: uuid("converted_order_id").references((): AnyPgColumn => salesOrders.id, { onDelete: "set null" }),
     /** Past this instant the quote can no longer be accepted (M9). */
@@ -2547,7 +2549,7 @@ export const quotes = pgTable(
     createdByActorId: uuid("created_by_actor_id"),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex("quote_org_number_idx").on(t.orgId, t.number)],
+  (t) => [uniqueIndex("quote_org_number_idx").on(t.orgId, t.number), index("quote_org_deal_idx").on(t.orgId, t.dealId)],
 );
 
 export const quoteLines = pgTable("quote_lines", {

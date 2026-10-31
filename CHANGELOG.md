@@ -11,8 +11,25 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-01
+
+This minor release makes Customer support the first composable app surface,
+introduces the shared Settings workspace and the editorial page system, and
+publishes the project's search and AI discovery surface.
+
 ### Added
 
+- Public web discovery now includes a product title and description, Open Graph and Twitter metadata, `SoftwareApplication` structured data, a web manifest, crawler rules, `llms.txt`, and route-level canonical and robots handling. The sign-in entry is indexable; every authenticated workspace, portal, widget, invitation, reset, print, and onboarding page is explicitly `noindex,nofollow`. The SEO surface and its deployment-domain boundary are documented in [docs/SEO.md](docs/SEO.md).
+- The customer support module now has a composable app surface at `/support`: horizontal Inbox, Overview, Knowledge, Channels, and Settings tabs, deep-linkable conversations at `/support/inbox/<id>`, a three-pane queue, thread, and context desk, a visible handoff reason, staff and customer message modes, quick replies, a copilot draft that stays in the composer until a person sends it, and responsive desktop and mobile layouts. The queue includes unbound website-widget conversations, so a widget escalation reaches a person with the visitor email and no unverified account facts. The support customer picker now accepts `support.read` as well as `crm.read` or `pos.sell`, so a support-only role can choose an existing customer without opening the CRM surface.
+- Support capability reads now carry staff-facing triage context: ticket number, priority, category, assignee id and name, SLA due time, channel, customer email, and created and updated times in the conversation list and the full detail read. The legacy agent-facing detail projection is unchanged, and the legacy `/api/support` list keeps its seven-field shape without the customer email and remains customer-bound.
+- `pnpm seed:support` seeds a reviewable Northwind desk into an existing workspace through the governed capability path, with eight governed customer conversations, one unbound website-widget escalation, quick replies, knowledge articles, internal tickets, and an optional unpaid invoice for billing context. It replaces only its own demo conversations and leaves invoices and other business records alone.
+- New support app tests cover horizontal navigation, deep links, queue filters, staff and customer messages, copilot drafts, quick replies, resolve, escalation, ticket edits, new conversations, unbound widget threads, module-disabled state, retry recovery, failed writes, knowledge, channel settings, and support settings.
+- Every business page now uses the shared editorial surface: serif display headings, balanced section titles, gold eyebrow labels, warm cards, and one gold-rule tab language. The support app and Settings retain their own denser chrome and section navigation. The README opening was rewritten as a product and engineering overview instead of a manifesto.
+- CBOS Settings now uses a shared settings workspace: a grouped section index, a focused configuration column, and URL-addressable sections at `/settings/<section>`. The former tab strip is gone. The index is reduced to General, AI & automation, and Operations, with no separate access links; Team & access sits inside Workspace. Email and Agent are exposed as first-class sections, while Print branding lives under Workspace and Quality under Governance. The Customer support app adds a Settings tab at `/support/settings` with overview, real channel configuration, the person's support ticket notification preference, shared workspace links, and audit links.
+- Settings typography is rebalanced around a 42px page title, 29px section title, 12px navigation and body, and 11px supporting copy. The CBOS page lede is removed, and the workspace status is moved inline beside the Settings title instead of taking a stacked row, so the page opens directly on the section index. The support palette's muted sage, plum, and slate tones appear only on group labels, section icons, and the settings status dot; gold remains the single active accent.
+- Settings and support configuration now have a reusable layout and test coverage: `SettingsWorkspace` owns the left index and content anatomy, `SettingsPage` covers section links and a deep-linked Modules section, and the support app covers its Settings tab, embedded channel controls, and notification preference save.
+- Quotes can be linked to the CRM opportunity they came from. `accounting.createQuote` accepts an optional `dealId`, refuses a deal from another workspace or a customer that does not match the deal customer, and quote reads include the deal title. The Sales workspace adds an Opportunity selector that prefills the customer and shows the linked deal on the quote row.
+- Business exceptions can now be assigned to any member of the workspace. The Inbox lists team members, shows the owner's name, preserves ownership through acknowledge and resolve, and adds a "Mine" queue. The governed record write refuses an owner who is not a member of the organization.
 - Vendor and employee lookups now use the same normalized identity rules as customers: exact email, name tokens in any order, company suffixes ignored for vendors, and person normalization for employees. `resolve_entity` reports why each vendor or employee matched.
 - A gated action that is not a purchase order now renders as an "Approval required" card in the conversation. It shows the capability, risk class, rationale, and up to six stored payload fields with sensitive keys redacted, and it supports approve and reject with an honest outcome. Purchase orders keep the line-item proposal card.
 
@@ -169,6 +186,10 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- The Customer support app no longer spends a separate row on its own business-app header. The shell now exposes a support action slot in the global top bar, and the app portals its live waiting status and New conversation action into it. The Inbox, Overview, Knowledge, Channels, and Settings tabs start directly below the top bar, saving the app header row while keeping the action state inside the app. The global Create launcher is replaced on support routes; the waiting count hides at 1280px and the action becomes icon-only at 1120px.
+- The support seed now preserves an existing workspace's embed token, auto-reply setting, and greeting. It creates the demo widget settings only when the workspace has none, so seeding demo conversations cannot silently change a real channel configuration.
+- `/support` now opens the Customer support app instead of the old single Support page. The app owns its internal horizontal tabs, the global rail stays flat, and the floating Workmate dock is hidden so the full-height composer is not covered. The old Support page and its isolated tests are removed.
+- The support queue renders ticket metadata from the read contract instead of deriving it per thread. The context panel uses `support.lookupOrderStatus` to show the customer's own outstanding balance and recent invoices, labels counts as the loaded queue, and does not invent fields the support schema does not have.
 - The in-conversation approval card chooses its presentation from the approval's capability instead of whether the payload happens to contain lines. Only `purchasing.createPurchaseOrder` renders as a purchase proposal; every other governed action uses the generic card.
 - The approvals page and the conversation card now share one payload presentation module, so both redact the same sensitive keys and label fields the same way.
 
@@ -208,6 +229,9 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Fixed
 
+- `support.lookupOrderStatus` returned the conversation transcript because it parsed into the conversation-read input type. It now parses into its own input and returns the customer's invoice context. A regression test pins the distinction, and the support app uses the result for its billing context panel.
+- The support composer's quick-reply popover cancelled its own library request when the loading state changed, so the picker stayed empty. The in-flight read is no longer torn down, and a retry is available if it fails.
+- The support thread no longer scrolls the escalation reason out of view. The handoff reason sits above the transcript and stays visible while messages scroll, and the context panel shows the full subject.
 - A customer creation or other non-purchase approval in the conversation was labeled "Purchase proposal" and told the person the card could not review it. It now renders as a reviewable "Approval required" card.
 - `resolve_entity` returned vendors and employees on a literal substring only, so reordered names and formatted emails missed the record. They now use the ranked resolver.
 
@@ -644,7 +668,7 @@ The full v1 changelog is preserved at the bottom of this file.
   pending.
 
 - Vite Inventory module defaults now use Go for exact `GET` and `POST
-  /api/module-settings` requests. Go resolves the signed session and organization,
+/api/module-settings` requests. Go resolves the signed session and organization,
   keeps reads available to members, and executes saves through
   `iam.setModuleConfig`, which checks `iam.admin` and retains approval and
   audit handling. Missing inventory settings remain `{}`; unsupported module
@@ -1451,6 +1475,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - Session trajectory and durable-run detail reads now enforce matching response limits in the Go API and legacy API: 10,000 session events, 256 KiB per event, an 8 MiB session response, and 200 durable-run steps with a 2 MiB logical JSON response cap. Both APIs check visibility before revealing an oversized durable run.
 
 ### Changed
+
 - Route Vite module switchboard reads and the Projects page's GET/POST operations through Go by default. Project writes keep session, tenant, permission, approval, and intent checks; set the matching `CHASTE_GO_*_ROUTE` selector to `0` to restore legacy proxying, and the paired `GO_*_ROUTE` flag to `0` to unmount that Go handler.
 - Route Vite `/team` GET and POST requests through Go by default. Session verification, organization scope, capability permissions, approvals, and intent receipts remain enforced; set the matching Go and Vite team route flags to `0` for legacy fallback.
 - Enable the Vite Sessions page metrics read through Go by default. Set `CHASTE_GO_METRICS_ROUTE=0` to restore the legacy proxy, or `GO_METRICS_ROUTE=0` to unmount the Go handler; unsupported methods and extra paths retain legacy fallback.
@@ -1646,6 +1671,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - **Opt-in Go CRM saved-view writes.** Saving customer views can use the signed Go capability executor behind `GO_CRM_VIEW_WRITES=1`. The flag defaults off; human session checks, private-view ownership, approval handling, audit receipts, snapshot restore, and the legacy response contract are preserved. Unavailable or invalid Go outcomes fail closed without a TypeScript retry.
 
 ### Added
+
 - **Go IAM org settings and purchasing supplier analytics.** Module switchboard (set and restore, protected spine unioned in), per-module configuration, the blanket autonomy policy, print branding, and the supplier performance, price history, and statement reads are ported to the signed Go capability executor and jobs worker under `iam.admin` and `purchasing.read`. They are reachable through governed agent and worker dispatch; the settings routes keep their TypeScript handlers for now, so no new flags ship with this slice.
 - **Go manufacturing, marketing, HR openings, and reminder parity.** The manufacturing BOM and work-order surface (definition, explosion, costing, feasibility, production, reversal, lot traceability), the marketing campaign surface (segments, campaigns, opt-out-honoring sends, delivery analytics), HR job openings, and payment reminder building are ported to the signed Go capability executor and jobs worker. Job opening writes (`GO_HR_OPENINGS_WRITE=1`) and reminder building (`GO_ACCOUNTING_REMINDERS_READS=1`) are bridged behind default-off flags; manufacturing and marketing are reachable through governed agent and worker dispatch since no public route serves them today. Existing handlers keep every other action, and uncertain writes fail closed without retrying through TypeScript.
 - **Opt-in Go supplier AP aging read.** The purchasing AP aging report can be served by the signed Go capability executor behind `GO_PURCHASING_AP_AGING_READS=1`. The flag defaults off, all other purchasing actions keep their current handlers, the aging shape stays stable, and an unavailable Go service fails closed without retrying through TypeScript.
@@ -2114,15 +2140,15 @@ The full v1 changelog is preserved at the bottom of this file.
   payment-crash-retry money case.
 - **Least-privilege runtime database role** (`@chaste/db/roles`): `chaste_app`
   - NOBYPASSRLS, DML-only, no DDL - provisioned idempotently with grants on
-  existing tables and default privileges for future ones, so the application
-  can stop running as the superuser migration owner (migration 0014's stated
-  intent, previously never wired up: the deployed database had a single
-  superuser role, making RLS inert). `runMigrations` accepts
-  `MIGRATION_DATABASE_URL` for separated owner credentials. The role's
-  security contract (tenant-scoped reads, fail-closed without context, no
-  cross-tenant writes, no DDL) is pinned by five tests in
-  `packages/db/src/runtime-role.test.ts`. The application's own role flip is
-  deliberately not done yet - it requires the entry-point context audit (S01).
+    existing tables and default privileges for future ones, so the application
+    can stop running as the superuser migration owner (migration 0014's stated
+    intent, previously never wired up: the deployed database had a single
+    superuser role, making RLS inert). `runMigrations` accepts
+    `MIGRATION_DATABASE_URL` for separated owner credentials. The role's
+    security contract (tenant-scoped reads, fail-closed without context, no
+    cross-tenant writes, no DDL) is pinned by five tests in
+    `packages/db/src/runtime-role.test.ts`. The application's own role flip is
+    deliberately not done yet - it requires the entry-point context audit (S01).
 - **W0 evidence register** (`docs/W0_EVIDENCE_REGISTER.md`): F01–F17 and
   N01–N10 revalidated at the current commit with executed probes where
   possible - F01 (committed write reported as failure when the audit append
@@ -2180,6 +2206,7 @@ The full v1 changelog is preserved at the bottom of this file.
   for user-started runs, or the organization's configured model provider.
 
 ### Fixed
+
 - **CRM timeline profile switching.** Closing a customer profile or opening another surface invalidates its pending timeline request, so late results and errors do not update a dismissed profile.
 - **Unverified sessions could inspect organization membership names.** The organization list and switch endpoints now stop before querying memberships for unverified email sessions, preserving the empty organization context and preventing the active-org cookie from being set.
 - **Messages stayed on the loading screen.** The conversation list now loads on mount, and request failures leave loading state so the retry message can render.
@@ -2196,8 +2223,7 @@ The full v1 changelog is preserved at the bottom of this file.
   vendor and purchase-order controls have accessible names.
 - **Document and suggestion counts were silently zero.** Correlated count
   subqueries interpolated unqualified column names, so a subquery like
-  `where document_id = id` compared a table to itself and always returned
-  0. Authored-document version counts and the long-standing open-coding-
+  `where document_id = id` compared a table to itself and always returned 0. Authored-document version counts and the long-standing open-coding-
   suggestions count now qualify their columns explicitly.
 - **Deleted conversations and messages could still leak through detail paths.**
   Conversation lists, reads, sends, and the workmate transcript now exclude
@@ -2253,7 +2279,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - **My Work remainders read full outstanding (W0.5).** The receipt-remainder
   query correlated receipt lines with a bare `"id"` (Drizzle renders an
   embedded column unqualified, so the subquery compared each receipt's
-  `po_line_id` against its *own* id and always summed zero) - every card
+  `po_line_id` against its _own_ id and always summed zero) - every card
   read the full order as outstanding. The correlation is now explicit, the
   remainder subtracts returns net of receipts (a returned delivery demotes
   the order to partial in the domain but read as received here), quantities
@@ -2291,7 +2317,7 @@ The full v1 changelog is preserved at the bottom of this file.
   reached back to stamp `source_id` on a posted ledger row. The invoice is
   now created first and the entry posts with its source link at insert time
   - the only legitimate post-insert journal mutation is gone, and returns
-  find the sale entry exactly as before.
+    find the sale entry exactly as before.
 - **A generic journal reversal was offered as a complete business undo
   (N12).** Reversing a payment's GL entry left the invoice collecting on
   money already returned, reversing a payroll posting left the run marked
@@ -2481,6 +2507,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - Messages now loads the conversation list on entry and shows a recoverable error state if that request fails, instead of staying on the loading skeleton.
 
 ### Changed
+
 - Added an opt-in Vite POS return dispatch through the Go `pos.returnSale` capability, with 404-only same-intent fallback and actor/org scoped exact retry recovery. Pending and uncertain returns keep their UUID and locked payload across reloads until completion or a definitive refusal.
 - **Vite owns the main local app port.** The React preview now opens at `http://localhost:3000`; the legacy compatibility server runs at `http://localhost:3001`, and Vite proxies its remaining API routes there.
 - **The desktop sidebar is less crowded.** Removed its two compact quick-action shortcuts; module actions remain available in the page header.
@@ -2600,16 +2627,17 @@ puts tests around the two surfaces a new business touches first: the setup
 wizard and the spreadsheet import.
 
 ### Added
+
 - **Tests for the CSV importer and the setup wizard**: 140 tests covering
   `lib/csv.ts` (RFC 4180 quoting, line endings, ragged rows, header
   guessing), `lib/onboarding-flow.ts`, `components/onboarding/wizard.tsx`,
   and the shell app/module catalogs. The wizard's decisions - which screen
   comes next, whether a profile may be submitted, how a failure is explained
   - now live in `lib/onboarding-flow.ts` so they can be tested without
-  rendering React; the component tests then drive the real wizard through its
-  flows, including the one where a skipped step comes back. `jsdom` and
-  `@testing-library/react` are new `apps/web` dev dependencies, and
-  `pnpm-lock.yaml` is regenerated with them.
+    rendering React; the component tests then drive the real wizard through its
+    flows, including the one where a skipped step comes back. `jsdom` and
+    `@testing-library/react` are new `apps/web` dev dependencies, and
+    `pnpm-lock.yaml` is regenerated with them.
 - **Retail & reach (M13, ADR 0040)**: `pos.returnSale` - always-gated
   full-sale reversal that refunds through a mirrored entry, credits the
   invoice, and restores stock; per-register shift summaries; marketing-lite
@@ -2696,7 +2724,6 @@ wizard and the spreadsheet import.
   the stricter cap, so the onboarding blanket rule can be tightened per
   module without loosening anything.
 
-
 - **Inventory → GL closure (M7, ADR 0033)**: `inventory.postValuationSummary`
   reconciles the GL inventory account (1200) to the stock ledger's
   moving-average value with one balanced entry against COGS; money-class
@@ -2772,6 +2799,7 @@ wizard and the spreadsheet import.
   at a nonexistent `./apps/...` location, so the queue never drained.
 
 ### Changed
+
 - **Document memory indexing degrades to a zero vector**: `embedDocChunk` now
   inserts a content chunk with a zero-length embedding when the embedding
   service is unavailable (previously an embedding failure silently skipped the
@@ -2799,6 +2827,7 @@ wizard and the spreadsheet import.
   and `CONTRIBUTING.md` documents how to keep a stack from rotting.
 
 ### Fixed
+
 - **Version drift**: `package.json` said `0.2.0` while the changelog's latest
   release was `0.4.0`, so no file in the repository named the version it was
   on. The manifest now reads `0.5.0`, matching this entry. One gap is recorded
@@ -2850,6 +2879,7 @@ wizard and the spreadsheet import.
 ## [0.4.0], 2026-08-26
 
 ### Added
+
 - **Tabbed app framework (`AppFrame`)**: every business app now opens into a
   shared frame - breadcrumb, app identity, underline tabs with live counts.
   Tabs persist per app (`persistKey`) and initialize from `?tab=` for
@@ -2878,6 +2908,7 @@ wizard and the spreadsheet import.
 - **Meridian is the default theme** for new devices.
 
 ### Changed
+
 - **Dashboard fits one desktop screen**: the ledger band compacts (tighter
   paddings, chart drawn inside the band), setup shows the first two steps
   with "Show N more" expandable, the ledger feed trims to three entries, and
@@ -2892,6 +2923,7 @@ wizard and the spreadsheet import.
   bordered ledgers, and a staggered entrance that respects reduced motion.
 
 ### Fixed
+
 - **ThemeMenu hydration mismatch**: replaced direct DOM read
   (`document.documentElement.dataset.mode`) with the `useMode()` state
   during render, eliminating the server/client HTML mismatch that triggered
@@ -2902,6 +2934,7 @@ wizard and the spreadsheet import.
 - Dev server picks the next free port when 3000 is occupied.
 
 ### Added
+
 - **Guided setup ("what is expected of me")**: `GET /api/setup` computes a
   live checklist per organization - products, customers, vendors, team,
   email, website widget, Creator-mode agent - each item with a one-sentence
@@ -3016,6 +3049,7 @@ wizard and the spreadsheet import.
   command palette, split-screen branded login, full responsive to 375px.
 
 ### Changed
+
 - **OS navigation model** (ADR 0030): five-group ERP sidebar replaced by
   workspace rail + full-screen Apps Launcher with type-to-filter and
   keyboard grid navigation.
@@ -3046,10 +3080,12 @@ wizard and the spreadsheet import.
 - CI gains gitleaks workflow; `.env.example` cleaned up.
 
 ### Removed
+
 - `_shell/nav.ts` (sidebar navigation tree) - superseded by the application
   catalog in `_shell/apps.ts`.
 
 ### Fixed
+
 - **ThemeMenu hydration mismatch** (see above).
 - **Theme hydration flash** (see above).
 - Accounting's year-end close lives behind its own confirmation dialog.
@@ -3084,6 +3120,7 @@ wizard and the spreadsheet import.
 - Dev server picks next free port when 3000 is occupied.
 
 ### Added
+
 - ADRs 0015–0030 covering design system, org memory, RLS, plugin kit,
   trust-spine hardening, multi-currency, ledger partitioning, creator-mode
   sandbox, support module, security audit remediation, OS navigation model,
@@ -3464,7 +3501,7 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
     elevated) permissions → record `policy/decision` and
     `command/query/dispatched|result` → normalize to the canonical output →
     render a concise model-facing result → log `tool/result`. Approval-required
-    calls are returned as `approval_required` (approval *requests*, never
+    calls are returned as `approval_required` (approval _requests_, never
     failures), and granted approvals carry the durable `approvalGrantId` into
     the envelope. `defaultToolPolicy` allows `read`/`write_local` under the
     actor's own authority and requires a durable grant for `exec`/`external`.
@@ -3505,7 +3542,7 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
     surfaces an inbox approval item (when wired), awaits the human decision,
     and on `allow`/`always` mints a durable grant whose id becomes the tool
     call's `approvalGrantId`; without a decision surface the call stays an
-    approval *request*, never a failure. `grantCoveredToolPolicy` checks the
+    approval _request_, never a failure. `grantCoveredToolPolicy` checks the
     store before the default risk policy, so a durable grant auto-allows
     subsequent identical calls until expiry/revocation; the trajectory's
     `policy/decision` cites `grant:<id>`.
@@ -3535,7 +3572,7 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
     auto-runs low-risk plans, surfaces medium/high-risk plans as an inbox
     `plan` item (editable/rejectable), and on approval mints one durable grant
     per `requiredApproval` (command/resource-scoped, TTL, `policyBasis:
-    "plan-approval"`, conditioned on the reason + plan id) so
+"plan-approval"`, conditioned on the reason + plan id) so
     `grantCoveredToolPolicy` auto-allows the matching steps. Rejection mints
     nothing and logs `approval/rejected`; no decision surface fails closed.
   - **Tests**, `planning/planning.test.ts` (risk classification, low-risk
@@ -3603,7 +3640,7 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
     `workflow.tasks.workQueue` (ready pending tasks) / `workflow.tasks.list`.
   - Permissions `activities.read` / `activities.write` /
     `workflow.tasks.read` / `workflow.tasks.write` declared in the manifest.
-  - `packages/runtime` builds the durable Postgres stores *before* module
+  - `packages/runtime` builds the durable Postgres stores _before_ module
     registration and injects them into the module, so the same stores serve
     the module and the harness.
   - Tests: `workflow-tasks.test.ts`, manifest, CRUD round-trips, overdue
@@ -3613,8 +3650,8 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
   - Docs: ADR 0014 tranche-7 update `docs/adr/0014-agent-harness-spine-pivot.md`.
 
 - **Host layer (harness over HTTP/chat), the eighth harness tranche**,
-  laying the build-item-9 foundation: the surface that *runs the native
-  harness* and serves inbox plan/approval decisions through durable grants.
+  laying the build-item-9 foundation: the surface that _runs the native
+  harness_ and serves inbox plan/approval decisions through durable grants.
   Additive, `/api/v1/ai/chat` and the legacy orchestrator are untouched.
   - **Bus→tool adapter (`@chaste/ai-core` `tools/from-bus.ts`)**, every
     registered command and query becomes a tool wrapping the same bus contract
@@ -3707,7 +3744,7 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
   13, cost-control half): the `ModelRouter` stage between the prompt envelope
   and the LLM call selects a provider per task class and records token/cost
   attribution. Every routed completion appends an append-only row to the
-  shared `model_usage` table; budget caps are enforced *before* dispatch by
+  shared `model_usage` table; budget caps are enforced _before_ dispatch by
   summing recorded spend, so a cap configured on one host reflects spend
   recorded on every host. Fail-closed: unroutable task classes and exhausted
   budgets refuse the request.
@@ -3740,7 +3777,7 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
 
 - **Proactive coordinator, the twelfth harness tranche** (build item 13,
   part 2): natural-language schedules parse into exact
-  who/what/when/condition/action objects *before* confirmation; watch rules
+  who/what/when/condition/action objects _before_ confirmation; watch rules
   (notify < suggest < draft < request_approval) fire durably with trigger
   evidence, proposed action, expected impact, and an explicit
   `requiredApproval` flag; quiet hours, a daily cap, and occurrence
@@ -3759,9 +3796,9 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
     wired as `runtime.watchRules` / `runtime.proactivePreferences` /
     `runtime.proactiveDeliveries`.
   - **`apps/api`**, `app.proactive` surface; `/api/v1/proactive/rules` (CRUD
-    + pause/resume), `/api/v1/proactive/preferences` (read/edit),
-    `/api/v1/proactive/suggestions?now=` (dry-run, records nothing), and
-    `/api/v1/proactive/tick` (collect + gate + record).
+    - pause/resume), `/api/v1/proactive/preferences` (read/edit),
+      `/api/v1/proactive/suggestions?now=` (dry-run, records nothing), and
+      `/api/v1/proactive/tick` (collect + gate + record).
   - Tests: ai-core `proactive/coordinator.test.ts` (parsing, store scoping,
     next-fire times, gate + quiet hours, collect/advance/duplicate,
     approval-safety, wakes + overdue activities, cap/quiet-hours suppression);
@@ -3784,7 +3821,7 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
     (`forkSession` with boundary validation, copies events under a new
     identity, appends `session/forked` + `session/resumed`), `scenario.ts`
     (`Scenario`, `createScenarioContext`, `runScenario` auto-attaching replay
-    + fork, `runScenarioSuite` → `SuiteReport`).
+    - fork, `runScenarioSuite` → `SuiteReport`).
   - **`@chaste/ai-core` `eval/scenarios/`**, golden scenarios over a real
     kernel bus/tools/grants/decision surface with the harness pointed at the
     scenario's own session log: `harness/unauthorized-tool-refusal` (tool

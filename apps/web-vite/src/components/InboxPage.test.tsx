@@ -4,6 +4,7 @@ import { InboxPage } from "./InboxPage";
 
 const orgId = "62d994c0-a6d8-4ac2-9ec6-6689ba2bfc12";
 const userId = "50000000-0000-4000-8000-000000000001";
+const bobId = "50000000-0000-4000-8000-000000000002";
 
 const signal = {
   id: "signal-1",
@@ -40,6 +41,14 @@ function mockFetch(overrides: { signals?: () => Response; approvals?: () => Resp
     const url = String(input);
     if (url === "/api/signals") return overrides.signals ? overrides.signals() : Response.json({ signals: [signal] });
     if (url === "/api/approvals") return overrides.approvals ? overrides.approvals() : Response.json({ approvals: [approval], history: [] });
+    if (url === "/api/team") return Response.json({
+      members: [
+        { userId, name: "Ada Lovelace", email: "ada@example.test", roleKeys: ["owner"] },
+        { userId: bobId, name: "Bob Stone", email: "bob@example.test", roleKeys: ["bookkeeper"] },
+      ],
+      roles: [],
+      catalog: [],
+    });
     if (url === "/api/my-work/summarize") return overrides.brief ? overrides.brief() : Response.json({ brief: "Focus on the reorder.", model: "test" });
     if (url === "/api/capabilities/execute") {
       const body = JSON.parse(String(init?.body ?? "{}")) as { capabilityId?: string; input?: Record<string, unknown> };
@@ -99,6 +108,27 @@ describe("InboxPage", () => {
     fireEvent.click(screen.getByRole("tab", { name: /Urgent/ }));
     expect(screen.queryByText("Desk lamp is at or below its reorder point")).toBeNull();
     expect(screen.getByText("Pay the outstanding supplier bill")).not.toBeNull();
+  });
+
+  it("assigns an exception to another member and filters the owner's queue", async () => {
+    const fetchMock = mockFetch();
+    render(<InboxPage organizationId={orgId} actorId={userId} />);
+    await screen.findByText("Desk lamp is at or below its reorder point");
+
+    fireEvent.change(screen.getByLabelText("Assign exception"), { target: { value: bobId } });
+    expect(await screen.findByText("Assigned to Bob Stone")).not.toBeNull();
+    const assignment = fetchMock.mock.calls
+      .map(([, init]) => JSON.parse(String(init?.body ?? "{}")) as { capabilityId?: string; input?: Record<string, unknown> })
+      .find((body) => body.capabilityId === "operations.upsertRecord");
+    expect(assignment?.input).toMatchObject({ status: "acknowledged", ownerUserId: bobId });
+
+    fireEvent.click(screen.getByRole("tab", { name: /Mine/ }));
+    expect(screen.queryByText("Desk lamp is at or below its reorder point")).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: /Everything/ }));
+    fireEvent.change(screen.getByLabelText("Assign exception"), { target: { value: userId } });
+    expect(await screen.findByText("Assigned to you")).not.toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: /Mine/ }));
+    expect(await screen.findByText("Desk lamp is at or below its reorder point")).not.toBeNull();
   });
 
   it("builds a brief from the visible queue", async () => {

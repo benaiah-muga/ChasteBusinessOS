@@ -32,6 +32,7 @@ type CreateQuoteLineInput struct {
 
 type CreateQuoteInput struct {
 	CustomerID string                 `json:"customerId"`
+	DealID     *string                `json:"dealId,omitempty"`
 	Memo       *string                `json:"memo,omitempty"`
 	ExpiresAt  *string                `json:"expiresAt,omitempty"`
 	Lines      []CreateQuoteLineInput `json:"lines"`
@@ -81,6 +82,8 @@ type ListQuoteSummary struct {
 	ExpiresAt  *string `json:"expiresAt"`
 	InvoiceID  *string `json:"invoiceId"`
 	OrderID    *string `json:"orderId"`
+	DealID     *string `json:"dealId"`
+	DealTitle  *string `json:"dealTitle"`
 }
 
 type ListQuotesOutput struct {
@@ -96,13 +99,18 @@ func ParseCreateQuoteInput(raw json.RawMessage) (CreateQuoteInput, error) {
 	if err != nil {
 		return CreateQuoteInput{}, err
 	}
-	if err := rejectQuoteFields(fields, "customerId", "memo", "expiresAt", "lines"); err != nil {
+	if err := rejectQuoteFields(fields, "customerId", "dealId", "memo", "expiresAt", "lines"); err != nil {
 		return CreateQuoteInput{}, err
 	}
 	var input CreateQuoteInput
 	input.CustomerID, err = requiredString(fields, "customerId")
 	if err != nil || !isZodUUID(input.CustomerID) {
 		return CreateQuoteInput{}, errors.New("customerId must be a UUID")
+	}
+	if input.DealID, err = optionalString(fields, "dealId"); err != nil {
+		return CreateQuoteInput{}, err
+	} else if input.DealID != nil && !isZodUUID(*input.DealID) {
+		return CreateQuoteInput{}, errors.New("dealId must be a UUID")
 	}
 	if input.Memo, err = optionalString(fields, "memo"); err != nil {
 		return CreateQuoteInput{}, err
@@ -335,6 +343,21 @@ func createQuote(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityCla
 	if !customerExists {
 		return CreateQuoteOutput{}, AccountingDomainError("customer not found")
 	}
+	if input.DealID != nil {
+		var dealCustomerID *string
+		err := tx.QueryRow(ctx, `
+			SELECT customer_id::text FROM deals WHERE id = $1::uuid AND org_id = $2::uuid`,
+			*input.DealID, claims.OrganizationID).Scan(&dealCustomerID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return CreateQuoteOutput{}, AccountingDomainError("deal not found")
+		}
+		if err != nil {
+			return CreateQuoteOutput{}, err
+		}
+		if dealCustomerID != nil && *dealCustomerID != input.CustomerID {
+			return CreateQuoteOutput{}, AccountingDomainError("quote customer does not match the deal customer")
+		}
+	}
 	subtotalMinor, taxMinor, totalMinor, err := computeQuoteTotals(input.Lines)
 	if err != nil {
 		return CreateQuoteOutput{}, err
@@ -350,12 +373,12 @@ func createQuote(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityCla
 	var quoteID string
 	err = tx.QueryRow(ctx, `
 		INSERT INTO quotes (
-			org_id, customer_id, number, status, subtotal_minor, tax_minor, total_minor,
+			org_id, customer_id, deal_id, number, status, subtotal_minor, tax_minor, total_minor,
 			memo, expires_at, created_by_actor_type, created_by_actor_id
 		)
-		VALUES ($1::uuid, $2::uuid, $3, 'sent', $4, $5, $6, $7, $8, $9, $10::uuid)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'sent', $5, $6, $7, $8, $9, $10, $11::uuid)
 		RETURNING id::text`,
-		claims.OrganizationID, input.CustomerID, number, subtotalMinor, taxMinor, totalMinor,
+		claims.OrganizationID, input.CustomerID, input.DealID, number, subtotalMinor, taxMinor, totalMinor,
 		input.Memo, expiresAt, claims.ActorType, claims.ActorID).Scan(&quoteID)
 	if err != nil {
 		return CreateQuoteOutput{}, err
@@ -483,16 +506,17 @@ func expireQuote(ctx context.Context, tx pgx.Tx, orgID string, now time.Time) (E
 
 func listQuotes(ctx context.Context, tx pgx.Tx, orgID string, input ListQuotesInput) (ListQuotesOutput, error) {
 	query := `
-		SELECT id::text, number, status, total_minor, customer_id::text, created_at, expires_at,
-		       converted_invoice_id::text, converted_order_id::text
-		FROM quotes
-		WHERE org_id = $1::uuid`
+		SELECT q.id::text, q.number, q.status, q.total_minor, q.customer_id::text, q.created_at, q.expires_at,
+		       q.converted_invoice_id::text, q.converted_order_id::text, q.deal_id::text, d.title
+		FROM quotes q
+		LEFT JOIN deals d ON d.id = q.deal_id AND d.org_id = q.org_id
+		WHERE q.org_id = $1::uuid`
 	args := []any{orgID}
 	if input.Status != nil {
-		query += ` AND status = $2`
+		query += ` AND q.status = $2`
 		args = append(args, *input.Status)
 	}
-	query += ` ORDER BY created_at DESC LIMIT 100`
+	query += ` ORDER BY q.created_at DESC LIMIT 100`
 	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return ListQuotesOutput{}, err
@@ -502,7 +526,7 @@ func listQuotes(ctx context.Context, tx pgx.Tx, orgID string, input ListQuotesIn
 	for rows.Next() {
 		var quote ListQuoteSummary
 		var createdAt, expiresAt *time.Time
-		if err := rows.Scan(&quote.ID, &quote.Number, &quote.Status, &quote.TotalMinor, &quote.CustomerID, &createdAt, &expiresAt, &quote.InvoiceID, &quote.OrderID); err != nil {
+		if err := rows.Scan(&quote.ID, &quote.Number, &quote.Status, &quote.TotalMinor, &quote.CustomerID, &createdAt, &expiresAt, &quote.InvoiceID, &quote.OrderID, &quote.DealID, &quote.DealTitle); err != nil {
 			return ListQuotesOutput{}, err
 		}
 		quote.CreatedAt = crmISOTime(createdAt)

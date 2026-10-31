@@ -52,14 +52,15 @@ var skillsCatalog = []Skill{
 		Steps: []string{
 			"Confirm the customer, what they are buying, prices, and any discount. Ask only for what is missing.",
 			"If the customer does not exist, create them with crm.createCustomer, then continue where you left off.",
-			"Draft a quotation with accounting.createQuote - it goes out as sent immediately. Include a sku on stocked lines so fulfilment can reserve the right item.",
+			"Draft a quotation with accounting.createQuote - it goes out as sent immediately. Include a sku on stocked lines so fulfilment can reserve the right item, and pass the CRM dealId when the quote came from an opportunity; the quote customer must match the deal customer.",
 			"On acceptance, award it with sales.createOrderFromQuote. It creates a linked draft order and marks the quote accepted; no revenue posts yet.",
 			"Confirm the order with sales.confirmOrder. This checks the customer's credit headroom and reserves stock; a shortfall is a backorder, not a silent promise.",
 			"Ship with sales.deliverOrder. It consumes reservations, writes the stock legs, and creates the invoice for exactly what was delivered. Partial deliveries are normal.",
 			"Record the payment with accounting.recordPayment when it arrives.",
+			"If the quote carried a dealId, move that opportunity to won with crm.moveDealStage only after the order is confirmed, not when the quote is sent or awarded, and tell the user which deal moved.",
 			"Report the quote number, order number, delivered quantities, invoice number and amount, and outstanding balance.",
 		},
-		Capabilities: []string{"crm.createCustomer", "accounting.createQuote", "sales.createOrderFromQuote", "sales.confirmOrder", "sales.deliverOrder", "accounting.declineQuote", "accounting.recordPayment"},
+		Capabilities: []string{"crm.createCustomer", "crm.listDeals", "crm.moveDealStage", "accounting.createQuote", "sales.createOrderFromQuote", "sales.confirmOrder", "sales.deliverOrder", "accounting.declineQuote", "accounting.recordPayment"},
 		Notes:        strPtrSkills("The continuity path is sales.createOrderFromQuote. accounting.acceptQuote exists for deliberate invoice-first service work but skips stock reservation and fulfilment, so prefer the order path whenever goods ship. Quotes are offers, not mutable records: if the customer negotiates, decline the old quote and create a fresh one. Cancelling an untouched order returns its source quote to sent."),
 	},
 	{

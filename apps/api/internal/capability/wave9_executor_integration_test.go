@@ -305,16 +305,16 @@ func TestGoWave9SupportBoundListFiltersBeforeLimit(t *testing.T) {
 	grantWavePermission(t, fx, "support.read")
 	var customerID string
 	if err := fx.owner.QueryRow(fx.ctx, `
-		INSERT INTO customers (org_id, name)
-		VALUES ($1::uuid, 'Bound support customer')
+		INSERT INTO customers (org_id, name, email)
+		VALUES ($1::uuid, 'Bound support customer', 'bound@example.test')
 		RETURNING id::text`, fx.orgID).Scan(&customerID); err != nil {
 		t.Fatal(err)
 	}
 	var customerConversationID string
 	if err := fx.owner.QueryRow(fx.ctx, `
-		INSERT INTO support_conversations (org_id, customer_id, subject, status, created_by_actor_type, created_at)
-		VALUES ($1::uuid, $2::uuid, 'Customer inbox item', 'open', 'human', now() - interval '1 minute')
-		RETURNING id::text`, fx.orgID, customerID).Scan(&customerConversationID); err != nil {
+		INSERT INTO support_conversations (org_id, customer_id, subject, status, priority, category, assigned_user_id, sla_due_at, ticket_number, created_by_actor_type, created_at)
+		VALUES ($1::uuid, $2::uuid, 'Customer inbox item', 'open', 'high', 'billing', $3::uuid, '2026-10-31 09:00:00+00'::timestamptz, 42, 'human', now() - interval '1 minute')
+		RETURNING id::text`, fx.orgID, customerID, fx.userID).Scan(&customerConversationID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := fx.owner.Exec(fx.ctx, `
@@ -352,5 +352,13 @@ func TestGoWave9SupportBoundListFiltersBeforeLimit(t *testing.T) {
 	bound := executeList(json.RawMessage(`{"limit":100,"customerBoundOnly":true}`), "wave9-support-bound-list")
 	if len(bound.Conversations) != 1 || bound.Conversations[0].ID != customerConversationID || bound.Conversations[0].CustomerID != customerID {
 		t.Fatalf("customer-bound conversations=%+v, want the customer row despite 105 newer visitor rows", bound.Conversations)
+	}
+	triage := bound.Conversations[0]
+	if triage.CustomerEmail == nil || *triage.CustomerEmail != "bound@example.test" || triage.Priority != "high" ||
+		triage.Category == nil || *triage.Category != "billing" || triage.AssignedUserID == nil || *triage.AssignedUserID != fx.userID ||
+		triage.AssignedUserName == nil || *triage.AssignedUserName == "" || triage.SLADueAt == nil || *triage.SLADueAt != "2026-10-31T09:00:00.000Z" ||
+		triage.TicketNumber == nil || *triage.TicketNumber != 42 || triage.Channel != "desk" ||
+		triage.CreatedAt == "" || triage.UpdatedAt == "" {
+		t.Fatalf("bound conversation=%+v, want the triage fields the support desk renders", triage)
 	}
 }

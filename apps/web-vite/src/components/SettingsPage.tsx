@@ -1,5 +1,26 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
+import {
+  Bell,
+  Blocks,
+  Bot,
+  Building2,
+  LockKeyhole,
+  Mail,
+  Server,
+  ShieldCheck,
+  Sparkles,
+  Workflow,
+} from "lucide-react";
 import "./SettingsPage.css";
+import { navigate } from "../navigation";
+import { SettingsWorkspace, type SettingsNavGroup } from "./SettingsWorkspace";
 import {
   AI_PROVIDER_OPTIONS,
   DEFAULT_AI_MODELS,
@@ -49,38 +70,29 @@ const INK = "#211f1a";
 const MUTED = "#625d53";
 const LINE = "#e5dccb";
 const SURFACE = "#fffdf8";
-const GOLD = "#8a6f38";
 
 const ui = {
-  page: { width: "min(100% - 48px, 1080px)", margin: "0 auto", padding: "clamp(28px, 4vw, 52px) 0 72px" } as CSSProperties,
-  header: { marginBottom: "24px" } as CSSProperties,
-  eyebrow: { margin: "0 0 9px", color: GOLD, fontSize: "10px", fontWeight: 700, letterSpacing: ".15em", textTransform: "uppercase" } as CSSProperties,
-  title: { margin: "0 0 10px", color: INK, fontFamily: 'Georgia, "Times New Roman", serif', fontSize: "clamp(30px, 4.5vw, 44px)", fontWeight: 500, letterSpacing: "-.05em", lineHeight: 1.05 } as CSSProperties,
-  lede: { maxWidth: "760px", margin: 0, color: MUTED, fontSize: "13px", lineHeight: 1.65 } as CSSProperties,
-  tablist: { display: "flex", flexWrap: "wrap", gap: "4px", margin: "0 0 24px", borderBottom: "1px solid " + LINE, paddingBottom: "2px" } as CSSProperties,
-  tab: { minHeight: "33px", border: "0", borderRadius: "6px 6px 0 0", padding: "0 11px", background: "transparent", color: "#6e726a", cursor: "pointer", fontSize: "11px", fontWeight: 600 } as CSSProperties,
-  tabActive: { background: "#f4efe5", color: INK } as CSSProperties,
   section: { marginBottom: "30px" } as CSSProperties,
-  sectionTitle: { margin: "0 0 5px", color: "#211f1a", fontSize: "14px", fontWeight: 650 } as CSSProperties,
-  sectionHint: { maxWidth: "720px", margin: "0 0 14px", color: MUTED, fontSize: "12px", lineHeight: 1.6 } as CSSProperties,
+  sectionTitle: { margin: "0 0 5px", color: "#211f1a", fontSize: "16px", fontWeight: 650 } as CSSProperties,
+  sectionHint: { maxWidth: "720px", margin: "0 0 14px", color: MUTED, fontSize: "12.5px", lineHeight: 1.6 } as CSSProperties,
   card: { minWidth: 0, border: "1px solid " + LINE, borderRadius: "12px", padding: "18px", background: SURFACE, boxShadow: "0 9px 28px rgb(48 45 36 / 4%)" } as CSSProperties,
   stack: { display: "grid", gap: "14px" } as CSSProperties,
   row: { display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "10px" } as CSSProperties,
-  label: { display: "grid", gap: "5px", color: "#36322b", fontSize: "11px", fontWeight: 600 } as CSSProperties,
-  hint: { color: "#756f63", fontSize: "10px", fontWeight: 400, lineHeight: 1.5 } as CSSProperties,
-  field: { minHeight: "35px", width: "100%", minWidth: 0, border: "1px solid #ddd4c4", borderRadius: "6px", padding: "0 9px", background: "#fffdf8", color: "#322f28", font: "inherit", fontSize: "12px" } as CSSProperties,
-  textarea: { minHeight: "70px", width: "100%", minWidth: 0, border: "1px solid #ddd4c4", borderRadius: "6px", padding: "9px", background: "#fffdf8", color: "#322f28", font: "inherit", fontSize: "12px", lineHeight: 1.6, resize: "vertical" } as CSSProperties,
-  monoField: { minHeight: "35px", width: "100%", minWidth: 0, border: "1px solid #ddd4c4", borderRadius: "6px", padding: "0 9px", background: "#fffdf8", color: "#322f28", font: "inherit", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: "11px" } as CSSProperties,
-  primary: { minHeight: "35px", border: "1px solid #171613", borderRadius: "6px", padding: "0 13px", background: "#171613", color: "#fffdf8", cursor: "pointer", font: "inherit", fontSize: "11px", fontWeight: 650 } as CSSProperties,
-  secondary: { minHeight: "35px", border: "1px solid #d9d7cd", borderRadius: "6px", padding: "0 12px", background: "#f7f6f0", color: "#2e2b24", cursor: "pointer", font: "inherit", fontSize: "11px", fontWeight: 650 } as CSSProperties,
-  link: { color: "#8b6a22", fontSize: "11px", fontWeight: 650 } as CSSProperties,
-  chip: { minHeight: "30px", border: "1px solid #e5dccb", borderRadius: "99px", padding: "0 11px", background: "#f7f6f0", color: "#5f5a51", cursor: "pointer", font: "inherit", fontSize: "10px", fontWeight: 650 } as CSSProperties,
+  label: { display: "grid", gap: "5px", color: "#36322b", fontSize: "12px", fontWeight: 600 } as CSSProperties,
+  hint: { color: "#756f63", fontSize: "11px", fontWeight: 400, lineHeight: 1.5 } as CSSProperties,
+  field: { minHeight: "35px", width: "100%", minWidth: 0, border: "1px solid #ddd4c4", borderRadius: "6px", padding: "0 9px", background: "#fffdf8", color: "#322f28", font: "inherit", fontSize: "13px" } as CSSProperties,
+  textarea: { minHeight: "70px", width: "100%", minWidth: 0, border: "1px solid #ddd4c4", borderRadius: "6px", padding: "9px", background: "#fffdf8", color: "#322f28", font: "inherit", fontSize: "13px", lineHeight: 1.6, resize: "vertical" } as CSSProperties,
+  monoField: { minHeight: "35px", width: "100%", minWidth: 0, border: "1px solid #ddd4c4", borderRadius: "6px", padding: "0 9px", background: "#fffdf8", color: "#322f28", font: "inherit", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: "11.5px" } as CSSProperties,
+  primary: { minHeight: "35px", border: "1px solid #171613", borderRadius: "6px", padding: "0 13px", background: "#171613", color: "#fffdf8", cursor: "pointer", font: "inherit", fontSize: "12px", fontWeight: 650 } as CSSProperties,
+  secondary: { minHeight: "35px", border: "1px solid #d9d7cd", borderRadius: "6px", padding: "0 12px", background: "#f7f6f0", color: "#2e2b24", cursor: "pointer", font: "inherit", fontSize: "12px", fontWeight: 650 } as CSSProperties,
+  link: { color: "#8b6a22", fontSize: "12px", fontWeight: 650 } as CSSProperties,
+  chip: { minHeight: "30px", border: "1px solid #e5dccb", borderRadius: "99px", padding: "0 11px", background: "#f7f6f0", color: "#5f5a51", cursor: "pointer", font: "inherit", fontSize: "11px", fontWeight: 650 } as CSSProperties,
   chipOn: { borderColor: "#e2c98f", background: "#faf1dc", color: "#7d5e1a" } as CSSProperties,
-  listRow: { display: "flex", minHeight: "46px", alignItems: "center", justifyContent: "space-between", gap: "12px", borderTop: "1px solid #eee7da", fontSize: "11px" } as CSSProperties,
-  mono: { fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: "10px" } as CSSProperties,
-  muted: { color: MUTED, fontSize: "11px", lineHeight: 1.6 } as CSSProperties,
-  empty: { color: "#817b6e", fontSize: "11px" } as CSSProperties,
-  badge: { display: "inline-flex", alignItems: "center", borderRadius: "99px", padding: "3px 8px", background: "#f4efe5", color: "#625d53", fontSize: "9px", fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase" } as CSSProperties,
+  listRow: { display: "flex", minHeight: "48px", alignItems: "center", justifyContent: "space-between", gap: "12px", borderTop: "1px solid #eee7da", fontSize: "12px" } as CSSProperties,
+  mono: { fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: "10.5px" } as CSSProperties,
+  muted: { color: MUTED, fontSize: "12px", lineHeight: 1.6 } as CSSProperties,
+  empty: { color: "#817b6e", fontSize: "12px" } as CSSProperties,
+  badge: { display: "inline-flex", alignItems: "center", borderRadius: "99px", padding: "3px 8px", background: "#f4efe5", color: "#625d53", fontSize: "9.5px", fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase" } as CSSProperties,
 } as const;
 
 const NOTICE_STYLE: Record<NoticeTone, CSSProperties> = {
@@ -94,7 +106,7 @@ const noticeStyle = (tone: NoticeTone): CSSProperties => ({
   margin: "0 0 14px",
   borderRadius: "9px",
   padding: "10px 13px",
-  fontSize: "11px",
+  fontSize: "12px",
   lineHeight: 1.55,
 });
 
@@ -178,94 +190,236 @@ async function copyToClipboard(value: string): Promise<void> {
 
 /* ----------------------------------------------------------------- page ---- */
 
-const TABS = [
-  { id: "workspace", label: "Workspace" },
-  { id: "notifications", label: "Notifications" },
-  { id: "modules", label: "Modules" },
-  { id: "governance", label: "Governance" },
-  { id: "quality", label: "Quality" },
-  { id: "ai", label: "AI & automation" },
-  { id: "branding", label: "Branding" },
-  { id: "routines", label: "Routines" },
-  { id: "runtime", label: "Runtime" },
+const SETTINGS_SECTIONS = [
+  {
+    id: "workspace",
+    label: "Workspace",
+    group: "General",
+    description:
+      "Organization facts, print branding, and the path to people and access.",
+    icon: Building2,
+  },
+  {
+    id: "email",
+    label: "Email",
+    group: "General",
+    description: "Outbound delivery, the sender, and a verified test send.",
+    icon: Mail,
+  },
+  {
+    id: "notifications",
+    label: "Notifications",
+    group: "General",
+    description: "Your in-app alert preferences.",
+    icon: Bell,
+  },
+  {
+    id: "ai",
+    label: "AI providers",
+    group: "AI & automation",
+    description: "Model provider, credentials, and coding-agent connections.",
+    icon: Sparkles,
+  },
+  {
+    id: "agent",
+    label: "Agent",
+    group: "AI & automation",
+    description: "The standing persona and the memory behind every answer.",
+    icon: Bot,
+  },
+  {
+    id: "routines",
+    label: "Routines",
+    group: "AI & automation",
+    description: "Recurring agent runs and their run history.",
+    icon: Workflow,
+  },
+  {
+    id: "modules",
+    label: "Modules",
+    group: "Operations",
+    description: "Installed applications and the defaults each module owns.",
+    icon: Blocks,
+  },
+  {
+    id: "governance",
+    label: "Governance",
+    group: "Operations",
+    description: "Autonomy policy, risk limits, and quality evaluation.",
+    icon: ShieldCheck,
+  },
+  {
+    id: "runtime",
+    label: "Runtime",
+    group: "Operations",
+    description: "Durable-run runtime compositions and their safe metadata.",
+    icon: Server,
+  },
 ] as const;
 
-type TabId = (typeof TABS)[number]["id"];
+type TabId = (typeof SETTINGS_SECTIONS)[number]["id"];
+
+function sectionFromPathname(pathname?: string): TabId {
+  const id = pathname?.match(/^\/settings\/([^/]+)/)?.[1];
+  return SETTINGS_SECTIONS.some((section) => section.id === id)
+    ? (id as TabId)
+    : "workspace";
+}
 
 export function SettingsPage({
   baseCurrency,
   actorId,
   organizationId,
-}: { baseCurrency?: string | null; actorId?: string | null; organizationId?: string | null }) {
-  const [tab, setTab] = useState<TabId>("workspace");
-  const [accountingOn, setAccountingOn] = useState<boolean | null>(null);
-  const retryScope = actorId && organizationId ? { actorId, organizationId } : null;
+  pathname,
+}: {
+  baseCurrency?: string | null;
+  actorId?: string | null;
+  organizationId?: string | null;
+  pathname?: string;
+}) {
+  const [tab, setTab] = useState<TabId>(() => sectionFromPathname(pathname));
+  const [board, setBoard] = useState<ModuleSwitchboard | null>(null);
+  const retryScope =
+    actorId && organizationId ? { actorId, organizationId } : null;
+
+  useEffect(() => {
+    setTab(sectionFromPathname(pathname));
+  }, [pathname]);
 
   useEffect(() => {
     const controller = new AbortController();
     void fetchModuleSwitchboard(controller.signal)
-      .then((board) => setAccountingOn(board.enabledModules.includes("accounting")))
-      .catch(() => setAccountingOn(false));
+      .then((next) => setBoard(next))
+      .catch(() => setBoard(null));
     return () => controller.abort();
   }, []);
 
+  function openSection(id: TabId) {
+    setTab(id);
+    if (pathname !== undefined) navigate(`/settings/${id}`);
+  }
+
+  const groups: SettingsNavGroup[] = [
+    "General",
+    "AI & automation",
+    "Operations",
+  ].map((label) => ({
+    label,
+    items: SETTINGS_SECTIONS.filter((section) => section.group === label).map(
+      (section) => ({
+        id: section.id,
+        label: section.label,
+        description: section.description,
+        icon: section.icon,
+        href: `/settings/${section.id}`,
+        onSelect: () => openSection(section.id),
+      }),
+    ),
+  }));
+
   return (
-    <main style={ui.page}>
-      <header style={ui.header}>
-        <p style={ui.eyebrow}>Workspace control room</p>
-        <h1 style={ui.title}>Settings</h1>
-        <p style={ui.lede}>
-          Workspace facts, module switchboard, and the models behind your workmate. Every write here goes through the
-          governed capability pipeline: a human admin applies changes under their own authority, and anything the
-          workmate proposes waits in the Approvals inbox.
-        </p>
-      </header>
-
-      {retryScope && <GovernedRetryNotice scope={retryScope} />}
-
-      <div role="tablist" aria-label="Settings sections" style={ui.tablist}>
-        {TABS.map((entry) => (
-          <button
-            key={entry.id}
-            type="button"
-            role="tab"
-            id={`settings-tab-${entry.id}`}
-            aria-selected={tab === entry.id}
-            aria-controls={`settings-panel-${entry.id}`}
-            onClick={() => setTab(entry.id)}
-            style={{ ...ui.tab, ...(tab === entry.id ? ui.tabActive : null) }}
-          >
-            {entry.label}
-          </button>
-        ))}
-      </div>
-
-      <div role="tabpanel" id={`settings-panel-${tab}`} aria-labelledby={`settings-tab-${tab}`}>
-        {tab === "workspace" && <WorkspaceTab accountingOn={accountingOn} />}
+    <main className="settings-page-shell">
+      <SettingsWorkspace
+        eyebrow="Workspace / Configuration"
+        title="Settings"
+        statusInline
+        status={
+          <>
+            <span className="settings-status-dot" aria-hidden="true" />
+            <strong>Governed workspace</strong>
+            <span>
+              {board
+                ? `${board.enabledModules.length} modules enabled`
+                : "Reading modules"}
+            </span>
+            <span>Every change is audit-recorded</span>
+          </>
+        }
+        groups={groups}
+        activeId={tab}
+        note={
+          <>
+            <strong>
+              <LockKeyhole size={12} aria-hidden="true" /> Governed settings
+            </strong>
+            <p>
+              Changes use the same capability pipeline as the rest of the
+              workspace. Pending approvals stay pending, and declared inverses
+              make supported changes reversible.
+            </p>
+          </>
+        }
+      >
+        {retryScope && <GovernedRetryNotice scope={retryScope} />}
+        {tab === "workspace" && (
+          <WorkspaceSection baseCurrency={baseCurrency} />
+        )}
+        {tab === "email" && <EmailSection />}
         {tab === "notifications" && <NotificationsTab />}
-        {tab === "modules" && <ModulesTab />}
-        {tab === "governance" && <GovernanceTab baseCurrency={baseCurrency} />}
-        {tab === "quality" && <EvaluationPanel organizationId={organizationId ?? null} />}
         {tab === "ai" && <AiTab />}
-        {tab === "branding" && <BrandingTab />}
-        {tab === "routines" && <RoutinesTab retryScope={retryScope ?? undefined} />}
+        {tab === "agent" && <AgentTab />}
+        {tab === "routines" && (
+          <RoutinesTab retryScope={retryScope ?? undefined} />
+        )}
+        {tab === "modules" && <ModulesTab />}
+        {tab === "governance" && (
+          <GovernanceSection
+            baseCurrency={baseCurrency}
+            organizationId={organizationId ?? null}
+          />
+        )}
         {tab === "runtime" && <RuntimeTab />}
-      </div>
+      </SettingsWorkspace>
     </main>
   );
 }
 
+function SettingsSubtabs({
+  label,
+  items,
+  activeId,
+  onChange,
+}: {
+  label: string;
+  items: ReadonlyArray<{ id: string; label: string }>;
+  activeId: string;
+  onChange: (id: string) => void;
+}) {
+  return (
+    <div className="settings-subtabs" role="group" aria-label={label}>
+      {items.map((item) => (
+        <button
+          key={item.id}
+          type="button"
+          className="settings-subtab"
+          aria-pressed={activeId === item.id}
+          onClick={() => onChange(item.id)}
+        >
+          {item.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function GovernedRetryNotice({ scope }: { scope: GovernedRetryScope }) {
-  const [attempt, setAttempt] = useState<Awaited<ReturnType<typeof fetchPendingGovernedAttempt>>>(null);
+  const [attempt, setAttempt] =
+    useState<Awaited<ReturnType<typeof fetchPendingGovernedAttempt>>>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
     void fetchPendingGovernedAttempt(scope)
-      .then((saved) => { if (active) setAttempt(saved); })
-      .catch((error: unknown) => { if (active) setMessage(errorMessage(error)); });
-    return () => { active = false; };
+      .then((saved) => {
+        if (active) setAttempt(saved);
+      })
+      .catch((error: unknown) => {
+        if (active) setMessage(errorMessage(error));
+      });
+    return () => {
+      active = false;
+    };
   }, [scope.actorId, scope.organizationId]);
 
   async function retry() {
@@ -290,18 +444,64 @@ function GovernedRetryNotice({ scope }: { scope: GovernedRetryScope }) {
 
   if (!attempt && !message) return null;
   return (
-    <section role="status" style={{ ...ui.card, borderColor: "#d7a34a", marginBottom: 18 }}>
-      <strong>{attempt ? "A routine change may not have reached the server." : "Safe routine retries are unavailable."}</strong>
-      {attempt && <p style={ui.muted}>Retrying sends the exact saved action with its original idempotency key.</p>}
+    <section
+      role="status"
+      style={{ ...ui.card, borderColor: "#d7a34a", marginBottom: 18 }}
+    >
+      <strong>
+        {attempt
+          ? "A routine change may not have reached the server."
+          : "Safe routine retries are unavailable."}
+      </strong>
+      {attempt && (
+        <p style={ui.muted}>
+          Retrying sends the exact saved action with its original idempotency
+          key.
+        </p>
+      )}
       {message && <p>{message}</p>}
-      {attempt && <button type="button" disabled={busy} onClick={() => void retry()}>{busy ? "Retrying…" : "Retry exact change"}</button>}
+      {attempt && (
+        <button type="button" disabled={busy} onClick={() => void retry()}>
+          {busy ? "Retrying…" : "Retry exact change"}
+        </button>
+      )}
     </section>
   );
 }
 
 /* ------------------------------------------------------------ workspace --- */
 
-function WorkspaceTab({ accountingOn }: { accountingOn: boolean | null }) {
+function WorkspaceSection({
+  baseCurrency,
+}: {
+  baseCurrency?: string | null;
+}) {
+  const [view, setView] = useState<"general" | "branding">("general");
+  return (
+    <>
+      <SettingsSubtabs
+        label="Workspace views"
+        items={[
+          { id: "general", label: "Overview" },
+          { id: "branding", label: "Print branding" },
+        ]}
+        activeId={view}
+        onChange={(id) => setView(id as "general" | "branding")}
+      />
+      {view === "general" ? (
+        <WorkspaceTab baseCurrency={baseCurrency} />
+      ) : (
+        <BrandingTab />
+      )}
+    </>
+  );
+}
+
+function WorkspaceTab({
+  baseCurrency,
+}: {
+  baseCurrency?: string | null;
+}) {
   const [orgName, setOrgName] = useState<string>("");
   const [orgError, setOrgError] = useState<string | null>(null);
 
@@ -310,7 +510,9 @@ function WorkspaceTab({ accountingOn }: { accountingOn: boolean | null }) {
     void fetchOrganizations(controller.signal)
       .then((data) => {
         if (controller.signal.aborted) return;
-        setOrgName(data.orgs.find((org) => org.id === data.activeOrgId)?.name ?? "");
+        setOrgName(
+          data.orgs.find((org) => org.id === data.activeOrgId)?.name ?? "",
+        );
       })
       .catch((error) => {
         if (!controller.signal.aborted) setOrgError(errorMessage(error));
@@ -319,35 +521,42 @@ function WorkspaceTab({ accountingOn }: { accountingOn: boolean | null }) {
   }, []);
 
   return (
-    <>
-      <Section
-        title="Organization"
-        hint="The workspace these settings govern. Switch organizations from the account menu in the top bar."
-      >
-        {orgError && <Notice tone="error">{orgError}</Notice>}
-        <div style={ui.card}>
-          <div style={{ ...ui.stack, gap: "0" }}>
-            <div style={ui.listRow}>
-              <span style={ui.muted}>Name</span>
-              <strong style={{ color: INK, fontSize: "12px" }}>{orgName || "-"}</strong>
-            </div>
-            <div style={ui.listRow}>
-              <span style={ui.muted}>Modules</span>
-              <span style={{ fontSize: "11px" }}>
-                {accountingOn === null ? "Checking" : accountingOn ? "Managed by owners" : "Restricted set"} ·{" "}
-                <a href="/team" style={ui.link}>Team &amp; roles</a>
-              </span>
-            </div>
-            <div style={ui.listRow}>
-              <span style={ui.muted}>Agent sessions</span>
-              <a href="/sessions" style={ui.link}>View trajectory log →</a>
-            </div>
+    <Section
+      title="Organization"
+      hint="The workspace these settings govern. Switch organizations from the account menu in the top bar."
+    >
+      {orgError && <Notice tone="error">{orgError}</Notice>}
+      <div style={ui.card}>
+        <div style={{ ...ui.stack, gap: "0" }}>
+          <div style={ui.listRow}>
+            <span style={ui.muted}>Name</span>
+            <strong style={{ color: INK, fontSize: "13px" }}>
+              {orgName || "-"}
+            </strong>
+          </div>
+          <div style={ui.listRow}>
+            <span style={ui.muted}>Base currency</span>
+            <strong style={{ color: INK, fontSize: "13px" }}>
+              {baseCurrency ?? "-"}
+            </strong>
+          </div>
+          <div style={ui.listRow}>
+            <span style={ui.muted}>People & access</span>
+            <span style={{ fontSize: "12px" }}>
+              <a href="/team" style={ui.link}>
+                Team &amp; roles
+              </a>
+            </span>
+          </div>
+          <div style={ui.listRow}>
+            <span style={ui.muted}>Agent sessions</span>
+            <a href="/sessions" style={ui.link}>
+              View trajectory log →
+            </a>
           </div>
         </div>
-      </Section>
-
-      <EmailSection />
-    </>
+      </div>
+    </Section>
   );
 }
 
@@ -460,7 +669,8 @@ function EmailSection() {
         if (!controller.signal.aborted) setStatus(data);
       })
       .catch(() => {
-        if (!controller.signal.aborted) setStatus({ configured: false, from: null });
+        if (!controller.signal.aborted)
+          setStatus({ configured: false, from: null });
       });
     return () => controller.abort();
   }, []);
@@ -482,45 +692,52 @@ function EmailSection() {
   }
 
   return (
-    <Section title="Email" hint="Invoices, approvals, and customer care all deliver through SMTP.">
-      <div style={ui.card}>
-        {!status ? (
-          <p style={ui.muted}>Checking…</p>
-        ) : status.configured ? (
-          <p style={ui.muted}>
-            SMTP is configured
-            {status.from ? <> - sending as <code style={ui.mono}>{status.from}</code></> : null}.
-          </p>
-        ) : (
-          <p style={ui.muted}>
-            Set <code style={ui.mono}>SMTP_HOST</code> (plus optional <code style={ui.mono}>SMTP_FROM</code>) in the
-            server environment to enable delivery.
-          </p>
-        )}
-        <div style={{ ...ui.row, justifyContent: "flex-start", marginTop: "12px" }}>
-          <label style={{ ...ui.label, flex: "0 0 220px" }}>
-            <span className="sr-only">Test recipient</span>
-            <input
-              type="email"
-              placeholder="you@company.com"
-              value={to}
-              onChange={(event) => setTo(event.currentTarget.value)}
-              disabled={!status?.configured}
-              style={ui.field}
-            />
-          </label>
-          <button
-            type="button"
-            onClick={() => void sendTest()}
-            disabled={busy || !status?.configured || !/.+@.+\..+/.test(to)}
-            style={ui.secondary}
-          >
-            Send test email
-          </button>
-        </div>
-        {message && <Notice tone={note ?? "error"}>{message}</Notice>}
+    <div style={ui.card}>
+      {!status ? (
+        <p style={ui.muted}>Checking…</p>
+      ) : status.configured ? (
+        <p style={ui.muted}>
+          SMTP is configured
+          {status.from ? (
+            <>
+              {" "}
+              - sending as <code style={ui.mono}>{status.from}</code>
+            </>
+          ) : null}
+          .
+        </p>
+      ) : (
+        <p style={ui.muted}>
+          Set <code style={ui.mono}>SMTP_HOST</code> (plus optional{" "}
+          <code style={ui.mono}>SMTP_FROM</code>) in the server environment to
+          enable delivery.
+        </p>
+      )}
+      <div
+        style={{ ...ui.row, justifyContent: "flex-start", marginTop: "12px" }}
+      >
+        <label style={{ ...ui.label, flex: "0 0 220px" }}>
+          <span className="sr-only">Test recipient</span>
+          <input
+            type="email"
+            placeholder="you@company.com"
+            value={to}
+            onChange={(event) => setTo(event.currentTarget.value)}
+            disabled={!status?.configured}
+            style={ui.field}
+          />
+        </label>
+        <button
+          type="button"
+          onClick={() => void sendTest()}
+          disabled={busy || !status?.configured || !/.+@.+\..+/.test(to)}
+          style={ui.secondary}
+        >
+          Send test email
+        </button>
       </div>
-    </Section>
+      {message && <Notice tone={note ?? "error"}>{message}</Notice>}
+    </div>
   );
 }
 
@@ -612,9 +829,9 @@ function ModuleSwitchboard() {
               <div style={{ minWidth: 0 }}>
                 <p style={{ margin: 0, color: INK, fontSize: "12px", fontWeight: 600 }}>
                   {module.label}
-                  {locked && <span style={{ marginLeft: "8px", color: "#a3a399", fontSize: "9px", fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase" }}>core</span>}
+                  {locked && <span style={{ marginLeft: "8px", color: "#a3a399", fontSize: "12px", fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase" }}>core</span>}
                 </p>
-                <p style={{ ...ui.muted, margin: "2px 0 0", fontSize: "10px" }}>{module.description}</p>
+                <p style={{ ...ui.muted, margin: "2px 0 0", fontSize: "12px" }}>{module.description}</p>
               </div>
               <button
                 type="button"
@@ -758,7 +975,7 @@ function ModuleSettingsPanel({ moduleId, title, hint, fields }: (typeof MODULE_S
             <button type="button" onClick={() => void save()} disabled={saving} style={ui.primary}>
               {saving ? "Saving…" : "Save defaults"}
             </button>
-            {notice && <span role={notice.tone === "error" ? "alert" : "status"} style={{ fontSize: "11px", color: notice.tone === "success" ? "#4f6b52" : notice.tone === "pending" ? "#7d5e1a" : "#9d4438" }}>{notice.text}</span>}
+            {notice && <span role={notice.tone === "error" ? "alert" : "status"} style={{ fontSize: "12px", color: notice.tone === "success" ? "#4f6b52" : notice.tone === "pending" ? "#7d5e1a" : "#9d4438" }}>{notice.text}</span>}
           </div>
         </div>
       )}
@@ -801,6 +1018,34 @@ const STRICT_OPTIONS = [
   { id: "destructive", label: "Destructive actions" },
   { id: "money", label: "Payments over threshold" },
 ] as const;
+
+function GovernanceSection({
+  baseCurrency,
+  organizationId,
+}: {
+  baseCurrency?: string | null;
+  organizationId: string | null;
+}) {
+  const [view, setView] = useState<"policy" | "quality">("policy");
+  return (
+    <>
+      <SettingsSubtabs
+        label="Governance views"
+        items={[
+          { id: "policy", label: "Policy" },
+          { id: "quality", label: "Quality" },
+        ]}
+        activeId={view}
+        onChange={(id) => setView(id as "policy" | "quality")}
+      />
+      {view === "policy" ? (
+        <GovernanceTab baseCurrency={baseCurrency} />
+      ) : (
+        <EvaluationPanel organizationId={organizationId} />
+      )}
+    </>
+  );
+}
 
 function GovernanceTab({ baseCurrency }: { baseCurrency?: string | null }) {
   const minorUnits = minorUnitsFor(baseCurrency ?? null);
@@ -945,7 +1190,7 @@ function GovernanceTab({ baseCurrency }: { baseCurrency?: string | null }) {
               )}
               {!canEdit && <span style={ui.empty}>Only organization admins can change policy.</span>}
               {notice && (
-                <span role={notice.tone === "error" ? "alert" : "status"} style={{ fontSize: "11px", color: notice.tone === "success" ? "#4f6b52" : notice.tone === "pending" ? "#7d5e1a" : "#9d4438" }}>
+                <span role={notice.tone === "error" ? "alert" : "status"} style={{ fontSize: "12px", color: notice.tone === "success" ? "#4f6b52" : notice.tone === "pending" ? "#7d5e1a" : "#9d4438" }}>
                   {notice.text}
                 </span>
               )}
@@ -1140,7 +1385,7 @@ function AiTab() {
                 Clear stored key
               </button>
               {note && (
-                <span role={note.tone === "error" ? "alert" : "status"} style={{ fontSize: "11px", color: note.tone === "success" ? "#4f6b52" : note.tone === "pending" ? "#7d5e1a" : "#9d4438" }}>
+                <span role={note.tone === "error" ? "alert" : "status"} style={{ fontSize: "12px", color: note.tone === "success" ? "#4f6b52" : note.tone === "pending" ? "#7d5e1a" : "#9d4438" }}>
                   {note.text}
                 </span>
               )}
@@ -1161,7 +1406,7 @@ function AiTab() {
                 <div key={field} style={ui.listRow}>
                   <span style={ui.muted}>
                     {label}
-                    <span style={{ display: "block", color: "#a3a399", fontSize: "9px" }}>{hint}</span>
+                    <span style={{ display: "block", color: "#a3a399", fontSize: "12px" }}>{hint}</span>
                   </span>
                   <span style={{ ...ui.mono, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{config.models[field]}</span>
                 </div>
@@ -1171,13 +1416,13 @@ function AiTab() {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: "10px" }}>
               <a href="/proposals" style={{ ...ui.card, display: "block", textDecoration: "none" }}>
                 <p style={{ margin: "0 0 4px", color: INK, fontSize: "12px", fontWeight: 600 }}>Creator mode</p>
-                <p style={{ ...ui.muted, margin: 0, fontSize: "10px" }}>
+                <p style={{ ...ui.muted, margin: 0, fontSize: "12px" }}>
                   Connect a coding agent to propose capabilities as reviewed diffs.
                 </p>
               </a>
               <a href="/sessions" style={{ ...ui.card, display: "block", textDecoration: "none" }}>
                 <p style={{ margin: "0 0 4px", color: INK, fontSize: "12px", fontWeight: 600 }}>Agent sessions</p>
-                <p style={{ ...ui.muted, margin: 0, fontSize: "10px" }}>
+                <p style={{ ...ui.muted, margin: 0, fontSize: "12px" }}>
                   Every model action, its capability, and its outcome, auditable forever.
                 </p>
               </a>
@@ -1187,6 +1432,13 @@ function AiTab() {
       </Section>
 
       <CodingAgentConnections />
+    </>
+  );
+}
+
+function AgentTab() {
+  return (
+    <>
       <SoulSection />
       <MemorySection />
     </>
@@ -1247,7 +1499,7 @@ function SoulSection() {
             {busy ? "Saving…" : "Save persona"}
           </button>
           {note && (
-            <span role={note.tone === "error" ? "alert" : "status"} style={{ fontSize: "11px", color: note.tone === "success" ? "#4f6b52" : "#9d4438" }}>
+            <span role={note.tone === "error" ? "alert" : "status"} style={{ fontSize: "12px", color: note.tone === "success" ? "#4f6b52" : "#9d4438" }}>
               {note.text}
             </span>
           )}
@@ -1329,7 +1581,7 @@ function MemorySection() {
             {memory.map((entry) => (
               <li key={entry.id} style={ui.listRow}>
                 <div style={{ minWidth: 0 }}>
-                  <p style={{ margin: 0, color: MUTED, fontSize: "10px", fontWeight: 650 }}>
+                  <p style={{ margin: 0, color: MUTED, fontSize: "12px", fontWeight: 650 }}>
                     {entry.kind}
                     {entry.source ? <span style={{ color: "#a3a399", fontWeight: 400 }}> · {entry.source}</span> : null}
                   </p>
@@ -1341,7 +1593,7 @@ function MemorySection() {
                     aria-label="Delete memory entry"
                     title="Forget this"
                     onClick={() => setConfirmId(entry.id)}
-                    style={{ minHeight: "26px", flex: "0 0 auto", border: "1px solid #e5dccb", borderRadius: "5px", padding: "0 8px", background: "#fffdf8", color: "#9d4438", cursor: "pointer", fontSize: "10px", fontWeight: 650 }}
+                    style={{ minHeight: "26px", flex: "0 0 auto", border: "1px solid #e5dccb", borderRadius: "5px", padding: "0 8px", background: "#fffdf8", color: "#9d4438", cursor: "pointer", fontSize: "12px", fontWeight: 650 }}
                   >
                     Forget
                   </button>
@@ -1537,7 +1789,7 @@ function BrandingTab() {
               {busy ? "Saving…" : "Save branding"}
             </button>
             {notice && (
-              <span role={notice.tone === "error" ? "alert" : "status"} style={{ fontSize: "11px", color: notice.tone === "success" ? "#4f6b52" : notice.tone === "pending" ? "#7d5e1a" : "#9d4438" }}>
+              <span role={notice.tone === "error" ? "alert" : "status"} style={{ fontSize: "12px", color: notice.tone === "success" ? "#4f6b52" : notice.tone === "pending" ? "#7d5e1a" : "#9d4438" }}>
                 {notice.text}
               </span>
             )}
@@ -1663,7 +1915,7 @@ function RoutinesTab({ retryScope }: { retryScope?: GovernedRetryScope }) {
             style={ui.textarea}
           />
         </label>
-        <label style={{ display: "flex", alignItems: "center", gap: "7px", color: MUTED, fontSize: "11px" }}>
+        <label style={{ display: "flex", alignItems: "center", gap: "7px", color: MUTED, fontSize: "12px" }}>
           <input type="checkbox" checked={withWebhook} onChange={(event) => setWithWebhook(event.currentTarget.checked)} />
           Allow webhook trigger (Paperclip-compatible)
         </label>
@@ -1726,10 +1978,10 @@ function RoutinesTab({ retryScope }: { retryScope?: GovernedRetryScope }) {
                   <button type="button" disabled={busy} onClick={() => void act({ action: "delete", routineId: routine.id }, "Routine deleted.")} style={ui.secondary}>Delete</button>
                 </div>
               </div>
-              <p style={{ ...ui.muted, margin: "7px 0 0", fontSize: "10px" }}>
+              <p style={{ ...ui.muted, margin: "7px 0 0", fontSize: "12px" }}>
                 {routine.lastError ?? "Read-only runner; findings become notifications."}
               </p>
-              <p style={{ margin: "4px 0 0", color: "#a3a399", fontSize: "10px" }}>
+              <p style={{ margin: "4px 0 0", color: "#a3a399", fontSize: "12px" }}>
                 {routine.enabled && routine.nextRunAt ? `Next run ${new Date(routine.nextRunAt).toLocaleString()}` : "Paused"}
                 {routine.webhookUrl && (
                   <>
@@ -1738,7 +1990,7 @@ function RoutinesTab({ retryScope }: { retryScope?: GovernedRetryScope }) {
                       type="button"
                       title={routine.webhookUrl}
                       onClick={() => void copyToClipboard(routine.webhookUrl ?? "")}
-                      style={{ border: 0, padding: 0, background: "none", color: "#8b6a22", cursor: "pointer", font: "inherit", fontSize: "10px", textDecoration: "underline" }}
+                      style={{ border: 0, padding: 0, background: "none", color: "#8b6a22", cursor: "pointer", font: "inherit", fontSize: "12px", textDecoration: "underline" }}
                     >
                       copy webhook URL
                     </button>
@@ -1837,9 +2089,9 @@ function RuntimeTab() {
 function DigestBox({ label, value }: { label: string; value: string }) {
   return (
     <div style={{ border: "1px solid " + LINE, borderRadius: "8px", padding: "9px 10px", background: "#f7f6f0" }}>
-      <p style={{ margin: 0, color: "#a3a399", fontSize: "9px", fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase" }}>{label}</p>
-      <code style={{ display: "block", marginTop: "4px", color: "#36322b", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: "10px", overflowWrap: "anywhere" }}>{value}</code>
-      <button type="button" onClick={() => void copyToClipboard(value)} style={{ marginTop: "5px", border: 0, padding: 0, background: "none", color: "#8b6a22", cursor: "pointer", fontSize: "10px", fontWeight: 650 }}>Copy</button>
+      <p style={{ margin: 0, color: "#a3a399", fontSize: "12px", fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase" }}>{label}</p>
+      <code style={{ display: "block", marginTop: "4px", color: "#36322b", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: "12px", overflowWrap: "anywhere" }}>{value}</code>
+      <button type="button" onClick={() => void copyToClipboard(value)} style={{ marginTop: "5px", border: 0, padding: 0, background: "none", color: "#8b6a22", cursor: "pointer", fontSize: "12px", fontWeight: 650 }}>Copy</button>
     </div>
   );
 }

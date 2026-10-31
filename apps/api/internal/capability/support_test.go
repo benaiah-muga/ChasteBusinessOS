@@ -196,3 +196,21 @@ func TestParseSupportConversationIDInputLimit(t *testing.T) {
 		})
 	}
 }
+
+func TestParseSupportInputKeepsOrderLookupDistinctFromConversationRead(t *testing.T) {
+	raw := json.RawMessage(`{"conversationId":"11111111-1111-4111-8111-111111111111"}`)
+	read, err := parseSupportInput(supportReadConversationCapabilityID, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := read.(SupportReadConversationInput); !ok {
+		t.Fatalf("readConversation parsed as %T", read)
+	}
+	lookup, err := parseSupportInput(supportLookupOrderStatusCapabilityID, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := lookup.(SupportLookupOrderStatusInput); !ok {
+		t.Fatalf("lookupOrderStatus parsed as %T, want SupportLookupOrderStatusInput", lookup)
+	}
+}

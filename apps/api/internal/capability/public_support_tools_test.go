@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -128,6 +129,7 @@ func (tx *publicSupportFakeTx) QueryRow(_ context.Context, query string, args ..
 		}
 		return publicSupportFakeRow{values: []any{
 			publicSupportConversationID, "open", nil, "Returns", nil, nil, "visitor@example.test", "normal", nil, nil, nil,
+			nil, time.Time{}, time.Time{}, nil, "desk",
 		}}
 	}
 	return publicSupportFakeRow{err: fmt.Errorf("unexpected QueryRow: %s", query)}

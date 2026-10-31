@@ -526,182 +526,182 @@
     {
       "exportName": "quoteLines",
       "tableName": "quote_lines",
-      "line": 2553
+      "line": 2555
     },
     {
       "exportName": "recurringInvoices",
       "tableName": "recurring_invoices",
-      "line": 2571
+      "line": 2573
     },
     {
       "exportName": "recurringInvoiceRuns",
       "tableName": "recurring_invoice_runs",
-      "line": 2599
+      "line": 2601
     },
     {
       "exportName": "timeEntries",
       "tableName": "time_entries",
-      "line": 2624
+      "line": 2626
     },
     {
       "exportName": "expenseClaims",
       "tableName": "expense_claims",
-      "line": 2650
+      "line": 2652
     },
     {
       "exportName": "invoiceShares",
       "tableName": "invoice_shares",
-      "line": 2680
+      "line": 2682
     },
     {
       "exportName": "notifications",
       "tableName": "notifications",
-      "line": 2700
+      "line": 2702
     },
     {
       "exportName": "authEmailOutbox",
       "tableName": "auth_email_outbox",
-      "line": 2721
+      "line": 2723
     },
     {
       "exportName": "authUser",
       "tableName": "auth_user",
-      "line": 2739
+      "line": 2741
     },
     {
       "exportName": "authSession",
       "tableName": "auth_session",
-      "line": 2749
+      "line": 2751
     },
     {
       "exportName": "authAccount",
       "tableName": "auth_account",
-      "line": 2762
+      "line": 2764
     },
     {
       "exportName": "authVerification",
       "tableName": "auth_verification",
-      "line": 2787
+      "line": 2789
     },
     {
       "exportName": "routines",
       "tableName": "routines",
-      "line": 2804
+      "line": 2806
     },
     {
       "exportName": "jobs",
       "tableName": "jobs",
-      "line": 2842
+      "line": 2844
     },
     {
       "exportName": "routineOccurrences",
       "tableName": "routine_occurrences",
-      "line": 2880
+      "line": 2882
     },
     {
       "exportName": "outboxMessages",
       "tableName": "outbox_messages",
-      "line": 2907
+      "line": 2909
     },
     {
       "exportName": "bankAccounts",
       "tableName": "bank_accounts",
-      "line": 2945
+      "line": 2947
     },
     {
       "exportName": "bankTransactions",
       "tableName": "bank_transactions",
-      "line": 2967
+      "line": 2969
     },
     {
       "exportName": "bankAllocations",
       "tableName": "bank_allocations",
-      "line": 2998
+      "line": 3000
     },
     {
       "exportName": "salesTaxFilings",
       "tableName": "sales_tax_filings",
-      "line": 3028
+      "line": 3030
     },
     {
       "exportName": "taxProfiles",
       "tableName": "tax_profiles",
-      "line": 3049
+      "line": 3051
     },
     {
       "exportName": "taxCodes",
       "tableName": "tax_codes",
-      "line": 3071
+      "line": 3073
     },
     {
       "exportName": "taxReturns",
       "tableName": "tax_returns",
-      "line": 3098
+      "line": 3100
     },
     {
       "exportName": "supportSettings",
       "tableName": "support_settings",
-      "line": 3138
+      "line": 3140
     },
     {
       "exportName": "supportCannedResponses",
       "tableName": "support_canned_responses",
-      "line": 3158
+      "line": 3160
     },
     {
       "exportName": "supportKbArticles",
       "tableName": "support_kb_articles",
-      "line": 3173
+      "line": 3175
     },
     {
       "exportName": "supportKbArticleEmbeddings",
       "tableName": "support_kb_article_embeddings",
-      "line": 3193
+      "line": 3195
     },
     {
       "exportName": "supportKbArticleEmbeddingJobs",
       "tableName": "support_kb_article_embedding_jobs",
-      "line": 3219
+      "line": 3221
     },
     {
       "exportName": "marketingSegments",
       "tableName": "marketing_segments",
-      "line": 3248
+      "line": 3250
     },
     {
       "exportName": "marketingCampaigns",
       "tableName": "marketing_campaigns",
-      "line": 3263
+      "line": 3265
     },
     {
       "exportName": "marketingSends",
       "tableName": "marketing_sends",
-      "line": 3283
+      "line": 3285
     },
     {
       "exportName": "marketingDeliveries",
       "tableName": "marketing_deliveries",
-      "line": 3306
+      "line": 3308
     },
     {
       "exportName": "actionReceipts",
       "tableName": "action_receipts",
-      "line": 3338
+      "line": 3340
     },
     {
       "exportName": "agentRunSteps",
       "tableName": "agent_run_steps",
-      "line": 3360
+      "line": 3362
     },
     {
       "exportName": "notificationReads",
       "tableName": "notification_reads",
-      "line": 3396
+      "line": 3398
     },
     {
       "exportName": "notificationPreferences",
       "tableName": "notification_preferences",
-      "line": 3419
+      "line": 3421
     }
   ]
 }

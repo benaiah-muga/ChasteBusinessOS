@@ -113,8 +113,9 @@ func (h *SupportCustomersSessionHandler) ServeHTTP(w http.ResponseWriter, r *htt
 	}
 	canReadCRM := resolved.HasPermission("crm.read") || resolved.HasPermission("*")
 	canSellPOS := resolved.HasPermission("pos.sell") || resolved.HasPermission("*")
-	if !canReadCRM && !canSellPOS {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden: missing crm.read or pos.sell"})
+	canReadSupport := resolved.HasPermission("support.read") || resolved.HasPermission("*")
+	if !canReadCRM && !canSellPOS && !canReadSupport {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden: missing support.read, crm.read, or pos.sell"})
 		return
 	}
 	data, err := h.reader.Read(r.Context(), *resolved.OrgID, canReadCRM)

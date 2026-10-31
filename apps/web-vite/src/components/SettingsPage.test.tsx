@@ -84,10 +84,50 @@ describe("Vite settings page", () => {
     render(<SettingsPage baseCurrency="USD" />);
 
     expect(await screen.findByText("Benson's Hardware")).not.toBeNull();
-    expect(screen.getByText(/Managed by owners/)).not.toBeNull();
+    expect(screen.getByText("Base currency")).not.toBeNull();
+    expect(screen.getByText("USD")).not.toBeNull();
     expect(screen.getByRole("link", { name: /Team & roles/ }).getAttribute("href")).toBe("/team");
     expect(screen.getByRole("link", { name: /View trajectory log/ }).getAttribute("href")).toBe("/sessions");
     expect(fetchMock.mock.calls.map(([url]) => String(url))).toContain("/api/org");
+  }, 20_000);
+
+  it("exposes email delivery as a first-class settings section", async () => {
+    routedFetch({
+      "/api/modules": () => jsonResponse(switchboard),
+      "/api/email": () => jsonResponse({
+        configured: true,
+        from: "Chaste Local <noreply@chaste.test>",
+      }),
+    });
+    render(<SettingsPage pathname="/settings/email" />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Email", level: 2 }),
+    ).not.toBeNull();
+    expect(
+      await screen.findByText(/SMTP is configured/),
+    ).not.toBeNull();
+    expect(
+      screen.getByRole("link", { name: "Email" }).getAttribute("aria-current"),
+    ).toBe("page");
+  }, 20_000);
+
+  it("opens a settings section directly from its URL", async () => {
+    routedFetch({
+      "/api/modules": () => jsonResponse(switchboard),
+      "/api/module-settings": () => jsonResponse({
+        module: "inventory",
+        settings: { defaultUnitLabel: "each", defaultReorderPointUnits: 4 },
+      }),
+    });
+    render(<SettingsPage pathname="/settings/modules" />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Modules", level: 2 }),
+    ).not.toBeNull();
+    expect(
+      screen.getByRole("link", { name: "Modules" }).getAttribute("aria-current"),
+    ).toBe("page");
   }, 20_000);
 
   it("locks the platform spine and unions it back in on a governed switchboard change", async () => {
@@ -97,7 +137,7 @@ describe("Vite settings page", () => {
         : jsonResponse({ ...switchboard, enabledModules: ["accounting", "iam", "routines", "signals"] })),
     });
     render(<SettingsPage />);
-    fireEvent.click(screen.getByRole("tab", { name: "Modules" }));
+    fireEvent.click(screen.getByRole("link", { name: "Modules" }));
 
     const iamSwitch = await screen.findByRole("switch", { name: "Disable Identity & access" });
     expect((iamSwitch as HTMLButtonElement).disabled).toBe(true);
@@ -122,7 +162,7 @@ describe("Vite settings page", () => {
         : jsonResponse(switchboard)),
     });
     render(<SettingsPage />);
-    fireEvent.click(screen.getByRole("tab", { name: "Modules" }));
+    fireEvent.click(screen.getByRole("link", { name: "Modules" }));
     await screen.findByRole("switch", { name: "Disable CRM" });
     fireEvent.click(screen.getByRole("switch", { name: "Disable CRM" }));
 
@@ -139,7 +179,7 @@ describe("Vite settings page", () => {
         : jsonResponse({ module: "inventory", settings: { defaultUnitLabel: "each", defaultReorderPointUnits: 4 } })),
     });
     render(<SettingsPage />);
-    fireEvent.click(screen.getByRole("tab", { name: "Modules" }));
+    fireEvent.click(screen.getByRole("link", { name: "Modules" }));
 
     const unit = await screen.findByLabelText("Inventory Default unit label") as HTMLInputElement;
     const reorder = screen.getByLabelText("Inventory Default reorder point") as HTMLInputElement;
@@ -161,7 +201,7 @@ describe("Vite settings page", () => {
   it("refuses to empty the switchboard", async () => {
     const fetchMock = routedFetch({ "/api/modules": () => jsonResponse({ ...switchboard, catalog: [switchboard.catalog[3]!], enabledModules: ["routines"] }) });
     render(<SettingsPage />);
-    fireEvent.click(screen.getByRole("tab", { name: "Modules" }));
+    fireEvent.click(screen.getByRole("link", { name: "Modules" }));
     const spine = await screen.findByRole("switch", { name: "Disable Routines" });
     expect((spine as HTMLButtonElement).disabled).toBe(true);
     expect(screen.queryByText("At least one module must stay enabled.")).toBeNull();
@@ -175,7 +215,7 @@ describe("Vite settings page", () => {
         : jsonResponse({ ...policy, policy: { ...policy.policy, moneyThresholdMinor: 50_000 } })),
     });
     render(<SettingsPage baseCurrency="USD" />);
-    fireEvent.click(screen.getByRole("tab", { name: "Governance" }));
+    fireEvent.click(screen.getByRole("link", { name: "Governance" }));
 
     const threshold = await screen.findByLabelText("Payment approval threshold");
     expect((threshold as HTMLInputElement).value).toBe("500");
@@ -194,7 +234,7 @@ describe("Vite settings page", () => {
   it("hides the policy save control from non-admins and explains why", async () => {
     routedFetch({ "/api/policy": () => jsonResponse({ ...policy, canEdit: false }) });
     render(<SettingsPage baseCurrency="USD" />);
-    fireEvent.click(screen.getByRole("tab", { name: "Governance" }));
+    fireEvent.click(screen.getByRole("link", { name: "Governance" }));
 
     expect(await screen.findByText("Only organization admins can change policy.")).not.toBeNull();
     expect(screen.queryByRole("button", { name: "Save policy" })).toBeNull();
@@ -208,7 +248,7 @@ describe("Vite settings page", () => {
       "/api/memory": () => jsonResponse({ memories: [], total: 0, canEdit: false }),
     });
     render(<SettingsPage />);
-    fireEvent.click(screen.getByRole("tab", { name: "AI & automation" }));
+    fireEvent.click(screen.getByRole("link", { name: "AI providers" }));
 
     const keyField = (await screen.findByLabelText("API key")) as HTMLInputElement;
     expect(screen.getByRole("link", { name: /Creator mode/ }).getAttribute("href")).toBe("/proposals");
@@ -237,7 +277,7 @@ describe("Vite settings page", () => {
       "/api/memory": () => jsonResponse({ memories: [], total: 0, canEdit: false }),
     });
     render(<SettingsPage />);
-    fireEvent.click(screen.getByRole("tab", { name: "AI & automation" }));
+    fireEvent.click(screen.getByRole("link", { name: "AI providers" }));
 
     expect(await screen.findByText("credential missing")).not.toBeNull();
     expect((screen.getByRole("button", { name: "Clear stored key" }) as HTMLButtonElement).disabled).toBe(true);
@@ -256,7 +296,7 @@ describe("Vite settings page", () => {
           })),
     });
     render(<SettingsPage />);
-    fireEvent.click(screen.getByRole("tab", { name: "AI & automation" }));
+    fireEvent.click(screen.getByRole("link", { name: "Agent" }));
 
     expect(await screen.findByText("Refunds need a receipt")).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Delete memory entry" }));
@@ -284,7 +324,7 @@ describe("Vite settings page", () => {
       }),
     });
     render(<SettingsPage />);
-    fireEvent.click(screen.getByRole("tab", { name: "AI & automation" }));
+    fireEvent.click(screen.getByRole("link", { name: "Agent" }));
     expect(await screen.findByText("Source matched entry")).not.toBeNull();
     const search = screen.getByRole("textbox", { name: "Search organization memory" });
     fireEvent.change(search, { target: { value: "x" } });
@@ -302,7 +342,7 @@ describe("Vite settings page", () => {
         : jsonResponse({ routines: [] })),
     });
     render(<SettingsPage actorId="actor-settings" organizationId="org-settings" />);
-    fireEvent.click(screen.getByRole("tab", { name: "Routines" }));
+    fireEvent.click(screen.getByRole("link", { name: "Routines" }));
 
     expect(await screen.findByText("No routines yet. Create one above, or start with the daily heartbeat.")).not.toBeNull();
     fireEvent.change(screen.getByLabelText("Routine name"), { target: { value: "Morning check" } });
@@ -360,7 +400,7 @@ describe("Vite settings page", () => {
   it("prevents unsupported schedule phrases from reaching the Go routines API", async () => {
     const fetchMock = routedFetch({ "/api/routines": () => jsonResponse({ routines: [] }) });
     render(<SettingsPage />);
-    fireEvent.click(screen.getByRole("tab", { name: "Routines" }));
+    fireEvent.click(screen.getByRole("link", { name: "Routines" }));
     await screen.findByText("No routines yet. Create one above, or start with the daily heartbeat.");
     fireEvent.change(screen.getByLabelText("Routine name"), { target: { value: "Ad hoc check" } });
     fireEvent.change(screen.getByLabelText("Schedule in plain language"), { target: { value: "a few times a day" } });
@@ -389,7 +429,7 @@ describe("Vite settings page", () => {
       }),
     });
     render(<SettingsPage />);
-    fireEvent.click(screen.getByRole("tab", { name: "Runtime" }));
+    fireEvent.click(screen.getByRole("link", { name: "Runtime" }));
 
     expect((await screen.findAllByText("erp-prod")).length).toBe(2);
     expect(screen.getByText("core@1.2.0")).not.toBeNull();
@@ -413,7 +453,7 @@ it("saves in-app notification preferences without changing approval authority", 
   });
   render(<SettingsPage organizationId="11111111-1111-4111-8111-111111111111" actorId="22222222-2222-4222-8222-222222222222" />);
 
-  fireEvent.click(screen.getByRole("tab", { name: "Notifications" }));
+  fireEvent.click(screen.getByRole("link", { name: "Notifications" }));
   expect(await screen.findByText("Approval requests")).not.toBeNull();
   expect((screen.getByRole("checkbox", { name: /Approval requests/ }) as HTMLInputElement).checked).toBe(true);
   expect((screen.getByRole("checkbox", { name: /System notices/ }) as HTMLInputElement).checked).toBe(false);

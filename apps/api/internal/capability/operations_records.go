@@ -17,6 +17,12 @@ const (
 	listOperationalRecordsCapabilityID  = "operations.listRecords"
 )
 
+// OperationsDomainError marks an expected operations workflow refusal for
+// HTTP adapters, so a business refusal is not reported as a server failure.
+type OperationsDomainError string
+
+func (e OperationsDomainError) Error() string { return string(e) }
+
 type UpsertOperationalRecordInput struct {
 	Kind         string          `json:"kind"`
 	StableKey    string          `json:"stableKey"`
@@ -174,6 +180,17 @@ func ParseListOperationalRecordsInput(raw json.RawMessage) (ListOperationalRecor
 }
 
 func upsertOperationalRecord(ctx context.Context, tx pgx.Tx, orgID string, actorID *string, input UpsertOperationalRecordInput, now time.Time) (OperationalRecord, error) {
+	if input.OwnerUserID != nil {
+		var member bool
+		if err := tx.QueryRow(ctx, `
+			SELECT EXISTS (SELECT 1 FROM memberships WHERE org_id = $1::uuid AND user_id = $2::uuid)`,
+			orgID, *input.OwnerUserID).Scan(&member); err != nil {
+			return OperationalRecord{}, err
+		}
+		if !member {
+			return OperationalRecord{}, OperationsDomainError("owner must be a member of this organization")
+		}
+	}
 	var resolvedAt *time.Time
 	if input.Status == "resolved" || input.Status == "verified" || input.Status == "suppressed" || input.Status == "cancelled" {
 		resolvedAt = &now

@@ -38,16 +38,21 @@ const (
 )
 
 type SupportBoundConversation struct {
-	ID             string
-	Status         string
-	CustomerID     *string
-	Subject        string
-	CustomerName   string
-	CustomerEmail  *string
-	Priority       string
-	Category       *string
-	AssignedUserID *string
-	SLADueAt       *string
+	ID               string
+	Status           string
+	CustomerID       *string
+	Subject          string
+	CustomerName     string
+	CustomerEmail    *string
+	Priority         string
+	Category         *string
+	AssignedUserID   *string
+	AssignedUserName *string
+	SLADueAt         *string
+	TicketNumber     *int64
+	Channel          string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 func supportLoadBoundConversation(ctx context.Context, tx pgx.Tx, orgID, conversationID string) (*SupportBoundConversation, error) {
@@ -57,12 +62,17 @@ func supportLoadBoundConversation(ctx context.Context, tx pgx.Tx, orgID, convers
 	var slaDueAt *time.Time
 	err := tx.QueryRow(ctx, `
 		SELECT c.id::text, c.status, c.customer_id::text, c.subject, cu.name, cu.email, c.visitor_email,
-			c.priority, c.category, c.assigned_user_id::text, c.sla_due_at
+			c.priority, c.category, c.assigned_user_id::text, c.sla_due_at,
+			c.ticket_number, c.created_at, c.updated_at, coalesce(au.name, au.email),
+			CASE WHEN c.visitor_secret_hash IS NOT NULL THEN 'widget' ELSE 'desk' END
 		FROM support_conversations c
 		LEFT JOIN customers cu ON cu.id = c.customer_id AND cu.org_id=$1::uuid
+		LEFT JOIN memberships am ON am.org_id = c.org_id AND am.user_id = c.assigned_user_id
+		LEFT JOIN users au ON au.id = am.user_id
 		WHERE c.id=$2::uuid AND c.org_id=$1::uuid LIMIT 1`, orgID, conversationID).Scan(
 		&conv.ID, &conv.Status, &conv.CustomerID, &conv.Subject, &customerName, &customerEmail, &visitorEmail,
-		&conv.Priority, &conv.Category, &conv.AssignedUserID, &slaDueAt)
+		&conv.Priority, &conv.Category, &conv.AssignedUserID, &slaDueAt,
+		&conv.TicketNumber, &conv.CreatedAt, &conv.UpdatedAt, &conv.AssignedUserName, &conv.Channel)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -82,10 +92,14 @@ func supportLoadBoundConversation(ctx context.Context, tx pgx.Tx, orgID, convers
 		conv.CustomerEmail = visitorEmail
 	}
 	if slaDueAt != nil {
-		formatted := slaDueAt.UTC().Format("2006-01-02T15:04:05.000Z07:00")
+		formatted := supportJSDate(*slaDueAt)
 		conv.SLADueAt = &formatted
 	}
 	return &conv, nil
+}
+
+func supportJSDate(value time.Time) string {
+	return value.UTC().Format("2006-01-02T15:04:05.000Z07:00")
 }
 
 type SupportStartConversationInput struct {
@@ -115,13 +129,23 @@ type SupportListConversationsInput struct {
 }
 
 type SupportConversationListItem struct {
-	ID                 string `json:"id"`
-	CustomerID         string `json:"customerId"`
-	CustomerName       string `json:"customerName"`
-	Subject            string `json:"subject"`
-	Status             string `json:"status"`
-	LastMessageAt      string `json:"lastMessageAt"`
-	LastMessagePreview string `json:"lastMessagePreview"`
+	ID                 string  `json:"id"`
+	CustomerID         string  `json:"customerId"`
+	CustomerName       string  `json:"customerName"`
+	CustomerEmail      *string `json:"customerEmail"`
+	Subject            string  `json:"subject"`
+	Status             string  `json:"status"`
+	Priority           string  `json:"priority"`
+	Category           *string `json:"category"`
+	AssignedUserID     *string `json:"assignedUserId"`
+	AssignedUserName   *string `json:"assignedUserName"`
+	SLADueAt           *string `json:"slaDueAt"`
+	TicketNumber       *int64  `json:"ticketNumber"`
+	Channel            string  `json:"channel"`
+	CreatedAt          string  `json:"createdAt"`
+	UpdatedAt          string  `json:"updatedAt"`
+	LastMessageAt      string  `json:"lastMessageAt"`
+	LastMessagePreview string  `json:"lastMessagePreview"`
 }
 
 type SupportListConversationsOutput struct {
@@ -198,16 +222,21 @@ func (output SupportReadConversationOutput) MarshalJSON() ([]byte, error) {
 }
 
 type SupportConversationHeader struct {
-	ID             string  `json:"id"`
-	CustomerID     *string `json:"customerId"`
-	CustomerName   string  `json:"customerName"`
-	Subject        string  `json:"subject"`
-	Status         string  `json:"status"`
-	Priority       string  `json:"priority"`
-	Category       *string `json:"category"`
-	AssignedUserID *string `json:"assignedUserId"`
-	SLADueAt       *string `json:"slaDueAt"`
-	CustomerEmail  *string `json:"customerEmail"`
+	ID               string  `json:"id"`
+	CustomerID       *string `json:"customerId"`
+	CustomerName     string  `json:"customerName"`
+	CustomerEmail    *string `json:"customerEmail"`
+	Subject          string  `json:"subject"`
+	Status           string  `json:"status"`
+	Priority         string  `json:"priority"`
+	Category         *string `json:"category"`
+	AssignedUserID   *string `json:"assignedUserId"`
+	AssignedUserName *string `json:"assignedUserName"`
+	SLADueAt         *string `json:"slaDueAt"`
+	TicketNumber     *int64  `json:"ticketNumber"`
+	Channel          string  `json:"channel"`
+	CreatedAt        string  `json:"createdAt"`
+	UpdatedAt        string  `json:"updatedAt"`
 }
 
 type SupportLookupOrderStatusInput struct {
@@ -721,8 +750,14 @@ func parseSupportInput(capabilityID string, raw json.RawMessage) (any, error) {
 		return ParseSupportListTicketsInput(raw)
 	case supportListLibraryCapabilityID:
 		return ParseSupportLibraryInput(raw)
-	case supportReadConversationCapabilityID, supportLookupOrderStatusCapabilityID:
+	case supportReadConversationCapabilityID:
 		return ParseSupportConversationIDInput(raw)
+	case supportLookupOrderStatusCapabilityID:
+		parsed, err := ParseSupportConversationIDInput(raw)
+		if err != nil {
+			return nil, err
+		}
+		return SupportLookupOrderStatusInput{ConversationID: parsed.ConversationID}, nil
 	case supportResolveConversationCapabilityID, supportReopenConversationCapabilityID:
 		fields, err := decodeJSONObject(raw)
 		if err != nil {
@@ -830,10 +865,15 @@ func supportListConversations(ctx context.Context, tx pgx.Tx, orgID string, inpu
 		customerJoin = "JOIN"
 	}
 	query := fmt.Sprintf(`
-		SELECT c.id::text, coalesce(c.customer_id::text, ''), coalesce(cu.name, c.visitor_email, 'Website visitor'),
-		       c.subject, c.status, COALESCE(m.created_at, c.created_at), coalesce(left(m.body, 140), '')
+		SELECT c.id::text, coalesce(c.customer_id::text, ''), coalesce(cu.name, 'Website visitor'),
+		       coalesce(cu.email, c.visitor_email), c.subject, c.status,
+		       c.priority, c.category, c.assigned_user_id::text, coalesce(au.name, au.email), c.sla_due_at,
+		       c.ticket_number, CASE WHEN c.visitor_secret_hash IS NOT NULL THEN 'widget' ELSE 'desk' END,
+		       c.created_at, c.updated_at, COALESCE(m.created_at, c.created_at), coalesce(left(m.body, 140), '')
 		FROM support_conversations c
 		%s customers cu ON cu.id = c.customer_id AND cu.org_id=$1::uuid
+		LEFT JOIN memberships am ON am.org_id = c.org_id AND am.user_id = c.assigned_user_id
+		LEFT JOIN users au ON au.id = am.user_id
 		LEFT JOIN LATERAL (
 			SELECT body, created_at FROM support_messages sm
 			WHERE sm.conversation_id = c.id ORDER BY created_at DESC LIMIT 1
@@ -853,11 +893,22 @@ func supportListConversations(ctx context.Context, tx pgx.Tx, orgID string, inpu
 	out := SupportListConversationsOutput{Conversations: []SupportConversationListItem{}}
 	for rows.Next() {
 		var item SupportConversationListItem
-		var lastMessageAt time.Time
-		if err := rows.Scan(&item.ID, &item.CustomerID, &item.CustomerName, &item.Subject, &item.Status, &lastMessageAt, &item.LastMessagePreview); err != nil {
+		var createdAt, updatedAt, lastMessageAt time.Time
+		var slaDueAt *time.Time
+		if err := rows.Scan(
+			&item.ID, &item.CustomerID, &item.CustomerName, &item.CustomerEmail, &item.Subject, &item.Status,
+			&item.Priority, &item.Category, &item.AssignedUserID, &item.AssignedUserName, &slaDueAt,
+			&item.TicketNumber, &item.Channel, &createdAt, &updatedAt, &lastMessageAt, &item.LastMessagePreview,
+		); err != nil {
 			return SupportListConversationsOutput{}, err
 		}
-		item.LastMessageAt = lastMessageAt.UTC().Format("2006-01-02T15:04:05.000Z07:00")
+		if slaDueAt != nil {
+			formatted := supportJSDate(*slaDueAt)
+			item.SLADueAt = &formatted
+		}
+		item.CreatedAt = supportJSDate(createdAt)
+		item.UpdatedAt = supportJSDate(updatedAt)
+		item.LastMessageAt = supportJSDate(lastMessageAt)
 		out.Conversations = append(out.Conversations, item)
 	}
 	return out, rows.Err()
@@ -987,9 +1038,11 @@ func supportReadConversation(ctx context.Context, tx pgx.Tx, orgID string, input
 	}
 	return SupportReadConversationOutput{
 		Conversation: SupportConversationHeader{
-			ID: conv.ID, CustomerID: conv.CustomerID, CustomerName: conv.CustomerName, Subject: conv.Subject,
-			Status: conv.Status, Priority: conv.Priority, Category: conv.Category, AssignedUserID: conv.AssignedUserID,
-			SLADueAt: conv.SLADueAt, CustomerEmail: conv.CustomerEmail,
+			ID: conv.ID, CustomerID: conv.CustomerID, CustomerName: conv.CustomerName, CustomerEmail: conv.CustomerEmail,
+			Subject: conv.Subject, Status: conv.Status, Priority: conv.Priority, Category: conv.Category,
+			AssignedUserID: conv.AssignedUserID, AssignedUserName: conv.AssignedUserName, SLADueAt: conv.SLADueAt,
+			TicketNumber: conv.TicketNumber, Channel: conv.Channel,
+			CreatedAt: supportJSDate(conv.CreatedAt), UpdatedAt: supportJSDate(conv.UpdatedAt),
 		},
 		Messages: messages, FullDetail: input.FullDetail,
 	}, nil

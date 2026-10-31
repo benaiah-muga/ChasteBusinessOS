@@ -227,7 +227,25 @@ func (h *SupportAdminHandler) handleRead(w http.ResponseWriter, r *http.Request,
 		})
 		return
 	}
-	h.readRaw(w, r, resolved, "support.listConversations", json.RawMessage(`{"limit":100,"customerBoundOnly":true}`))
+	data, ok := h.executeRead(w, r, resolved, "support.listConversations", json.RawMessage(`{"limit":100,"customerBoundOnly":true}`))
+	if !ok {
+		return
+	}
+	var output capability.SupportListConversationsOutput
+	if json.Unmarshal(data, &output) != nil {
+		h.fail(w, "decode support conversation list", errors.New("capability returned invalid list JSON"))
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	conversations := make([]supportAdminConversationListItem, 0, len(output.Conversations))
+	for _, item := range output.Conversations {
+		conversations = append(conversations, supportAdminConversationListItem{
+			ID: item.ID, CustomerID: item.CustomerID, CustomerName: item.CustomerName,
+			Subject: item.Subject, Status: item.Status, LastMessageAt: item.LastMessageAt,
+			LastMessagePreview: item.LastMessagePreview,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"conversations": conversations})
 }
 
 func (h *SupportAdminHandler) readRaw(w http.ResponseWriter, r *http.Request, resolved *session.ResolvedUser, capabilityID string, input json.RawMessage) {
@@ -535,6 +553,16 @@ type supportAdminConversationHeader struct {
 	Category       *string `json:"category"`
 	AssignedUserID *string `json:"assignedUserId"`
 	SLADueAt       *string `json:"slaDueAt"`
+}
+
+type supportAdminConversationListItem struct {
+	ID                 string `json:"id"`
+	CustomerID         string `json:"customerId"`
+	CustomerName       string `json:"customerName"`
+	Subject            string `json:"subject"`
+	Status             string `json:"status"`
+	LastMessageAt      string `json:"lastMessageAt"`
+	LastMessagePreview string `json:"lastMessagePreview"`
 }
 
 type supportAdminConversationDetail struct {

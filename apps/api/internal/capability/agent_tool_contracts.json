@@ -988,12 +988,17 @@
     },
     {
       "id": "accounting.createQuote",
-      "description": "Create a sent sales quote with priced lines and optional catalogue SKUs. Award it with sales.createOrderFromQuote so stock and credit are checked at confirmation, or decline it with accounting.declineQuote.",
+      "description": "Create a sent sales quote against a customer and, when one exists, the CRM opportunity it came from. Award it with sales.createOrderFromQuote so stock and credit are checked at confirmation, or decline it with accounting.declineQuote.",
       "schema": {
         "type": "object",
         "properties": {
           "customerId": {
             "type": "string"
+          },
+          "dealId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Optional CRM deal UUID. When the deal has a customer, the quote customer must match it."
           },
           "memo": {
             "type": "string"

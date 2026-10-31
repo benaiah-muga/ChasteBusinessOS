@@ -26,6 +26,7 @@ func TestSupportCustomersSessionHandlerUsesPermissionSpecificCustomerScope(t *te
 	}{
 		{permission: "crm.read", includeInactive: true},
 		{permission: "pos.sell", includeInactive: false},
+		{permission: "support.read", includeInactive: false},
 	} {
 		identity := directTestIdentity()
 		identity.Permissions = map[string]bool{test.permission: true}
@@ -43,7 +44,7 @@ func TestSupportCustomersSessionHandlerUsesPermissionSpecificCustomerScope(t *te
 	}
 }
 
-func TestSupportCustomersSessionHandlerRequiresCRMOrPOSSellAndHonorsOrgSelector(t *testing.T) {
+func TestSupportCustomersSessionHandlerRequiresASupportCRMOrPOSSellReadAndHonorsOrgSelector(t *testing.T) {
 	identity := directTestIdentity()
 	identity.Permissions = map[string]bool{"crm.write": true}
 	reader := &supportCustomersTestReader{}

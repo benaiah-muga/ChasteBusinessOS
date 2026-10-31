@@ -551,6 +551,16 @@ func TestSessionCapabilityHandlerRejectsInvalidAuthOriginAndCallerClaims(t *test
 		}
 	})
 
+	t.Run("operations domain refusals are definitive client errors", func(t *testing.T) {
+		resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
+		executor := &fakeDirectCapabilityExecutor{err: capability.OperationsDomainError("owner must be a member of this organization")}
+		response := httptest.NewRecorder()
+		NewSessionCapabilityHandler(resolver, executor, nil).ServeHTTP(response, directCapabilityRequest(http.MethodPost, `{"capabilityId":"operations.upsertRecord","input":{},"intentId":"operations-domain-refusal-1"}`))
+		if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), "owner must be a member") {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+		}
+	})
+
 	t.Run("sales domain refusals are definitive client errors", func(t *testing.T) {
 		resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
 		executor := &fakeDirectCapabilityExecutor{err: capability.SalesDomainError("quote is accepted; only sent quotes become orders")}

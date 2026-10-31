@@ -1,0 +1,10 @@
+# ChasteBusinessOS is a private workspace. Only the public sign-in entry and
+# discovery files are intentionally crawlable.
+User-agent: *
+Allow: /login
+Allow: /llms.txt
+Allow: /site.webmanifest
+Allow: /assets/
+Allow: /brand/
+Allow: /favicon.svg
+Disallow: /

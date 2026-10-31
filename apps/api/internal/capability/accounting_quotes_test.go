@@ -50,6 +50,14 @@ func TestGoAccountingQuotesParsersMirrorZodContracts(t *testing.T) {
 	if err != nil || minimal.Memo != nil || minimal.ExpiresAt != nil || minimal.Lines[0].TaxMinor != nil {
 		t.Fatalf("minimal createQuote input=%+v err=%v, want absent optionals", minimal, err)
 	}
+	dealID := "44444444-4444-4444-8444-444444444444"
+	withDeal, err := ParseCreateQuoteInput(json.RawMessage(`{"customerId":"` + customerID + `","dealId":"` + dealID + `","lines":[{"description":"Chair","quantity":1000,"unitPriceMinor":10}]}`))
+	if err != nil || withDeal.DealID == nil || *withDeal.DealID != dealID {
+		t.Fatalf("ParseCreateQuoteInput dealId = %+v, %v, want %s", withDeal.DealID, err, dealID)
+	}
+	if _, err := ParseCreateQuoteInput(json.RawMessage(`{"customerId":"` + customerID + `","dealId":"not-a-uuid","lines":[{"description":"Chair","quantity":1000,"unitPriceMinor":10}]}`)); err == nil {
+		t.Fatal("ParseCreateQuoteInput accepted a malformed dealId")
+	}
 	withSKU, err := ParseCreateQuoteInput(json.RawMessage(`{"customerId":"` + customerID + `","lines":[{"description":"Chair","quantity":1000,"unitPriceMinor":10,"sku":"CHAIR-1"}]}`))
 	if err != nil || withSKU.Lines[0].SKU == nil || *withSKU.Lines[0].SKU != "CHAIR-1" {
 		t.Fatalf("ParseCreateQuoteInput sku = %+v, %v, want CHAIR-1", withSKU.Lines, err)
@@ -644,7 +652,7 @@ func TestGoAccountingQuotesListFiltersOrdersAndScopesTenants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantNewest := fmt.Sprintf(`{"id":%q,"number":3,"status":"sent","totalMinor":30000,"customerId":%q,"createdAt":"2026-09-20T10:00:00.000Z","expiresAt":"2026-12-31T00:00:00.000Z","invoiceId":null,"orderId":null}`, newest, customerID)
+	wantNewest := fmt.Sprintf(`{"id":%q,"number":3,"status":"sent","totalMinor":30000,"customerId":%q,"createdAt":"2026-09-20T10:00:00.000Z","expiresAt":"2026-12-31T00:00:00.000Z","invoiceId":null,"orderId":null,"dealId":null,"dealTitle":null}`, newest, customerID)
 	if string(newestEncoded) != wantNewest {
 		t.Fatalf("listQuotes row JSON = %s, want %s", newestEncoded, wantNewest)
 	}
@@ -652,7 +660,7 @@ func TestGoAccountingQuotesListFiltersOrdersAndScopesTenants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantConverted := fmt.Sprintf(`{"id":%q,"number":2,"status":"accepted","totalMinor":20000,"customerId":%q,"createdAt":"2026-09-20T09:00:00.000Z","expiresAt":"2026-09-01T00:00:00.000Z","invoiceId":%q,"orderId":null}`, converted, customerID, invoiceID)
+	wantConverted := fmt.Sprintf(`{"id":%q,"number":2,"status":"accepted","totalMinor":20000,"customerId":%q,"createdAt":"2026-09-20T09:00:00.000Z","expiresAt":"2026-09-01T00:00:00.000Z","invoiceId":%q,"orderId":null,"dealId":null,"dealTitle":null}`, converted, customerID, invoiceID)
 	if string(convertedEncoded) != wantConverted {
 		t.Fatalf("listQuotes converted row JSON = %s, want %s", convertedEncoded, wantConverted)
 	}
@@ -660,7 +668,7 @@ func TestGoAccountingQuotesListFiltersOrdersAndScopesTenants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantOldest := fmt.Sprintf(`{"id":%q,"number":1,"status":"sent","totalMinor":10000,"customerId":%q,"createdAt":"2026-09-20T08:00:00.000Z","expiresAt":null,"invoiceId":null,"orderId":null}`, oldest, customerID)
+	wantOldest := fmt.Sprintf(`{"id":%q,"number":1,"status":"sent","totalMinor":10000,"customerId":%q,"createdAt":"2026-09-20T08:00:00.000Z","expiresAt":null,"invoiceId":null,"orderId":null,"dealId":null,"dealTitle":null}`, oldest, customerID)
 	if string(oldestEncoded) != wantOldest {
 		t.Fatalf("listQuotes oldest row JSON = %s, want %s", oldestEncoded, wantOldest)
 	}
@@ -685,5 +693,76 @@ func TestGoAccountingQuotesListFiltersOrdersAndScopesTenants(t *testing.T) {
 	emptyEncoded, err := marshalJS(empty)
 	if err != nil || string(emptyEncoded) != `{"quotes":[]}` {
 		t.Fatalf("empty listQuotes JSON = %s, %v", emptyEncoded, err)
+	}
+}
+
+func TestGoAccountingQuotesAttachDealAttribution(t *testing.T) {
+	fx := newExecutorFixture(t)
+	customerID := seedQuoteCustomer(t, fx, fx.orgID, nil)
+	otherCustomerID := seedQuoteCustomer(t, fx, fx.orgID, nil)
+	claims := quoteTestClaims(fx)
+
+	dealID := executorUUID(t)
+	if _, err := fx.owner.Exec(fx.ctx, `
+		INSERT INTO deals (id, org_id, customer_id, title, stage)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, 'Hotel chandelier fit-out', 'negotiation')`,
+		dealID, fx.orgID, customerID); err != nil {
+		t.Fatal(err)
+	}
+	foreignDealID := executorUUID(t)
+	if _, err := fx.owner.Exec(fx.ctx, `
+		INSERT INTO deals (id, org_id, title, stage)
+		VALUES ($1::uuid, $2::uuid, 'Foreign opportunity', 'lead')`,
+		foreignDealID, fx.otherOrgID); err != nil {
+		t.Fatal(err)
+	}
+
+	created, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (CreateQuoteOutput, error) {
+		return createQuote(fx.ctx, tx, claims, CreateQuoteInput{
+			CustomerID: customerID,
+			DealID:     &dealID,
+			Lines:      []CreateQuoteLineInput{{Description: "Chandelier", Quantity: 1000, UnitPriceMinor: 250_000}},
+		})
+	})
+	if err != nil {
+		t.Fatalf("createQuote with deal: %v", err)
+	}
+	var storedDeal *string
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT deal_id::text FROM quotes WHERE org_id=$1::uuid AND id=$2::uuid`, fx.orgID, created.QuoteID).Scan(&storedDeal); err != nil {
+		t.Fatal(err)
+	}
+	if storedDeal == nil || *storedDeal != dealID {
+		t.Fatalf("stored deal = %v, want %s", storedDeal, dealID)
+	}
+	listed, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (ListQuotesOutput, error) {
+		return listQuotes(fx.ctx, tx, fx.orgID, ListQuotesInput{})
+	})
+	if err != nil || len(listed.Quotes) != 1 {
+		t.Fatalf("listQuotes = %+v, %v", listed.Quotes, err)
+	}
+	if listed.Quotes[0].DealID == nil || *listed.Quotes[0].DealID != dealID ||
+		listed.Quotes[0].DealTitle == nil || *listed.Quotes[0].DealTitle != "Hotel chandelier fit-out" {
+		t.Fatalf("listed deal = %v / %v, want %s and its title", listed.Quotes[0].DealID, listed.Quotes[0].DealTitle, dealID)
+	}
+
+	_, err = dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (CreateQuoteOutput, error) {
+		return createQuote(fx.ctx, tx, claims, CreateQuoteInput{
+			CustomerID: otherCustomerID,
+			DealID:     &dealID,
+			Lines:      []CreateQuoteLineInput{{Description: "Mismatch", Quantity: 1000, UnitPriceMinor: 100}},
+		})
+	})
+	if err == nil || err.Error() != "quote customer does not match the deal customer" {
+		t.Fatalf("mismatched customer error = %v, want deal customer refusal", err)
+	}
+	_, err = dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (CreateQuoteOutput, error) {
+		return createQuote(fx.ctx, tx, claims, CreateQuoteInput{
+			CustomerID: customerID,
+			DealID:     &foreignDealID,
+			Lines:      []CreateQuoteLineInput{{Description: "Foreign", Quantity: 1000, UnitPriceMinor: 100}},
+		})
+	})
+	if err == nil || err.Error() != "deal not found" {
+		t.Fatalf("foreign deal error = %v, want not found", err)
 	}
 }

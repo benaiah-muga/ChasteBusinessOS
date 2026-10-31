@@ -693,3 +693,5 @@
 .sales-quote-list td a + button {
   margin-left: 0.4rem;
 }
+
+.sales-quote-deal { display: block; margin-top: 0.15rem; color: var(--gold-700); font-size: 0.72rem; font-weight: 650; }

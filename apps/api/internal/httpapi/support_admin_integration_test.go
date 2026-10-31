@@ -141,6 +141,9 @@ func TestSupportAdminIntegrationServesTheInboxThroughCapabilities(t *testing.T) 
 	if first["id"] != conversationID || first["subject"] != "Printer smokes" {
 		t.Fatalf("conversation=%v", first)
 	}
+	if len(first) != 7 {
+		t.Fatalf("legacy list shape changed: %s", list.Body.String())
+	}
 	if _, leaked := first["customerEmail"]; leaked {
 		t.Fatalf("list leaked customerEmail: %s", list.Body.String())
 	}

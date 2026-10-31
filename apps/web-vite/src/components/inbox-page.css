@@ -111,3 +111,6 @@
 .inbox-item-status-acknowledged { border-color: #ead6a8; background: var(--warning-soft); color: var(--gold-700); }
 .inbox-item-status-resolved { border-color: #cadfce; background: #f0f7f1; color: #3e6b4a; }
 .inbox-item-owner { border: 1px solid var(--line); border-radius: 999px; padding: 1px 6px; background: var(--paper-50); color: var(--ink-400); font-weight: 600; letter-spacing: 0; text-transform: none; }
+
+.inbox-item-assign select { border: 1px solid var(--line); border-radius: 999px; padding: 3px 7px; background: var(--paper-50); color: var(--ink-500); font: inherit; font-size: 9.5px; font-weight: 600; }
+.inbox-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

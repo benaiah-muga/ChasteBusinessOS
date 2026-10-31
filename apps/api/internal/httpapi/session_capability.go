@@ -271,6 +271,11 @@ func (h *SessionCapabilityHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 				writeJSON(w, http.StatusUnprocessableEntity, businesscontract.ErrorResponse{Error: salesError.Error()})
 				return
 			}
+			var operationsError capability.OperationsDomainError
+			if errors.As(err, &operationsError) {
+				writeJSON(w, http.StatusUnprocessableEntity, businesscontract.ErrorResponse{Error: operationsError.Error()})
+				return
+			}
 			var creatorError capability.CreatorDomainError
 			if errors.As(err, &creatorError) {
 				errorMessage := creatorError.Error()

@@ -19,8 +19,9 @@ const actorId = "10000000-0000-4000-8000-000000000001";
 const organizationId = "10000000-0000-4000-8000-000000000002";
 const customerId = "20000000-0000-4000-8000-000000000001";
 const quoteId = "30000000-0000-4000-8000-000000000001";
+const dealId = "60000000-0000-4000-8000-000000000001";
 const customer = { id: customerId, name: "Acme Foods", email: "buy@acme.test" };
-const quote = { id: quoteId, number: 25, status: "sent" as const, totalMinor: 12500, customerId, createdAt: "2026-10-01T10:00:00.000Z", expiresAt: null, invoiceId: null, orderId: null };
+const quote = { id: quoteId, number: 25, status: "sent" as const, totalMinor: 12500, customerId, createdAt: "2026-10-01T10:00:00.000Z", expiresAt: null, invoiceId: null, orderId: null, dealId: null, dealTitle: null };
 const otherCustomer = { id: "20000000-0000-4000-8000-000000000002", name: "Globex", email: null };
 const otherQuote = { ...quote, id: "30000000-0000-4000-8000-000000000002", number: 26, customerId: otherCustomer.id };
 
@@ -28,7 +29,7 @@ beforeEach(() => {
   vi.mocked(fetchSalesQuotes).mockResolvedValue([quote]);
   vi.mocked(fetchSalesQuoteCustomers).mockResolvedValue([customer]);
   vi.mocked(fetchSalesQuoteDeals).mockResolvedValue([{
-    id: "60000000-0000-4000-8000-000000000001", title: "Website renewal", stage: "proposal", valueMinor: 250000,
+    id: dealId, title: "Website renewal", stage: "proposal", valueMinor: 250000,
     source: "Referral", ownerUserId: "70000000-0000-4000-8000-000000000001", ownerName: "Morgan Lee",
     note: null, customerId, customerName: customer.name, createdAt: "2026-10-01T10:00:00.000Z", updatedAt: "2026-10-02T10:00:00.000Z",
   }]);
@@ -62,9 +63,32 @@ describe("Vite Sales quote and relationship workspace", () => {
   it("accepts a sent quote and reports the created invoice", async () => {
     render(<SalesQuoteWorkspace actorId={actorId} organizationId={organizationId} baseCurrency="USD" />);
     const row = await screen.findByRole("row", { name: /#25 Acme Foods sent/ });
-    fireEvent.click(within(row).getByRole("button", { name: "Invoice immediately" }));
+    fireEvent.click(within(row).getByRole("button", { name: "Invoice now" }));
     await waitFor(() => expect(acceptSalesQuote).toHaveBeenCalledWith(quoteId, { actorId, organizationId }));
     expect((await screen.findByRole("status")).textContent).toContain("Quote #25 accepted. Invoice #701 was created.");
+  });
+
+  it("links a quote to its CRM opportunity and prefills the deal customer", async () => {
+    render(<SalesQuoteWorkspace actorId={actorId} organizationId={organizationId} baseCurrency="USD" />);
+    await screen.findByRole("row", { name: /#25 Acme Foods sent/ });
+    fireEvent.click(screen.getByRole("button", { name: "Create quote" }));
+    fireEvent.change(screen.getByLabelText("Opportunity"), { target: { value: dealId } });
+    expect((screen.getByLabelText("Customer") as HTMLSelectElement).value).toBe(customerId);
+    fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Lighting plan" } });
+    fireEvent.change(screen.getByLabelText("Unit price"), { target: { value: "250.00" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create and send quote" }));
+
+    await waitFor(() => expect(createSalesQuote).toHaveBeenCalledWith({
+      customerId,
+      dealId,
+      lines: [{ description: "Lighting plan", quantity: 1000, unitPriceMinor: 25000, taxMinor: 0 }],
+    }, { actorId, organizationId }));
+  });
+
+  it("shows the CRM opportunity attached to a quote", async () => {
+    vi.mocked(fetchSalesQuotes).mockResolvedValue([{ ...quote, dealId, dealTitle: "Website renewal" }]);
+    render(<SalesQuoteWorkspace actorId={actorId} organizationId={organizationId} baseCurrency="USD" />);
+    expect(await screen.findByText("Deal: Website renewal")).not.toBeNull();
   });
 
   it("awards a sent quote into a sales order and points to fulfilment", async () => {
@@ -72,7 +96,7 @@ describe("Vite Sales quote and relationship workspace", () => {
     vi.mocked(fetchSalesQuotes).mockResolvedValueOnce([quote]).mockResolvedValue([accepted]);
     render(<SalesQuoteWorkspace actorId={actorId} organizationId={organizationId} baseCurrency="USD" />);
     const row = await screen.findByRole("row", { name: /#25 Acme Foods sent/ });
-    fireEvent.click(within(row).getByRole("button", { name: "Create sales order" }));
+    fireEvent.click(within(row).getByRole("button", { name: "Create order" }));
     await waitFor(() => expect(createOrderFromSalesQuote).toHaveBeenCalledWith(quoteId, { actorId, organizationId }));
     expect((await screen.findByRole("status")).textContent).toContain("Quote #25 became sales order #9.");
     expect(screen.getByRole("link", { name: "Open sales order" }).getAttribute("href")).toBe("/sales");
@@ -82,7 +106,7 @@ describe("Vite Sales quote and relationship workspace", () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     render(<SalesQuoteWorkspace actorId={actorId} organizationId={organizationId} baseCurrency="USD" />);
     const row = await screen.findByRole("row", { name: /#25 Acme Foods sent/ });
-    fireEvent.click(within(row).getByRole("button", { name: "Decline quote" }));
+    fireEvent.click(within(row).getByRole("button", { name: "Decline" }));
     await waitFor(() => expect(declineSalesQuote).toHaveBeenCalledWith(quoteId, { actorId, organizationId }));
     expect(confirm).toHaveBeenCalledWith("Decline quote #25? This cannot be undone.");
     expect((await screen.findByRole("status")).textContent).toContain("Quote #25 declined.");
@@ -96,7 +120,7 @@ describe("Vite Sales quote and relationship workspace", () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     const { rerender } = render(<SalesQuoteWorkspace actorId={actorId} organizationId={organizationId} baseCurrency="USD" />);
     const firstRow = await screen.findByRole("row", { name: /#25 Acme Foods sent/ });
-    fireEvent.click(within(firstRow).getByRole("button", { name: "Decline quote" }));
+    fireEvent.click(within(firstRow).getByRole("button", { name: "Decline" }));
     await waitFor(() => expect(declineSalesQuote).toHaveBeenCalledWith(quoteId, { actorId, organizationId }));
 
     const salesReadCount = vi.mocked(fetchSalesQuotes).mock.calls.length;
@@ -120,7 +144,7 @@ describe("Vite Sales quote and relationship workspace", () => {
   it("clears a prior action notice when the active organization changes", async () => {
     const { rerender } = render(<SalesQuoteWorkspace actorId={actorId} organizationId={organizationId} baseCurrency="USD" />);
     const row = await screen.findByRole("row", { name: /#25 Acme Foods sent/ });
-    fireEvent.click(within(row).getByRole("button", { name: "Invoice immediately" }));
+    fireEvent.click(within(row).getByRole("button", { name: "Invoice now" }));
     expect((await screen.findByRole("status")).textContent).toContain("Quote #25 accepted.");
 
     const salesReadCount = vi.mocked(fetchSalesQuotes).mock.calls.length;

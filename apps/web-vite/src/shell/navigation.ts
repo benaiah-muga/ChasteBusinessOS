@@ -1,4 +1,5 @@
 import type { LucideIcon } from "lucide-react";
+import { appRouteMeta } from "./apps";
 import {
   BarChart3,
   Bell,
@@ -195,6 +196,8 @@ export function isLeafActive(pathname: string, leaf: NavLeaf): boolean {
 }
 
 export function pageMeta(pathname: string): { label: string; group: string; description: string } {
+  const appMeta = appRouteMeta(pathname);
+  if (appMeta) return appMeta;
   const exactItem = ALL_NAV_ITEMS.find((item) => item.href === pathname);
   const primaryItem = PRIMARY_NAV.find((item) => item.href === pathname);
   if (exactItem || primaryItem) {

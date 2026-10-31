@@ -25,7 +25,7 @@ func TestWorkflowSkillsReferenceExecutableCapabilities(t *testing.T) {
 	if !exists {
 		t.Fatal("quote-to-cash skill is missing")
 	}
-	for _, required := range []string{"sales.createOrderFromQuote", "sales.confirmOrder", "sales.deliverOrder", "accounting.recordPayment"} {
+	for _, required := range []string{"crm.listDeals", "crm.moveDealStage", "sales.createOrderFromQuote", "sales.confirmOrder", "sales.deliverOrder", "accounting.recordPayment"} {
 		if !skillHasCapability(quote, required) {
 			t.Errorf("quote-to-cash does not continue through %s", required)
 		}

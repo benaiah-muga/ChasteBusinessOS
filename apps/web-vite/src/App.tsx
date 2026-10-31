@@ -66,7 +66,10 @@ import {
   isNavItemActive,
   pageMeta,
 } from "./shell/navigation";
+import { appPathPattern } from "./shell/apps";
+import { applyPageSeo, publicPageSeo } from "./seo";
 import "./app-shell.css";
+import "./editorial.css";
 
 const InventoryPage = lazy(() => import("./components/InventoryPage").then((module) => ({ default: module.InventoryPage })));
 const ProductsPage = lazy(() => import("./components/ProductsPage").then((module) => ({ default: module.ProductsPage })));
@@ -83,7 +86,7 @@ const MessagesPage = lazy(() => import("./components/MessagesPage").then((module
 const SettingsPage = lazy(() => import("./components/SettingsPage").then((module) => ({ default: module.SettingsPage })));
 const PurchasingPage = lazy(() => import("./components/PurchasingPage").then((module) => ({ default: module.PurchasingPage })));
 const PurchasingReceivingPage = lazy(() => import("./components/PurchasingReceivingPage").then((module) => ({ default: module.PurchasingReceivingPage })));
-const SupportPage = lazy(() => import("./components/SupportPage").then((module) => ({ default: module.SupportPage })));
+const SupportApp = lazy(() => import("./apps/support/SupportApp").then((module) => ({ default: module.SupportApp })));
 const ManufacturingPage = lazy(() => import("./components/ManufacturingPage").then((module) => ({ default: module.ManufacturingPage })));
 const MarketingPage = lazy(() => import("./components/MarketingPage").then((module) => ({ default: module.MarketingPage })));
 const ProposalsPage = lazy(() => import("./components/ProposalsPage").then((module) => ({ default: module.ProposalsPage })));
@@ -108,7 +111,7 @@ type AuthState =
 const viteAppPaths = new Set(["/", "/login", "/approvals", ...flattenNavLeaves().map((item) => item.href), "/accounting", "/purchasing", "/inbox"]);
 
 export function isViteAppPath(pathname: string): boolean {
-  return viteAppPaths.has(pathname) || /^\/documents\/editor\/[^/]+$/.test(pathname) || /^\/invite\/[^/]+$/.test(pathname);
+  return viteAppPaths.has(pathname) || pathname.startsWith("/settings/") || appPathPattern(pathname) || /^\/documents\/editor\/[^/]+$/.test(pathname) || /^\/invite\/[^/]+$/.test(pathname);
 }
 
 const QUICK_CREATES = [
@@ -251,10 +254,10 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
   const purchasingReceiptsPage = pathname === "/purchasing/receipts";
   const accountingPage = pathname === "/accounting";
   const messagesPage = pathname === "/messages";
-  const settingsPage = pathname === "/settings";
+  const settingsPage = pathname === "/settings" || pathname.startsWith("/settings/");
   const purchasingPage = pathname === "/purchasing";
   const purchasingReceivingPage = pathname === "/purchasing/receiving";
-  const supportPage = pathname === "/support";
+  const supportPage = pathname === "/support" || pathname.startsWith("/support/");
   const manufacturingPage = pathname === "/manufacturing";
   const marketingPage = pathname === "/marketing";
   const proposalsPage = pathname === "/proposals";
@@ -310,8 +313,12 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
   }, [organizationRevision]);
 
   useEffect(() => {
-    document.title = `${meta.label} · Chaste BusinessOS`;
-  }, [meta.label]);
+    applyPageSeo({
+      title: `${meta.label} · Chaste BusinessOS`,
+      description: meta.description || "A governed workspace in ChasteBusinessOS.",
+      robots: "noindex,nofollow",
+    });
+  }, [meta.label, meta.description]);
   useEffect(() => {
     if (!mobileNavOpen) return;
     const previous = document.body.style.overflow;
@@ -569,25 +576,29 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
               <span className="topbar-live" title="Every action is governed, auditable, and reversible">Governed</span>
             </div>
             <div className="topbar-actions">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="primary" size="sm" className="topbar-create" aria-label="Create with the workmate">
-                    <Plus size={14} aria-hidden="true" /> <span>Create</span>
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="topbar-create-menu">
-                  <DropdownMenuLabel>Start with the workmate</DropdownMenuLabel>
-                  {QUICK_CREATES.map((action) => {
-                    const Icon = action.icon;
-                    return (
-                      <DropdownMenuItem key={action.id} onSelect={() => navigate(`/chat?prompt=${encodeURIComponent(action.prompt)}`)}>
-                        <Icon size={14} aria-hidden="true" />
-                        <span className="topbar-create-copy"><strong>{action.label}</strong><small>{action.detail}</small></span>
-                      </DropdownMenuItem>
-                    );
-                  })}
-                </DropdownMenuContent>
-              </DropdownMenu>
+              {supportPage ? (
+                <div id="support-topbar-slot" className="topbar-support-slot" />
+              ) : (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="primary" size="sm" className="topbar-create" aria-label="Create with the workmate">
+                      <Plus size={14} aria-hidden="true" /> <span>Create</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="topbar-create-menu">
+                    <DropdownMenuLabel>Start with the workmate</DropdownMenuLabel>
+                    {QUICK_CREATES.map((action) => {
+                      const Icon = action.icon;
+                      return (
+                        <DropdownMenuItem key={action.id} onSelect={() => navigate(`/chat?prompt=${encodeURIComponent(action.prompt)}`)}>
+                          <Icon size={14} aria-hidden="true" />
+                          <span className="topbar-create-copy"><strong>{action.label}</strong><small>{action.detail}</small></span>
+                        </DropdownMenuItem>
+                      );
+                    })}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
               <button type="button" className="topbar-search" onClick={() => setCommandOpen(true)} aria-label="Search and jump to">
                 <Search size={14} aria-hidden="true" />
                 <span>Search</span>
@@ -682,9 +693,9 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
                                                               : messagesPage
                                                                 ? <MessagesPage key={organizationRevision} actorId={currentUserId} organizationId={activeOrgId} />
                                                                 : settingsPage
-                                                                  ? <SettingsPage key={organizationRevision} actorId={currentUserId} organizationId={activeOrgId} />
+                                                                  ? <SettingsPage key={organizationRevision} baseCurrency={baseCurrency} actorId={currentUserId} organizationId={activeOrgId} pathname={pathname} />
                                                                   : supportPage
-                                                                    ? <SupportPage key={organizationRevision} actorId={currentUserId} organizationId={activeOrgId} />
+                                                                    ? <SupportApp key={organizationRevision} pathname={pathname} baseCurrency={baseCurrency} actorId={currentUserId} organizationId={activeOrgId} />
                                                                     : manufacturingPage
                                                                       ? <ManufacturingPage key={organizationRevision} baseCurrency={baseCurrency} actorId={currentUserId} organizationId={activeOrgId} />
                                                                       : marketingPage
@@ -731,6 +742,21 @@ export function App() {
     window.addEventListener("popstate", updatePathname);
     return () => window.removeEventListener("popstate", updatePathname);
   }, []);
+
+  useEffect(() => {
+    const seo = publicPageSeo(pathname);
+    if (seo) {
+      applyPageSeo(seo);
+      return;
+    }
+    if (!isViteAppPath(pathname)) {
+      applyPageSeo({
+        title: "Page not found | ChasteBusinessOS",
+        description: "This address does not match a page in ChasteBusinessOS.",
+        robots: "noindex,nofollow",
+      });
+    }
+  }, [pathname]);
 
   if (pathname === "/login") return <LoginPage />;
   if (pathname === "/reset-password") return <PasswordResetPage />;

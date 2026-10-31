@@ -77,6 +77,24 @@ describe("Vite Sales quote Go APIs", () => {
     await expect(fetchSalesQuotes()).rejects.toMatchObject({ name: "SalesQuoteApiError", status: 200 });
   });
 
+  it("sends deal attribution with the quote and preserves it on read", async () => {
+    const dealId = "60000000-0000-4000-8000-000000000001";
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(success({ quoteId, quoteNumber: 27, totalMinor: 5000 }))
+      .mockResolvedValueOnce(success({ quotes: [{ id: quoteId, number: 27, status: "sent", totalMinor: 5000, customerId, createdAt: null, expiresAt: null, invoiceId: null, orderId: null, dealId, dealTitle: "Website renewal" }] }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(createSalesQuote({ customerId, dealId, lines: [{ description: "Work", quantity: 1000, unitPriceMinor: 5000 }] }, scope))
+      .resolves.toMatchObject({ kind: "completed" });
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
+      capabilityId: "accounting.createQuote",
+      input: { customerId, dealId },
+    });
+    await expect(fetchSalesQuotes()).resolves.toEqual([{
+      id: quoteId, number: 27, status: "sent", totalMinor: 5000, customerId, createdAt: null, expiresAt: null,
+      invoiceId: null, orderId: null, dealId, dealTitle: "Website renewal",
+    }]);
+  });
+
   it("reuses scoped exact create intent after an unknown result and accepts valid Go output", async () => {
     const intentIds: string[] = [];
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {

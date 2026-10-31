@@ -61,6 +61,7 @@ export function SalesQuoteWorkspace({ actorId, organizationId, baseCurrency }: {
   const [loadedScopeIdentity, setLoadedScopeIdentity] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [customerId, setCustomerId] = useState("");
+  const [dealId, setDealId] = useState("");
   const [memo, setMemo] = useState("");
   const [expiresAt, setExpiresAt] = useState("");
   const [lines, setLines] = useState<DraftLine[]>([emptyLine()]);
@@ -108,6 +109,7 @@ export function SalesQuoteWorkspace({ actorId, organizationId, baseCurrency }: {
     setBusy(false);
     setFormOpen(false);
     setCustomerId("");
+    setDealId("");
     setMemo("");
     setExpiresAt("");
     setLines([emptyLine()]);
@@ -125,6 +127,7 @@ export function SalesQuoteWorkspace({ actorId, organizationId, baseCurrency }: {
   const filteredQuotes = visibleQuotes.filter((quote) => quoteFilter === "all" || quote.status === quoteFilter);
   const filteredDeals = visibleDeals.filter((deal) => `${deal.title} ${deal.customerName ?? ""} ${deal.stage}`.toLowerCase().includes(dealQuery.toLowerCase()));
   const customerNames = useMemo(() => new Map(visibleCustomers.map((customer) => [customer.id, customer.name])), [visibleCustomers]);
+  const dealChoices = visibleDeals.filter((deal) => deal.stage !== "won" && deal.stage !== "lost");
   const total = quoteTotal(lines, digits);
 
   function clearActionMessages(): void {
@@ -156,6 +159,7 @@ export function SalesQuoteWorkspace({ actorId, organizationId, baseCurrency }: {
     if (total === null || total <= 0) { showActionError("Enter valid quantities, prices, and tax amounts. Each amount and the total must fit the database limit, and the total must be greater than zero."); return; }
     const payload = {
       customerId,
+      ...(dealId ? { dealId } : {}),
       ...(memo.trim() ? { memo: memo.trim() } : {}),
       ...(expiresAt ? { expiresAt: `${expiresAt}T23:59:59.000Z` } : {}),
       lines: lines.map((line) => ({
@@ -177,6 +181,7 @@ export function SalesQuoteWorkspace({ actorId, organizationId, baseCurrency }: {
       showNotice(`Quote #${result.data.quoteNumber} created and sent.`);
       setFormOpen(false);
       setMemo("");
+      setDealId("");
       setExpiresAt("");
       setLines([emptyLine()]);
       await load();
@@ -263,7 +268,18 @@ export function SalesQuoteWorkspace({ actorId, organizationId, baseCurrency }: {
       {hasCurrentData && formOpen && tab === "quotes" && <form className="sales-quote-form" onSubmit={(event) => void submitQuote(event)}>
         <h3>Create and send quote</h3>
         <div className="sales-quote-fields">
-          <label>Customer<select required value={customerId} onChange={(event) => setCustomerId(event.currentTarget.value)}><option value="">Choose customer</option>{visibleCustomers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>
+          <label>Opportunity<select value={dealId} onChange={(event) => {
+            const nextDealId = event.currentTarget.value;
+            setDealId(nextDealId);
+            const deal = visibleDeals.find((candidate) => candidate.id === nextDealId);
+            if (deal?.customerId) setCustomerId(deal.customerId);
+          }}><option value="">No linked deal</option>{dealChoices.map((deal) => <option key={deal.id} value={deal.id}>{deal.title} · {deal.stage}</option>)}</select></label>
+          <label>Customer<select required value={customerId} onChange={(event) => {
+            const nextCustomerId = event.currentTarget.value;
+            setCustomerId(nextCustomerId);
+            const deal = visibleDeals.find((candidate) => candidate.id === dealId);
+            if (deal?.customerId && deal.customerId !== nextCustomerId) setDealId("");
+          }}><option value="">Choose customer</option>{visibleCustomers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>
           <label>Expiry date<input type="date" min={today()} value={expiresAt} onChange={(event) => setExpiresAt(event.currentTarget.value)} /></label>
           <label className="sales-quote-memo">Memo<textarea maxLength={4000} value={memo} onChange={(event) => setMemo(event.currentTarget.value)} /></label>
         </div>
@@ -284,7 +300,7 @@ export function SalesQuoteWorkspace({ actorId, organizationId, baseCurrency }: {
       {!loading && hasCurrentData && !visibleLoadError && tab === "quotes" && <div className="sales-quote-list">
         <div className="sales-quote-list-heading"><h3>Quotes</h3><label>Filter<select value={quoteFilter} onChange={(event) => setQuoteFilter(event.currentTarget.value)}><option value="all">All statuses</option>{["sent", "accepted", "declined", "expired", "draft"].map((status) => <option key={status}>{status}</option>)}</select></label></div>
         {filteredQuotes.length === 0 ? <p className="sales-quote-empty">No quotes in this view.</p> : <div className="sales-table-scroll"><table className="sales-table"><thead><tr><th>Quote</th><th>Customer</th><th>Status</th><th>Expires</th><th>Total</th><th>Actions</th></tr></thead><tbody>{filteredQuotes.map((quote) => <tr key={quote.id}>
-          <th scope="row">#{quote.number}</th><td>{customerNames.get(quote.customerId) ?? "Unknown customer"}</td><td><span className="sales-status">{quote.status}</span></td><td>{quote.expiresAt ? new Date(quote.expiresAt).toLocaleDateString() : "No expiry"}</td><td className="sales-total">{formatMoney(quote.totalMinor, currency, digits)}</td><td>{quote.status === "sent" && <><button type="button" disabled={busy} onClick={() => void createOrder(quote)}>Create sales order</button><button type="button" disabled={busy} title="Creates the invoice now, without stock reservation or fulfilment" onClick={() => void accept(quote)}>Invoice immediately</button><button type="button" disabled={busy} onClick={() => void decline(quote)}>Decline quote</button></>}{quote.orderId && <a href="/sales">Open sales order</a>}{quote.invoiceId && <a href="/accounting/invoices">Open invoices</a>}</td>
+          <th scope="row">#{quote.number}</th><td>{customerNames.get(quote.customerId) ?? "Unknown customer"}{quote.dealTitle ? <span className="sales-quote-deal">Deal: {quote.dealTitle}</span> : null}</td><td><span className="sales-status">{quote.status}</span></td><td>{quote.expiresAt ? new Date(quote.expiresAt).toLocaleDateString() : "No expiry"}</td><td className="sales-total">{formatMoney(quote.totalMinor, currency, digits)}</td><td>{quote.status === "sent" && <><button type="button" disabled={busy} onClick={() => void createOrder(quote)}>Create order</button><button type="button" disabled={busy} title="Creates the invoice now, without stock reservation or fulfilment" onClick={() => void accept(quote)}>Invoice now</button><button type="button" disabled={busy} onClick={() => void decline(quote)}>Decline</button></>}{quote.orderId && <a href="/sales">Open sales order</a>}{quote.invoiceId && <a href="/accounting/invoices">Open invoices</a>}</td>
         </tr>)}</tbody></table></div>}
       </div>}
 

@@ -102,6 +102,7 @@ export const SupportConversationSchema = z.object({
   id: uuid,
   customerId: z.string(),
   customerName: z.string(),
+  customerEmail: z.string().nullable().optional(),
   subject: z.string(),
   status: z.enum(["open", "escalated", "resolved"]),
   lastMessageAt: z.string().datetime({ offset: true }).nullable().optional(),
@@ -110,7 +111,12 @@ export const SupportConversationSchema = z.object({
   priority: z.enum(["low", "normal", "high", "urgent"]).nullable().optional(),
   category: z.string().max(40).nullable().optional(),
   assignedUserId: uuid.nullable().optional(),
+  assignedUserName: z.string().nullable().optional(),
   slaDueAt: z.string().datetime({ offset: true }).nullable().optional(),
+  ticketNumber: z.number().int().nullable().optional(),
+  channel: z.enum(["desk", "widget"]).optional(),
+  createdAt: z.string().datetime({ offset: true }).optional(),
+  updatedAt: z.string().datetime({ offset: true }).optional(),
 }).strict();
 export type SupportConversation = z.infer<typeof SupportConversationSchema>;
 
@@ -128,7 +134,6 @@ const ConversationListSchema = z.object({ conversations: z.array(SupportConversa
 
 const GoSupportThreadConversationSchema = SupportConversationSchema.extend({
   customerId: uuid.nullable(),
-  customerEmail: z.string().nullable(),
 }).strict();
 const GoCapabilityEnvelopeSchema = CapabilityExecutionSuccessSchema;
 
@@ -397,7 +402,7 @@ async function clearSupportCannedResponseAttempt(storageKey: string, intentId: s
 }
 
 async function readGoSupportCapability<T>(
-  capabilityId: "support.listConversations" | "support.listTickets" | "support.readConversation" | "support.listLibrary" | "support.suggestCategory",
+  capabilityId: "support.listConversations" | "support.listTickets" | "support.readConversation" | "support.listLibrary" | "support.suggestCategory" | "support.lookupOrderStatus",
   input: Record<string, unknown>,
   schema: z.ZodType<T>,
   organizationId: string | null | undefined,
@@ -420,7 +425,7 @@ async function readGoSupportCapability<T>(
 }
 
 export async function fetchSupportConversations(organizationId: string | null | undefined, signal?: AbortSignal): Promise<SupportConversation[]> {
-  const parsed = await readGoSupportCapability("support.listConversations", { customerBoundOnly: true, limit: 100 }, ConversationListSchema, organizationId, signal);
+  const parsed = await readGoSupportCapability("support.listConversations", { customerBoundOnly: false, limit: 100 }, ConversationListSchema, organizationId, signal);
   return parsed.conversations;
 }
 
@@ -458,11 +463,40 @@ export async function fetchSupportThread(conversationId: string, organizationId:
     organizationId,
     signal,
   );
-  const { customerEmail: _customerEmail, customerId, ...conversation } = parsed.conversation;
+  const { customerId, ...conversation } = parsed.conversation;
   return {
     conversation: SupportConversationSchema.parse({ ...conversation, customerId: customerId ?? "" }),
     messages: parsed.messages,
   };
+}
+
+export const SupportOrderStatusSchema = z.object({
+  customerName: z.string(),
+  totalOutstandingMinor: z.number().int(),
+  invoices: z.array(z.object({
+    number: z.number().int(),
+    status: z.string().min(1),
+    totalMinor: z.number().int(),
+    paidMinor: z.number().int(),
+    outstandingMinor: z.number().int(),
+    issuedAt: z.string().datetime({ offset: true }).nullable(),
+  }).strict()),
+}).strict();
+export type SupportOrderStatus = z.infer<typeof SupportOrderStatusSchema>;
+
+export async function fetchSupportOrderStatus(
+  conversationId: string,
+  organizationId: string | null | undefined,
+  signal?: AbortSignal,
+): Promise<SupportOrderStatus> {
+  if (!uuid.safeParse(conversationId).success) throw new SupportApiError(0, "Choose a conversation before reading its billing context.");
+  return readGoSupportCapability(
+    "support.lookupOrderStatus",
+    { conversationId },
+    SupportOrderStatusSchema,
+    organizationId,
+    signal,
+  );
 }
 
 const SupportLibrarySchema = z.object({

@@ -15,6 +15,8 @@ const QuoteSchema = z.object({
   expiresAt: z.string().datetime({ offset: true }).nullable(),
   invoiceId: uuid.nullable(),
   orderId: uuid.nullable().default(null),
+  dealId: uuid.nullable().optional(),
+  dealTitle: z.string().nullable().optional(),
 }).strict();
 const CustomerSchema = z.object({ id: uuid, name: z.string().min(1).max(500), email: z.string().max(500).nullable() }).strict();
 const DealSchema = z.object({
@@ -43,6 +45,7 @@ const QuoteLineSchema = z.object({
 }).strict();
 const CreateQuoteInputSchema = z.object({
   customerId: uuid,
+  dealId: uuid.optional(),
   memo: z.string().max(4000).refine((value) => !value.includes("\u0000")).optional(),
   expiresAt: z.string().datetime({ offset: true }).optional(),
   lines: z.array(QuoteLineSchema).min(1).max(100),

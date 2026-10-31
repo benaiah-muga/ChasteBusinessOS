@@ -107,6 +107,8 @@ the next number; superseded ones get a Status update, never deletion.
 | 0100 | Deterministic Workmate turn contract, enforced outside the prompt | accepted |
 | 0101 | Resolve a customer to the surviving identity, with evidence | accepted |
 | 0102 | Advertise three meta tools to coding agents, not the catalog | accepted |
+| 0104 | Composable app surfaces and the Customer Support desk | accepted |
+| 0105 | Shared settings workspace and support configuration | accepted |
 
 Gaps in numbering are intentional placeholders for decisions not yet
 written down, if you made one of those calls, write the ADR.

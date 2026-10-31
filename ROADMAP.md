@@ -19,6 +19,8 @@ The sequence is evidence-gated, not date-gated.
 - [x] Persistent exceptions, business objectives, and Decision Records.
 - [x] Durable exception lifecycle in the Inbox: acknowledge, take ownership, resolve, reopen, and keep no-longer-detected exceptions visible until a person closes them.
 - [x] Quote-to-cash continuity: SKU-aware quote lines, award into a sales order, credit and stock checks on confirmation, delivery-created invoice linked back to the order, and quote restoration when an untouched order is cancelled.
+- [x] Opportunity attribution: quotes link to their CRM deal with customer-consistency checks, quote rows show the deal, and deal stage remains an explicit `crm.moveDealStage` action after order confirmation.
+- [x] Exception ownership: exceptions assign to any workspace member through the governed record path, with membership validation, owner names, preserved ownership on resolve, and a Mine queue.
 - [x] Document-to-action continuity: reviewed coding suggestions become a vendor bill with the source document linked atomically, and parsed documents awaiting review raise an exception.
 - [x] Replenishment-to-payment skill spans cash forecast, payables context, supplier comparison, purchase approval, receiving, three-way matching, and a reviewed payment run.
 - [x] Workmate purchase proposal card: supplier context, exact approval payload, approve and reject in the conversation.
@@ -30,6 +32,8 @@ The sequence is evidence-gated, not date-gated.
 - [x] Entity identity resolution: normalized email, phone, and name-token evidence for customers, vendors, and employees; merged customer duplicates resolve to the surviving record with the old name reported; a pure ranker with unit and migrated-database proofs.
 - [x] Generic in-conversation approval card for any gated action, with the purchase-order line-item view kept only for purchase orders.
 - [x] Progressive coding-agent tool surface: three MCP meta tools (discover, describe, dispatch), direct tools only when pinned, deterministic ranked discovery, and the full governed catalog reachable without advertising it.
+- [x] Customer Support as the first composable app surface: horizontal Inbox, Overview, Knowledge, and Channels tabs, URL-addressable conversations, a three-pane queue, thread, and context desk, the customer's own invoice balance, human-released copilot drafts, and a reusable Northwind seed.
+- [ ] Module-aware rail filtering and a support focus mode, so a workspace that installs only customer support gets a complete support-only experience without unrelated module links.
 
 ## M0, Foundation (current sprint)
 - [x] Monorepo scaffold: Turborepo, pnpm, TS strict, Next.js 15 web app

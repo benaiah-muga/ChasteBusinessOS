@@ -61,6 +61,12 @@ describe("ChatDock", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("stays out of the full-height support desk", () => {
+    render(<ChatDock pathname="/support/inbox/11111111-1111-4111-8111-111111111111" />);
+    expect(screen.queryByRole("button", { name: "Open chat" })).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("expands from the bubble into the panel and offers the full page", async () => {
     render(<ChatDock pathname="/projects" />);
     fireEvent.click(screen.getByRole("button", { name: "Open chat" }));

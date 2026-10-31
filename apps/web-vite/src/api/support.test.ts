@@ -144,11 +144,11 @@ describe("support Go inbox reads", () => {
     }));
     expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("X-Organization-ID")).toBe(organizationId);
     const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { input?: unknown; intentId?: string };
-    expect(request.input).toEqual({ customerBoundOnly: true, limit: 100 });
+    expect(request.input).toEqual({ customerBoundOnly: false, limit: 100 });
     expect(request.intentId).toEqual(expect.any(String));
   });
 
-  it("uses Go full-detail mode and projects its strict guest-customer shape", async () => {
+  it("uses Go full-detail mode and keeps the staff-facing customer email", async () => {
     const systemMessage = { ...message, id: "889a3b29-a63c-4d4b-a1db-f95393e8844b", senderType: "system", body: "Conversation reopened." };
     const goThread = {
       conversation: { ...threadResponse.conversation, customerId: null, customerEmail: "guest@example.test" },
@@ -160,7 +160,7 @@ describe("support Go inbox reads", () => {
     const result = await fetchSupportThread(conversationId, organizationId);
 
     expect(result.conversation.customerId).toBe("");
-    expect(result.conversation).not.toHaveProperty("customerEmail");
+    expect(result.conversation.customerEmail).toBe("guest@example.test");
     expect(result.messages).toEqual([message, systemMessage]);
     expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
       body: expect.stringContaining('"capabilityId":"support.readConversation"'),
