@@ -74,6 +74,41 @@ the next number; superseded ones get a Status update, never deletion.
 | 0067 | Business paper design system | accepted |
 | 0068 | Messaging conversation UX and capabilities | accepted |
 | 0069 | Accounting workbenches separate planning, review, submission, and settlement | accepted |
+| 0070 | React Vite and Go runtime migration | accepted direction, implementation underway and gated by parity |
+| 0071 | Temporary signed session assertions for Go reads | accepted for migration reads |
+| 0072 | Dedicated least-privilege Go database runtime role | accepted for migration runtime |
+| 0073 | Preserve the governed capability path in Go | accepted for implementation; public ownership gated by parity |
+| 0074 | Preserve the CRM merge restore contract during runtime migration | accepted for migration parity |
+| 0075 | Go webhook outbox worker privilege boundary | accepted |
+| 0076 | Go capability jobs worker | accepted |
+| 0077 | OpenAPI contract generation | accepted for the React and Go migration |
+| 0078 | System money actions require human approval | accepted |
+| 0079 | Go owns opt-in provider-neutral OIDC sign-in | accepted for migration; provider proofs and route cutover remain open |
+| 0080 | Go owns opt-in federated auth and SCIM provisioning | accepted for migration; provider proofs and route cutover remain open |
+| 0081 | Explicit coding-agent delegation for public support replies | accepted |
+| 0082 | Verified-session organization bootstrap in Go | accepted |
+| 0083 | Private message attachment staging bypasses approval payloads | accepted |
+| 0084 | Go-owned asynchronous document parsing jobs | accepted |
+| 0085 | Creator Mode scaffolds Go capability artifacts | accepted |
+| 0086 | Replenishment planning is a read-only governed capability | accepted |
+| 0087 | Workmate proposal cards render the stored approval payload | accepted |
+| 0088 | Agent evaluations run live models against fixture tool results | accepted |
+| 0089 | Money approvals are versioned proposals and quote awards carry lines | accepted |
+| 0090 | Persistent operating records and read-only Workmate cards | accepted |
+| 0091 | Brand system, command-first shell, and an inbox for human attention | accepted |
+| 0092 | Workmate capability discovery, composed briefs, and honest action confirmation | accepted |
+| 0093 | Tool-aware history, operating surfaces, and a high-throughput default provider | accepted |
+| 0094 | Approval plans, cross-record search, and wider entity resolution | accepted |
+| 0095 | Per-action session checkpoints and declared inverse plans | accepted |
+| 0096 | Flat workspace navigation and content-shaped loading | accepted |
+| 0097 | Agent sources, notification preferences, and turn reverts | accepted |
+| 0098 | Capability parity by default and resumable Workmate sessions | accepted |
+| 0099 | Workflow continuity through durable links, not a second orchestration engine | accepted |
+| 0100 | Deterministic Workmate turn contract, enforced outside the prompt | accepted |
+| 0101 | Resolve a customer to the surviving identity, with evidence | accepted |
+| 0102 | Advertise three meta tools to coding agents, not the catalog | accepted |
+| 0104 | Composable app surfaces and the Customer Support desk | accepted |
+| 0105 | Shared settings workspace and support configuration | accepted |
 
 Gaps in numbering are intentional placeholders for decisions not yet
 written down, if you made one of those calls, write the ADR.

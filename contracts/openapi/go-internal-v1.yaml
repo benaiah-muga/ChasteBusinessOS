@@ -1,0 +1,439 @@
+openapi: 3.1.0
+info:
+  title: Chaste Go Internal API
+  version: 1.0.0
+  description: Version 1 contract for the private Go API consumed by the web application.
+paths:
+  /__go/policy:
+    get:
+      operationId: readGoPolicy
+      summary: Read the organization policy
+      description: Reads policy for the organization named by the signed session assertion.
+      security:
+        - chasteSessionAssertion: []
+      responses:
+        "200":
+          description: Current policy and whether the actor can edit it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GoPolicyResponse"
+        "401":
+          description: The signed assertion is missing, invalid, or expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The policy could not be read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The private bridge is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /__go/ledger:
+    get:
+      operationId: readGoLedger
+      summary: Read recent organization ledger events
+      description: Reads recent events only for the organization in the signed assertion, which must include the ledger-read grant.
+      security:
+        - chasteSessionAssertion: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Optional numeric row limit. Omitted or malformed values use 60; values are floored and clamped to the inclusive range 1 through 200.
+          schema:
+            type: string
+          example: "100"
+      responses:
+        "200":
+          description: Recent ledger events for the signed organization, newest first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GoLedgerResponse"
+        "401":
+          description: The signed assertion is missing, invalid, or expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The assertion does not grant ledger read access.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The ledger could not be read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The private bridge is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+components:
+  securitySchemes:
+    chasteSessionAssertion:
+      type: apiKey
+      in: header
+      name: X-Chaste-Session-Assertion
+      description: Short-lived signed assertion created by the authenticated web server.
+      x-token-format: base64url-json.payload-dot-base64url-hmac-sha256
+      x-claim-schema-by-audience:
+        go.policy.read:
+          $ref: "#/components/schemas/GoPolicyAssertionClaims"
+        go.ledger.read:
+          $ref: "#/components/schemas/GoLedgerAssertionClaims"
+        go.org.switch:
+          $ref: "#/components/schemas/GoOrgSwitchAssertionClaims"
+        go.capability.execute:
+          $ref: "#/components/schemas/GoCapabilityAssertionClaims"
+        go.approval.decide:
+          $ref: "#/components/schemas/GoApprovalDecisionAssertionClaims"
+        go.approvals.inbox.read:
+          $ref: "#/components/schemas/GoApprovalInboxAssertionClaims"
+        go.metrics.read:
+          $ref: "#/components/schemas/GoMetricsAssertionClaims"
+        go.crm.read:
+          $ref: "#/components/schemas/GoCRMReadAssertionClaims"
+        go.projects.read:
+          $ref: "#/components/schemas/GoProjectsReadAssertionClaims"
+  schemas:
+    GoLedgerResponse:
+      type: object
+      additionalProperties: false
+      required: [events]
+      properties:
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/GoLedgerEvent"
+    GoLedgerEvent:
+      type: object
+      additionalProperties: false
+      required: [seq, kind, capabilityId, actorType, actorId, sessionId, authSessionId, payload, hash, prevHash, occurredAt]
+      properties:
+        seq:
+          type: integer
+          format: int64
+        kind:
+          type: string
+        capabilityId:
+          type: [string, "null"]
+        actorType:
+          type: string
+        actorId:
+          type: [string, "null"]
+        sessionId:
+          type: [string, "null"]
+        authSessionId:
+          type: [string, "null"]
+        payload:
+          x-go-type: RawJSON
+        hash:
+          type: string
+        prevHash:
+          type: [string, "null"]
+        occurredAt:
+          type: string
+          description: UTC timestamp formatted with millisecond precision.
+    GoPolicyAssertionClaims:
+      type: object
+      additionalProperties: false
+      required: [aud, sub, org_id, can_edit, iat, exp]
+      properties:
+        aud:
+          type: string
+          const: go.policy.read
+        sub:
+          type: string
+        org_id:
+          type: string
+        can_edit:
+          type: boolean
+        iat:
+          type: integer
+          format: int64
+        exp:
+          type: integer
+          format: int64
+    GoLedgerAssertionClaims:
+      type: object
+      additionalProperties: false
+      required: [aud, sub, org_id, can_read_ledger, iat, exp]
+      properties:
+        aud:
+          type: string
+          const: go.ledger.read
+        sub:
+          type: string
+        org_id:
+          type: string
+        can_read_ledger:
+          type: boolean
+          const: true
+        iat:
+          type: integer
+          format: int64
+        exp:
+          type: integer
+          format: int64
+    GoOrgSwitchAssertionClaims:
+      type: object
+      additionalProperties: false
+      required: [aud, sub, org_id, can_edit, iat, exp]
+      properties:
+        aud:
+          type: string
+          const: go.org.switch
+        sub:
+          type: string
+        org_id:
+          type: string
+        can_edit:
+          type: boolean
+          const: false
+        iat:
+          type: integer
+          format: int64
+        exp:
+          type: integer
+          format: int64
+    GoCapabilityAssertionClaims:
+      type: object
+      additionalProperties: false
+      required: [aud, sub, org_id, capability_id, input_sha256, actor_id, actor_type, permissions, auth_session_id, iat, exp]
+      properties:
+        aud:
+          type: string
+          const: go.capability.execute
+        sub:
+          type: string
+        org_id:
+          type: string
+        capability_id:
+          type: string
+        input_sha256:
+          type: string
+          pattern: "^[a-f0-9]{64}$"
+        actor_id:
+          type: [string, "null"]
+        actor_type:
+          type: string
+          enum: [human, agent, system]
+        permissions:
+          type: array
+          items:
+            type: string
+        auth_session_id:
+          type: string
+        agent_session_id:
+          type: string
+        intent_id:
+          type: string
+        iat:
+          type: integer
+          format: int64
+        exp:
+          type: integer
+          format: int64
+    GoApprovalDecisionAssertionClaims:
+      type: object
+      additionalProperties: false
+      required: [aud, sub, org_id, capability_id, input_sha256, actor_id, actor_type, permissions, auth_session_id, approval_id, decision, comment, iat, exp]
+      properties:
+        aud:
+          type: string
+          const: go.approval.decide
+        sub:
+          type: string
+        org_id:
+          type: string
+        capability_id:
+          type: string
+        input_sha256:
+          type: string
+          pattern: "^[a-f0-9]{64}$"
+        actor_id:
+          type: [string, "null"]
+        actor_type:
+          type: string
+          enum: [human, agent, system]
+        permissions:
+          type: array
+          items:
+            type: string
+        auth_session_id:
+          type: string
+        approval_id:
+          type: string
+        decision:
+          type: string
+          enum: [approve, reject]
+        comment:
+          type: [string, "null"]
+        iat:
+          type: integer
+          format: int64
+        exp:
+          type: integer
+          format: int64
+    GoApprovalInboxAssertionClaims:
+      type: object
+      additionalProperties: false
+      required: [aud, sub, org_id, input_sha256, actor_id, actor_type, permissions, auth_session_id, iat, exp]
+      properties:
+        aud:
+          type: string
+          const: go.approvals.inbox.read
+        sub:
+          type: string
+        org_id:
+          type: string
+        input_sha256:
+          type: string
+          pattern: "^[a-f0-9]{64}$"
+        actor_id:
+          type: [string, "null"]
+        actor_type:
+          type: string
+          enum: [human, agent, system]
+        permissions:
+          type: array
+          items:
+            type: string
+        auth_session_id:
+          type: string
+        iat:
+          type: integer
+          format: int64
+        exp:
+          type: integer
+          format: int64
+    GoMetricsAssertionClaims:
+      type: object
+      additionalProperties: false
+      required: [aud, sub, org_id, iat, exp]
+      properties:
+        aud:
+          type: string
+          const: go.metrics.read
+        sub:
+          type: string
+        org_id:
+          type: string
+        iat:
+          type: integer
+          format: int64
+        exp:
+          type: integer
+          format: int64
+    GoCRMReadAssertionClaims:
+      type: object
+      additionalProperties: false
+      required: [aud, sub, org_id, capability_id, input_sha256, actor_id, actor_type, permissions, auth_session_id, iat, exp]
+      properties:
+        aud:
+          type: string
+          const: go.crm.read
+        sub:
+          type: string
+        org_id:
+          type: string
+        capability_id:
+          type: string
+        input_sha256:
+          type: string
+          pattern: "^[a-f0-9]{64}$"
+        actor_id:
+          type: [string, "null"]
+        actor_type:
+          type: string
+          const: human
+        permissions:
+          type: array
+          items:
+            type: string
+        auth_session_id:
+          type: string
+        iat:
+          type: integer
+          format: int64
+        exp:
+          type: integer
+          format: int64
+    GoProjectsReadAssertionClaims:
+      type: object
+      additionalProperties: false
+      required: [aud, sub, org_id, capability_id, input_sha256, actor_id, actor_type, permissions, auth_session_id, iat, exp]
+      properties:
+        aud:
+          type: string
+          const: go.projects.read
+        sub:
+          type: string
+        org_id:
+          type: string
+        capability_id:
+          type: string
+        input_sha256:
+          type: string
+          pattern: "^[a-f0-9]{64}$"
+        actor_id:
+          type: [string, "null"]
+        actor_type:
+          type: string
+          const: human
+        permissions:
+          type: array
+          items:
+            type: string
+        auth_session_id:
+          type: string
+        iat:
+          type: integer
+          format: int64
+        exp:
+          type: integer
+          format: int64
+    GoPolicyResponse:
+      type: object
+      additionalProperties: false
+      required: [policy, canEdit]
+      properties:
+        policy:
+          $ref: "#/components/schemas/Policy"
+        canEdit:
+          type: boolean
+    Policy:
+      type: object
+      additionalProperties: false
+      required: [maxRiskAutonomous, moneyThresholdMinor, requiresApprovalFor]
+      properties:
+        maxRiskAutonomous:
+          type: string
+        moneyThresholdMinor:
+          type: integer
+          format: int64
+        requiresApprovalFor:
+          type: array
+          items: {}
+          x-go-type: RawJSON
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: string

@@ -14,9 +14,7 @@
  */
 import { eq } from "drizzle-orm";
 import { getDb, invoices, users } from "@chaste/db";
-import { buildExecutor, buildRegistry } from "../apps/web/src/server/kernel";
-import { runOnboarding } from "../apps/web/src/server/onboarding";
-import { draftSupportReply } from "../apps/web/src/server/support-agent";
+import { buildExecutor, buildRegistry, draftSupportReply, runOnboarding } from "./lib/go-driver";
 
 async function main() {
   const db = getDb().db;
@@ -32,7 +30,7 @@ async function main() {
   const { orgId } = await runOnboarding(db, {
     userId: owner.id,
     userEmail: owner.email,
-    orgName: "Support Demo Co",
+    orgName: `Support Demo Co ${Date.now()}`,
     businessDescription:
       "Small furniture workshop. Refund policy: unused items within 30 days for full refund. Warranty: 2 years on all wood joints.",
   });
@@ -89,7 +87,7 @@ async function main() {
     resolved: { userId: owner.id, orgId },
     conversationId,
   });
-  console.log(`✓ draft produced in ${draftResult.steps} step(s):`);
+  console.log("✓ draft produced:");
   console.log("  ┌─ draft ─────────────────────────────────────");
   for (const line of draftResult.draft.split("\n")) console.log(`  │ ${line}`);
   console.log("  └────────────────────────────────────────────");

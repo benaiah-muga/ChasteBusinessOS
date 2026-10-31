@@ -5,10 +5,8 @@
  * Run: pnpm demo:m11 [hr|projects|flow|all]
  */
 import { getDb, timeEntries, users } from "@chaste/db";
-import { CapabilityRegistry } from "@chaste/kernel";
-import { buildExecutor, buildRegistry } from "../apps/web/src/server/kernel";
-import { runOnboarding } from "../apps/web/src/server/onboarding";
-import { registerProjectsCapabilities } from "../modules/projects/src/index";
+import { randomUUID } from "node:crypto";
+import { buildExecutor, buildRegistry, runOnboarding } from "./lib/go-driver";
 
 let passed = 0;
 function ok(label: string, condition?: boolean) {
@@ -30,10 +28,11 @@ async function seedOrg(db: ReturnType<typeof getDb>["db"], orgName: string, enab
     .values({ email: `own-${Date.now()}-${Math.random().toString(36).slice(2, 6)}@demo.test`, name: "Owner" })
     .returning();
   if (!owner) throw new Error("owner insert failed");
+  const runName = `${orgName} ${randomUUID().slice(0, 8)}`;
   const { orgId } = await runOnboarding(db, {
     userId: owner.id,
     userEmail: owner.email,
-    orgName,
+    orgName: runName,
     businessDescription: "A services crew that hires, plans production, and keeps projects moving.",
     ...(enabledModules ? { enabledModules } : {}),
   });
@@ -46,7 +45,7 @@ async function seedOrg(db: ReturnType<typeof getDb>["db"], orgName: string, enab
       services: {},
     },
     agentCtx: {
-      actor: { type: "agent" as const, id: null, orgId, permissions: new Set(["*"]) },
+      actor: { type: "agent" as const, id: owner.id, orgId, permissions: new Set(["*"]) },
       now: new Date(),
       services: {},
     },
@@ -98,12 +97,11 @@ async function hrScenario(): Promise<string> {
 
 async function projectsScenario(): Promise<string> {
   const db = getDb().db;
-  // Standalone: a registry containing ONLY the projects module, executor
-  // with only that module enabled. No CRM, no accounting, no HR.
-  const bare = new CapabilityRegistry();
+  // Standalone: the org is onboarded with ONLY the projects module enabled.
+  // No CRM, no accounting, no HR. The Go API refuses sibling modules the
+  // org has not enabled.
   const { orgId, ownerCtx } = await seedOrg(db, "M11 Projects Solo", ["projects"]);
-  registerProjectsCapabilities(bare, { db });
-  const ex = buildExecutor(db, bare, { enabledModules: ["projects"] });
+  const ex = buildExecutor(db, buildRegistry(db), { enabledModules: ["projects"] });
   void orgId;
 
   const project = data(await ex.execute("projects.createProject", ownerCtx, {

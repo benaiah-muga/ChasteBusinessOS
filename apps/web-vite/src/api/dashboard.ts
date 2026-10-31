@@ -1,0 +1,243 @@
+import { z } from "zod";
+import type { components } from "../generated/business-v1";
+import { SignalSchema } from "./signals";
+
+const MinorUnitsSchema = z.number().int().safe();
+const CountSchema = z.number().int().nonnegative().safe();
+export const DashboardResponseSchema = z.object({
+  signals: z.array(SignalSchema).max(8),
+  money: z.object({
+    revenueMinor: MinorUnitsSchema,
+    expenseMinor: MinorUnitsSchema,
+    netIncomeMinor: MinorUnitsSchema,
+    cashMinor: MinorUnitsSchema.nullable(),
+    balanced: z.boolean().nullable(),
+    assetsMinor: MinorUnitsSchema,
+    liabilitiesMinor: MinorUnitsSchema,
+    equityMinor: MinorUnitsSchema,
+  }).strict(),
+  workingCapital: z.object({
+    arOutstandingMinor: MinorUnitsSchema,
+    overdueCount: CountSchema,
+    overdueAmountMinor: MinorUnitsSchema,
+    apOutstandingMinor: MinorUnitsSchema,
+  }).strict(),
+  pipeline: z.object({
+    stages: z.array(z.object({
+      stage: z.enum(["lead", "qualified", "proposal", "negotiation", "won", "lost"]),
+      count: CountSchema,
+      valueMinor: MinorUnitsSchema,
+    }).strict()).length(6),
+    openCount: CountSchema,
+    weightedForecastMinor: MinorUnitsSchema,
+  }).strict(),
+  ops: z.object({
+    headcount: CountSchema,
+    pendingLeave: CountSchema,
+    posOpen: z.object({ register: z.string() }).strict().nullable(),
+    lowStock: z.array(z.object({ sku: z.string(), name: z.string() }).strict()),
+    pendingApprovals: CountSchema,
+    docsParsed: CountSchema,
+    docsAwaitingCoding: CountSchema,
+  }).strict(),
+  trend: z.array(z.object({
+    month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
+    incomeMinor: MinorUnitsSchema,
+    expenseMinor: MinorUnitsSchema,
+  }).strict()).length(6),
+  activity: z.array(z.object({
+    seq: CountSchema,
+    kind: z.string(),
+    capabilityId: z.string().nullable(),
+    actorType: z.string(),
+    occurredAt: z.string().datetime({ offset: true }),
+  }).strict()).max(8),
+}).strict();
+
+const SetupItemSchema: z.ZodType<components["schemas"]["SetupItem"]> = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  why: z.string(),
+  href: z.string().refine((value) => {
+    if (!value.startsWith("/") || value.startsWith("//") || value.startsWith("/\\")) return false;
+    try {
+      return new URL(value, "https://chaste.invalid").origin === "https://chaste.invalid";
+    } catch {
+      return false;
+    }
+  }, "Expected a local path"),
+  done: z.boolean(),
+}).strict();
+
+export const SetupResponseSchema: z.ZodType<components["schemas"]["SetupResponse"]> = z.object({
+  items: z.array(SetupItemSchema),
+  remaining: CountSchema,
+}).strict();
+
+const LocalPathSchema: z.ZodType<components["schemas"]["MyWorkCard"]["actionHref"]> = z.string().refine((value) => {
+  if (!value.startsWith("/") || value.startsWith("//") || value.startsWith("/\\")) return false;
+  try {
+    return new URL(value, "https://chaste.invalid").origin === "https://chaste.invalid";
+  } catch {
+    return false;
+  }
+}, "Expected a local path");
+
+export const WorkCardSchema: z.ZodType<components["schemas"]["MyWorkCard"]> = z.object({
+  kind: z.enum(["approval", "receipt_remainder", "signal"]),
+  id: z.string().min(1),
+  title: z.string().min(1),
+  detail: z.string(),
+  whyItMatters: z.string(),
+  actionLabel: z.string().min(1),
+  actionHref: LocalPathSchema,
+  createdAt: z.string().datetime({ offset: true }).nullable(),
+  rank: CountSchema,
+}).strict();
+
+export const MyWorkResponseSchema: z.ZodType<components["schemas"]["MyWorkResponse"]> = z.object({
+  cards: z.array(WorkCardSchema).max(30),
+  generatedAt: z.string().datetime({ offset: true }),
+}).strict();
+
+const WorkBriefCardSchema: z.ZodType<components["schemas"]["MyWorkSummaryCard"]> = z.object({
+  kind: z.string().min(1),
+  title: z.string().min(1),
+  detail: z.string(),
+}).strict();
+
+const WorkBriefInputSchema: z.ZodType<components["schemas"]["MyWorkSummaryInput"]> = z.object({
+  cards: z.array(WorkBriefCardSchema).min(1).max(30),
+}).strict().superRefine((input, context) => {
+  const lines: string[] = [];
+  input.cards.forEach((card, index) => {
+    for (const field of ["kind", "title", "detail"] as const) {
+      if (card[field].length > 4096) {
+        context.addIssue({ code: "custom", path: ["cards", index, field], message: "Card field exceeds the UTF-16 code unit limit" });
+      }
+    }
+    lines.push(`- [${card.kind}] ${card.title}: ${card.detail}`);
+  });
+  if (`Pending work:\n${lines.join("\n")}`.length > 32_000) {
+    context.addIssue({ code: "custom", path: ["cards"], message: "Composed prompt exceeds the UTF-16 code unit limit" });
+  }
+});
+
+const WorkBriefResponseSchema: z.ZodType<components["schemas"]["MyWorkSummaryResponse"]> = z.object({
+  brief: z.string().min(1),
+  model: z.string().min(1),
+}).strict();
+
+const WorkBriefErrorSchema: z.ZodType<components["schemas"]["MyWorkSummaryError"]> = z.object({
+  error: z.string(),
+  detail: z.string().optional(),
+  hint: z.string().optional(),
+}).strict();
+
+const ApiErrorBodySchema = z.object({
+  hint: z.string().optional(),
+  error: z.string().optional(),
+});
+
+export type DashboardData = components["schemas"]["DashboardResponse"];
+export type SetupItem = components["schemas"]["SetupItem"];
+export type WorkCard = components["schemas"]["MyWorkCard"];
+
+export class DashboardApiError extends Error {
+  constructor(readonly status: number, message: string, readonly hint?: string) {
+    super(message);
+    this.name = "DashboardApiError";
+  }
+}
+
+async function getJson(path: string, signal?: AbortSignal): Promise<unknown> {
+  const response = await fetch(path, {
+    credentials: "same-origin",
+    headers: { accept: "application/json" },
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
+  });
+  if (!response.ok) {
+    const message = response.status === 401
+      ? "Your session has expired. Sign in again to continue."
+      : response.status === 428
+        ? "Finish setting up your workspace to see its dashboard."
+        : response.status === 403
+          ? "Your account does not have access to this information."
+          : "The dashboard service is unavailable. Try again.";
+    throw new DashboardApiError(response.status, message, await readApiHint(response));
+  }
+  try {
+    return await response.json();
+  } catch {
+    throw new DashboardApiError(response.status, "The dashboard service returned an unreadable response.");
+  }
+}
+
+async function readApiHint(response: Response): Promise<string | undefined> {
+  const body = await response.json().catch(() => null);
+  const parsed = ApiErrorBodySchema.safeParse(body);
+  return parsed.success ? parsed.data.hint : undefined;
+}
+
+async function postJson(path: string, body: components["schemas"]["MyWorkSummaryInput"]): Promise<unknown> {
+  const response = await fetch(path, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!response.ok) {
+    const message = response.status === 401
+      ? "Your session has expired. Sign in again to continue."
+      : "The work brief is unavailable right now. The ranked list is still available.";
+    const errorBody = await response.json().catch(() => null);
+    const parsedError = WorkBriefErrorSchema.safeParse(errorBody);
+    throw new DashboardApiError(response.status, message, parsedError.success ? parsedError.data.hint : undefined);
+  }
+  try {
+    return await response.json();
+  } catch {
+    throw new DashboardApiError(response.status, "The work brief service returned an unreadable response.");
+  }
+}
+
+export async function fetchDashboard(signal?: AbortSignal): Promise<DashboardData> {
+  const response = await getJson("/api/dashboard", signal);
+  const parsed = DashboardResponseSchema.safeParse(response);
+  if (!parsed.success) {
+    throw new DashboardApiError(200, "The dashboard service returned data in an unexpected format.");
+  }
+  const dashboard: DashboardData = parsed.data;
+  return dashboard;
+}
+
+export async function fetchSetup(signal?: AbortSignal): Promise<SetupItem[]> {
+  const response = await getJson("/api/setup", signal);
+  const parsed = SetupResponseSchema.safeParse(response);
+  if (!parsed.success) {
+    throw new DashboardApiError(200, "The setup service returned data in an unexpected format.");
+  }
+  return parsed.data.items;
+}
+
+export async function fetchMyWork(signal?: AbortSignal): Promise<WorkCard[]> {
+  const response = await getJson("/api/my-work", signal);
+  const parsed = MyWorkResponseSchema.safeParse(response);
+  if (!parsed.success) {
+    throw new DashboardApiError(200, "The work queue returned data in an unexpected format.");
+  }
+  return parsed.data.cards;
+}
+
+export async function summarizeWork(cards: WorkCard[]): Promise<string> {
+  const request = WorkBriefInputSchema.parse({
+    cards: cards.map(({ kind, title, detail }) => ({ kind, title, detail })),
+  });
+  const response = await postJson("/api/my-work/summarize", request);
+  const parsed = WorkBriefResponseSchema.safeParse(response);
+  if (!parsed.success) {
+    throw new DashboardApiError(200, "The work brief service returned data in an unexpected format.");
+  }
+  return parsed.data.brief;
+}

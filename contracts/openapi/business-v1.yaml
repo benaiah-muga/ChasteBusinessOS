@@ -1,0 +1,4433 @@
+openapi: 3.1.0
+info:
+  title: Chaste Business API
+  version: 1.0.0
+  description: Versioned public HTTP contracts shared by the Go API and its clients.
+paths:
+  /api/org:
+    get:
+      operationId: getOrganizations
+      summary: List organizations available to the signed-in user
+      description: >-
+        Returns the authenticated user's organization memberships and active
+        organization. The Better Auth session cookie is the only supported
+        authentication mechanism for this route. The active organization is
+        selected from the server-resolved session and HttpOnly active-org
+        cookie; X-Organization-ID is not read here. An unverified user receives
+        an empty orgs list and a null activeOrgId. Responses include
+        Cache-Control: no-store. No Origin header is required for this read.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Organization memberships and active selection.
+          headers:
+            Cache-Control:
+              description: Organization membership data is not stored.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizationListResponse"
+        "401":
+          description: The Better Auth session is missing or invalid.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Session resolution infrastructure or the organization membership query failed.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The session service is misconfigured.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: The authenticated request used an unsupported method. This route supports GET, POST, PATCH, and PUT.
+          headers:
+            Allow:
+              description: Methods accepted by this route.
+              schema:
+                type: string
+                const: GET, POST, PATCH, PUT
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: switchActiveOrganization
+      summary: Switch the active organization
+      description: >-
+        Verifies membership in the requested organization and sets the
+        HttpOnly active-org cookie. Only Better Auth cookie sessions are
+        supported. The request must include a same-origin Origin header and the
+        session email must be verified. This endpoint does not accept an
+        X-Organization-ID selector; orgId in the body is the requested target.
+        Every response includes Cache-Control: no-store.
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        description: JSON request body limited to 4096 bytes.
+        x-maxBodyBytes: 4096
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrganizationSwitchRequest"
+      responses:
+        "200":
+          description: Active organization cookie was set.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Set-Cookie:
+              description: HttpOnly, SameSite=Lax chaste_active_org cookie scoped to /.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizationSwitchSuccess"
+        "400":
+          description: The body is malformed or orgId is not a UUID.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: The Better Auth session is missing or invalid.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The Origin is not same-origin, the email is unverified, or the user is not a member of orgId.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Session resolution infrastructure or membership verification failed.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The session service is misconfigured.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: The authenticated request used an unsupported method. This route supports GET, POST, PATCH, and PUT.
+          headers:
+            Allow:
+              description: Methods accepted by this route.
+              schema:
+                type: string
+                const: GET, POST, PATCH, PUT
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: updateOrganizationAgentSoul
+      summary: Update the organization's agent persona
+      description: >-
+        Replaces the standing agent persona for the active organization. This
+        cookie-session route requires an active organization, iam.admin, and a
+        same-origin Origin header. The body is limited to 65536 bytes. The
+        agentSoul value is trimmed before storage; whitespace-only text clears
+        the persona. Its maximum is 8000 UTF-16 code units. Unknown object
+        properties are accepted and ignored.
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        x-maxBodyBytes: 65536
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrganizationSoulPatchRequest"
+      responses:
+        "200":
+          description: Agent persona was updated.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizationWriteSuccess"
+        "400":
+          description: The body is malformed, agentSoul is absent or null, or the UTF-16 length exceeds 8000 code units.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: The session is invalid or has no active organization.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The Origin is not same-origin or the actor lacks iam.admin.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Session resolution infrastructure or updating the agent persona failed.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The session service is misconfigured.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: The authenticated request used an unsupported method. This route supports GET, POST, PATCH, and PUT.
+          headers:
+            Allow:
+              description: Methods accepted by this route.
+              schema:
+                type: string
+                const: GET, POST, PATCH, PUT
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      operationId: getOrganizationAgentSoul
+      summary: Read the organization's agent persona
+      description: >-
+        Reads the standing agent persona for the active organization. This
+        cookie-session route requires an active organization, but does not
+        require iam.admin or an Origin header. Every response includes
+        Cache-Control: no-store.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Current agent persona.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentSoulResponse"
+        "401":
+          description: The session is invalid or has no active organization.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Session resolution infrastructure or reading the agent persona failed.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The session service is misconfigured.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: The authenticated request used an unsupported method. This route supports GET, POST, PATCH, and PUT.
+          headers:
+            Allow:
+              description: Methods accepted by this route.
+              schema:
+                type: string
+                const: GET, POST, PATCH, PUT
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/signals:
+    get:
+      operationId: getSignals
+      summary: Read organization signals
+      description: >-
+        Lists signals for the authenticated organization through the governed
+        signals.list capability. Cookie sessions use the active organization
+        from session context unless X-Organization-ID is supplied; bearer
+        tokens are resolved against that selected organization. An explicit
+        selector must be a single valid UUID matching the actor's membership.
+        Invalid nonempty Authorization does not fall back to the cookie. The
+        first severity or module query value is used and additional values are
+        ignored. Unknown query keys are ignored. Invalid filters return 400.
+        The module filter is limited to 2-40 UTF-8 bytes. Missing signals.read
+        permission or organization membership returns a generic 403. All
+        responses include Cache-Control: no-store and Pragma: no-cache.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      parameters:
+        - name: X-Organization-ID
+          in: header
+          required: false
+          description: Selects an organization and must match the authenticated membership.
+          schema:
+            type: string
+            format: uuid
+        - name: severity
+          in: query
+          required: false
+          description: First value is used; additional values are ignored.
+          schema:
+            type: string
+            enum: [red, orange, green]
+        - name: module
+          in: query
+          required: false
+          description: First value is used; additional values are ignored. Length is measured in UTF-8 bytes.
+          schema:
+            type: string
+            x-minBytes: 2
+            x-maxBytes: 40
+      responses:
+        "200":
+          description: Signals for the active organization.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignalResponse"
+        "400":
+          description: The organization selector or query parameters are malformed.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: The session is invalid or the identity is not verified or does not resolve to an organization.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+            WWW-Authenticate:
+              description: Bearer authentication challenge.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The explicit organization selector does not match the resolved membership, or the actor lacks signals.read. The message is generic.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: The exact path is owned by Go and only GET is enabled. Suffix paths continue to the configured fallback.
+          headers:
+            Allow:
+              schema:
+                type: string
+                const: GET
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Session resolution infrastructure, the signal capability, or its response failed. The message is generic.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Signals dependencies or session configuration are unavailable.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/dashboard:
+    get:
+      operationId: getDashboard
+      summary: Read the authenticated organization dashboard
+      description: >-
+        Returns the dashboard snapshot for the authenticated organization. The
+        response includes organization-scoped financial, working-capital,
+        pipeline, operations, trend, activity, and signal data. Report-derived
+        money fields use the legacy zero or null fallback when the actor cannot
+        read the corresponding accounting report. Every response includes
+        Cache-Control: no-store and Pragma: no-cache. Cookie sessions use the
+        active organization from session context unless X-Organization-ID is
+        supplied. Bearer tokens are resolved against the selected organization.
+        An explicit organization selector must match the resolved membership.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      parameters:
+        - name: X-Organization-ID
+          in: header
+          required: false
+          description: Selects the organization for this request and must match an organization membership.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Dashboard snapshot for the authenticated organization.
+          headers:
+            Cache-Control:
+              description: Dashboard responses are not stored by clients or intermediaries.
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              description: Legacy cache prevention header.
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardResponse"
+        "400":
+          description: The organization selector is malformed or repeated.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: The session is invalid or the actor is not a verified organization member.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+            WWW-Authenticate:
+              description: Bearer authentication challenge.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The explicit organization selector does not match the authenticated actor's organization.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: Only GET is supported.
+          headers:
+            Allow:
+              description: Allowed request method.
+              schema:
+                type: string
+                const: GET
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The tenant-scoped dashboard read failed.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The dashboard service is unavailable.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/setup:
+    get:
+      operationId: getSetupChecklist
+      summary: Read the organization setup checklist
+      description: >-
+        Returns the setup checklist for the authenticated organization. The
+        checklist's completion flags include organization-scoped counts plus
+        runtime configuration for SMTP_HOST and installed coding-agent
+        executables. Cookie sessions use the active-organization cookie unless
+        X-Organization-ID is supplied; bearer tokens are resolved against the
+        selected organization. A supplied selector must match the resolved
+        organization. The verified actor must have iam.admin or wildcard
+        permission, and the request must resolve to an authenticated session
+        with an active organization. This read does not require Origin. Query
+        parameters and request bodies are ignored. Responses include
+        Cache-Control: no-store and Pragma: no-cache. The router mounts only
+        GET for this exact path while the handler is enabled; unsupported
+        methods receive 405, and suffix paths continue to the base handler.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      parameters:
+        - name: X-Organization-ID
+          in: header
+          required: false
+          description: Selects an organization membership for the request.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The organization setup checklist.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetupResponse"
+        "400":
+          description: The organization selector is malformed or repeated.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: The session is invalid, unverified, missing an active organization, or missing its authenticated session identity.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+            WWW-Authenticate:
+              description: Bearer authentication challenge.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The selected organization does not match the resolved session or the actor lacks iam.admin or wildcard permission.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: The exact setup path received an unsupported method before authentication.
+          headers:
+            Allow:
+              description: The supported request method.
+              schema:
+                type: string
+                const: GET
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The tenant-scoped setup checklist read failed.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The setup service dependencies are unavailable.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/capabilities/execute:
+    post:
+      operationId: executeCapability
+      summary: Execute an authenticated business capability
+      description: >-
+        Executes one capability through the governed kernel using the
+        authenticated actor and active organization. The six accounts
+        receivable capability inputs below are described as named schemas;
+        other capability inputs and outputs remain open-ended at this generic
+        boundary and are checked by runtime validators. Cookie-authenticated
+        requests must include a same-origin Origin header. Bearer-authenticated
+        requests do not use the browser origin check. If X-Organization-ID is
+        provided, it must match the authenticated active organization.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      parameters:
+        - name: X-Organization-ID
+          in: header
+          required: false
+          description: Selects the active organization when the authenticated identity belongs to more than one organization.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CapabilityExecutionRequest"
+      responses:
+        "200":
+          description: Capability completed successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapabilityExecutionSuccess"
+        "202":
+          description: Capability is waiting for human approval.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapabilityExecutionPending"
+        "400":
+          description: Request body or capability execution envelope is malformed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: The session is invalid or does not identify an authenticated organization member.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The origin is not allowed or the actor cannot perform the requested action.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Capability input was valid JSON but the capability refused the request.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/CapabilityExecutionRefusal"
+                  - $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: A capability-specific rate limit was reached.
+          headers:
+            Retry-After:
+              description: Seconds until the request can be retried.
+              schema:
+                type: integer
+                minimum: 1
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Capability execution failed unexpectedly.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Capability execution is unavailable or the requested capability is disabled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: Only POST is supported.
+          headers:
+            Allow:
+              description: Allowed request method.
+              schema:
+                type: string
+                const: POST
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/modules:
+    get:
+      operationId: getModuleSwitchboard
+      summary: Read the organization module switchboard
+      description: >-
+        Returns the module catalog and effective module selection for the authenticated organization. Every response includes Cache-Control: no-store and Pragma: no-cache. Cookie sessions use the active organization from session context unless X-Organization-ID is supplied. Bearer tokens are resolved against the selected organization, and an explicit selection must match an organization membership. This read does not require an Origin header.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      parameters:
+        - name: X-Organization-ID
+          in: header
+          required: false
+          description: Selects the organization for this request. The server rejects malformed selectors and cookie sessions cannot select an organization they do not belong to.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The module catalog and effective module selection.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModuleSwitchboardResponse"
+        "400":
+          description: The organization selector is malformed or repeated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: The session is invalid or the actor is not an authenticated organization member.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The requested organization does not match the authenticated actor's organization.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: Only GET is supported.
+          headers:
+            Allow:
+              description: Allowed request method.
+              schema:
+                type: string
+                const: GET
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The module service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: setModuleSwitchboard
+      summary: Update the organization module switchboard
+      description: >-
+        Updates enabled modules through the governed iam.setModules capability. Every response includes Cache-Control: no-store and Pragma: no-cache. The authenticated actor must have iam.admin. Cookie-authenticated requests must include a same-origin Origin header. Bearer-authenticated requests bypass the browser Origin check. The request includes the current catalog module IDs, and the server preserves protected modules automatically.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      parameters:
+        - name: X-Organization-ID
+          in: header
+          required: false
+          description: Selects the organization for this request and must match an organization membership.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModuleSwitchboardRequest"
+      responses:
+        "200":
+          description: The module switchboard update completed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapabilityExecutionSuccess"
+        "202":
+          description: The module change is waiting for approval.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModuleSwitchboardPending"
+        "400":
+          description: The organization selector or request body is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: The session is invalid or the actor is not a verified organization member.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The origin is disallowed, the actor lacks iam.admin, or organization membership is no longer valid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: The governed capability refused the module change.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The governed module update failed unexpectedly.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The module write service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: Only POST is supported.
+          headers:
+            Allow:
+              description: Allowed request method.
+              schema:
+                type: string
+                const: POST
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/approvals:
+    get:
+      operationId: getApprovalInbox
+      summary: Read pending approvals and recent decisions
+      description: >-
+        Reads the authenticated organization's approval queue and recent
+        history. Cookie sessions use the active organization from session
+        context unless X-Organization-ID is supplied; bearer tokens are
+        resolved against the selected organization. An explicit selector must
+        match the authenticated membership. Cookie reads do not require an
+        Origin header. Responses include Cache-Control: no-store and
+        Pragma: no-cache.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      parameters:
+        - name: X-Organization-ID
+          in: header
+          required: false
+          description: Selects an organization membership for the request.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Up to 100 pending approvals and up to 25 recent decisions.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalInboxResponse"
+        "400":
+          description: The organization selector is malformed or repeated.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: The actor has no valid verified session for an organization.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+            WWW-Authenticate:
+              description: Bearer authentication challenge.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The explicit organization selector does not match the resolved membership.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: Only GET is supported.
+          headers:
+            Allow:
+              schema:
+                type: string
+                const: GET
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The organization-scoped inbox read failed.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The approval inbox service is unavailable.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: decideApproval
+      summary: Approve or reject a pending action
+      description: >-
+        Decides one pending approval in the authenticated organization. Supply
+        exactly one non-empty approval id in the id query parameter. The
+        handler reports malformed or non-existent IDs as not found. Cookie-authenticated
+        requests must pass the server's same-origin Origin check; bearer
+        requests do not use that browser check. An explicit X-Organization-ID
+        is used to resolve the organization and resolution failures return 401
+        with a Bearer challenge. Approval execution requires the permission for
+        the approved capability. Request bodies are limited to 16 KiB.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: query
+          required: true
+          description: Approval ID to decide. The handler requires exactly one non-empty value; malformed IDs are reported as not found.
+          schema:
+            type: string
+            minLength: 1
+        - name: X-Organization-ID
+          in: header
+          required: false
+          description: Selects the active organization and must match membership.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApprovalDecisionRequest"
+      responses:
+        "200":
+          description: Approval was rejected or approved and its action executed.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalDecisionSuccess"
+        "400":
+          description: The ID query or decision body is malformed.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/ErrorResponse"
+                  - $ref: "#/components/schemas/ApprovalDecisionFailure"
+        "401":
+          description: Authentication is invalid, the actor is not a verified organization member, or organization selection failed.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            WWW-Authenticate:
+              description: Bearer authentication challenge.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/ErrorResponse"
+                  - $ref: "#/components/schemas/ApprovalDecisionFailure"
+        "403":
+          description: The cookie request origin is disallowed or the actor lacks authority over this capability.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/ErrorResponse"
+                  - $ref: "#/components/schemas/ApprovalDecisionFailure"
+        "404":
+          description: No approval with this ID exists in the authenticated organization.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalDecisionFailure"
+        "405":
+          description: Only POST is supported.
+          headers:
+            Allow:
+              schema:
+                type: string
+                const: POST
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: This approval has already been handled or is being executed elsewhere.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalDecisionFailure"
+        "410":
+          description: The approval expired before it could be decided.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalDecisionFailure"
+        "422":
+          description: The approved capability is unsupported or refused execution.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalDecisionFailure"
+        "500":
+          description: The decision or approved action failed unexpectedly.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/ErrorResponse"
+                  - $ref: "#/components/schemas/ApprovalDecisionFailure"
+        "503":
+          description: The approval decision service is unavailable.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/my-work:
+    get:
+      operationId: getMyWork
+      summary: Read permission-scoped work cards for the organization
+      description: >-
+        Returns pending approvals visible to the authenticated actor, receipt
+        remainders when the actor has purchasing.read, and signals when the
+        actor has signals.read. Approval cards are filtered by the permission
+        required by their capability. Query parameters and request bodies are
+        ignored. Cookie sessions use the active-organization cookie unless
+        X-Organization-ID is supplied; bearer tokens are resolved against the
+        selected organization. A supplied selector must match the resolved
+        membership. Every response includes Cache-Control: no-store and
+        Pragma: no-cache. Unsupported methods on this exact path receive 405
+        while this Go route is enabled; suffix paths remain on the base router.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      parameters:
+        - name: X-Organization-ID
+          in: header
+          required: false
+          description: Selects an organization membership for this request.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ranked work cards visible to the authenticated actor.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyWorkResponse"
+        "400":
+          description: The organization selector is malformed or repeated.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: The session is invalid, unverified, or lacks an authenticated organization session.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+            WWW-Authenticate:
+              description: Bearer authentication challenge.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The explicit organization selector does not match the authenticated actor's organization.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: Only GET is supported.
+          headers:
+            Allow:
+              description: Allowed request method.
+              schema:
+                type: string
+                const: GET
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Session resolution or the organization-scoped work read failed.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The work service or session configuration is unavailable.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/my-work/summarize:
+    post:
+      operationId: summarizeMyWork
+      summary: Summarize permission-scoped work cards
+      description: >-
+        Creates a short model-generated brief from the supplied work cards.
+        The API requires an authenticated, verified user with an organization
+        session. Cookie sessions use the active-organization cookie unless
+        X-Organization-ID is supplied; bearer tokens are resolved against the
+        selected organization. A supplied selector must match the resolved
+        membership. The caller sends only card kind, title, and detail; model
+        credentials and coding-agent credentials are loaded and used on the
+        server and are never accepted in the request. Cards must contain 1 to
+        30 items. The encoded body is limited to 1 MiB. Each kind, title, and
+        detail value is limited to 4,096 UTF-16 code units, and the composed
+        prompt is limited to 32,000 UTF-16 code units. Unknown request object
+        properties are ignored. Missing workspace credentials produce a 503
+        response; provider and coding-agent failures produce a sanitized 502
+        response. Cookie-authenticated requests require a same-origin Origin
+        header; bearer requests do not use this cookie CSRF check. This
+        operation may invoke a model and may record coding-agent
+        usage, so retries can repeat provider work and usage recording. No
+        idempotency key is supported. Responses include Cache-Control: no-store
+        and Pragma: no-cache. Unsupported methods on this exact path receive
+        405 while the Go route is enabled; suffix paths and a disabled route
+        remain on the base router.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      parameters:
+        - name: X-Organization-ID
+          in: header
+          required: false
+          description: Selects an organization membership for this request.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MyWorkSummaryInput"
+      responses:
+        "200":
+          description: Generated work brief and selected model identifier.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyWorkSummaryResponse"
+        "400":
+          description: The selector or request body is malformed or exceeds card limits.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyWorkSummaryError"
+        "401":
+          description: No valid session exists, or the resolved identity is unverified or invalid.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+            WWW-Authenticate:
+              description: Bearer authentication challenge.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyWorkSummaryError"
+        "403":
+          description: The explicit organization selector does not match the authenticated membership, or a cookie-authenticated request lacks a valid same-origin Origin header.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyWorkSummaryError"
+        "405":
+          description: Only POST is supported on the Go-owned exact path.
+          headers:
+            Allow:
+              description: Allowed request method.
+              schema:
+                type: string
+                const: POST
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyWorkSummaryError"
+        "413":
+          description: The encoded request body exceeds 1 MiB.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyWorkSummaryError"
+        "500":
+          description: Session resolution or organization-scoped configuration access failed unexpectedly.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyWorkSummaryError"
+        "502":
+          description: The selected provider failed or returned no usable brief; detail is sanitized.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyWorkSummaryError"
+        "503":
+          description: Summary configuration is unavailable or no workspace model credential is configured.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyWorkSummaryError"
+  /api/ledger:
+    get:
+      operationId: getLedgerEvents
+      summary: Read organization ledger events
+      description: >-
+        Returns organization-scoped append-only ledger events, newest first.
+        The authenticated actor must have accounting.read or wildcard
+        permission. Cookie sessions use the active-organization cookie unless
+        X-Organization-ID is supplied; bearer tokens are resolved against the
+        selected organization. A supplied selector must match the resolved
+        membership. Each response includes Cache-Control: no-store and
+        Pragma: no-cache. `limit` defaults to 60; values are coerced using
+        JavaScript-style number parsing, floored, and clamped to 1 through 200.
+        Malformed, non-finite, or underscore-containing values use 60; an empty
+        value clamps to 1. `before` is a positive base-10 sequence cursor and
+        returns events whose sequence is lower than the cursor. Duplicate
+        query parameters use their first value. Event payload is arbitrary raw
+        JSON and may contain sensitive audit details.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      parameters:
+        - name: X-Organization-ID
+          in: header
+          required: false
+          description: Selects an organization membership for this request.
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          description: >-
+            Coerced and floored like JavaScript Number, then clamped to 1..200.
+            Malformed, non-finite, or underscore-containing values default to
+            60; an explicit empty value becomes 1. Duplicate parameters use
+            the first value.
+          schema:
+            type: string
+          example: "101"
+        - name: before
+          in: query
+          required: false
+          description: >-
+            Positive base-10 ledger sequence cursor. Returns events with seq
+            lower than this value. Invalid, zero, negative, non-decimal, or
+            greater-than-JavaScript-safe-integer values return 400. Duplicate
+            parameters use the first value.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+            maximum: 9007199254740991
+      responses:
+        "200":
+          description: Ledger events ordered by descending sequence.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LedgerResponse"
+        "400":
+          description: The organization selector is malformed or repeated, or the before cursor is invalid.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: The session is invalid or does not identify a verified organization member.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+            WWW-Authenticate:
+              description: Bearer authentication challenge.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The organization selector does not match the authenticated membership or the actor lacks accounting.read.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: Only GET is supported on the exact path while the Go route is enabled.
+          headers:
+            Allow:
+              description: Allowed request method.
+              schema:
+                type: string
+                const: GET
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Session resolution or the organization-scoped ledger read failed, or storage returned a sequence outside the public safe-integer contract.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The ledger service or session configuration is unavailable.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/conversations/{id}/agent-reply:
+    post:
+      operationId: createConversationAgentReply
+      summary: Generate an agent reply to a conversation message
+      description: >-
+        Generates an AI reply for a human-authored trigger message in the
+        authenticated user's organization. Cookie sessions and bearer tokens
+        are supported. The session email must be verified, the selected
+        organization must match an explicit organization membership, and the
+        user must have messaging.write (or wildcard) permission. Cookie writes
+        require a same-origin Origin header. The user must be a conversation
+        member; replies are allowed when the conversation has its agent enabled
+        or the trigger message mentions the agent. Agent tools execute through
+        governed capabilities using the initiating user's permissions and auth
+        session. The provider credential remains server-side. The request's
+        intentId is validated but server idempotency is derived from the
+        organization, conversation, and message IDs. Responses include
+        Cache-Control: no-store and Pragma: no-cache.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Conversation UUID.
+          schema:
+            type: string
+            format: uuid
+        - name: X-Organization-ID
+          in: header
+          required: false
+          description: Explicit organization selector. If supplied, it must be a single valid UUID and match the resolved membership.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        description: Strict JSON object limited to 8192 bytes; unknown properties and trailing JSON are rejected.
+        x-maxBodyBytes: 8192
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConversationAgentReplyRequest"
+      responses:
+        "200":
+          description: Agent reply was posted, or an existing reply was replayed.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationAgentReplySuccess"
+        "202":
+          description: The governed messaging capability requires human approval before posting the generated reply.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationAgentReplyPending"
+        "400":
+          description: Conversation ID or strict request body is invalid, or the X-Organization-ID selector is malformed or repeated.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Session or bearer identity is missing or invalid.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Cookie origin is not same-origin, organization selector does not match membership, or messaging.write is not granted.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: The exact Go-owned path does not support the requested method.
+          headers:
+            Allow:
+              schema:
+                type: string
+                const: POST
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: An agent reply for this trigger message is already being generated.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Conversation membership, agent trigger, or governed messaging policy does not permit this reply.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal or session-resolution infrastructure failure; details are sanitized.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: The configured AI provider failed to produce a usable response.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Messaging agent dependencies or the session signing secret are unavailable.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/notifications:
+    get:
+      operationId: getNotifications
+      summary: List notifications for the authenticated user
+      description: >-
+        Returns notifications visible to the authenticated user in the resolved
+        organization, newest first, with an unread count across the full visible
+        feed. Cookie sessions use their active organization unless
+        X-Organization-ID is provided; bearer tokens are resolved against the
+        selected organization. A supplied selector must match the resolved
+        membership. Cookie and bearer authentication are supported. Reads
+        include Cache-Control: no-store and Pragma: no-cache. Query limit
+        defaults to 30, is clamped to 1 through 100, and invalid numeric values
+        fall back to 30. If Authorization is present, it must contain a valid
+        Bearer token; an invalid Authorization value does not fall back to the
+        session cookie.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      parameters:
+        - name: X-Organization-ID
+          in: header
+          required: false
+          description: Selects an organization membership for the request.
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          description: >-
+            Requested result count. Values are parsed as numbers and floored;
+            values below 1 clamp to 1, above 100 clamp to 100, and invalid or
+            non-finite values use the default of 30. An explicitly empty value
+            clamps to 1.
+          schema:
+            type: string
+            example: "20"
+      responses:
+        "200":
+          description: Notifications and unread count.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationsResponse"
+        "400":
+          description: The organization selector is malformed or repeated.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: No valid verified session is available for an organization.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+            WWW-Authenticate:
+              description: Bearer authentication challenge.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The explicit organization selector does not match the resolved membership.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Notification feed retrieval failed.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The notification service is unavailable.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: >-
+            The mounted Go route received an unsupported method. The exact-path
+            method guard runs before authentication. With the default full
+            route, GET and POST are mounted; disabled methods continue to the
+            base owner.
+          headers:
+            Allow:
+              description: Configured methods on the exact Go-owned path.
+              schema:
+                type: string
+                const: GET, POST
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: markNotificationRead
+      summary: Mark a notification as read
+      description: >-
+        Marks a visible notification as read through the governed
+        notifications.markRead capability. Cookie and bearer authentication
+        are supported. Cookie-authenticated requests must include a same-origin
+        Origin header; bearer-authenticated requests do not require Origin.
+        If Authorization is present, it must contain a valid Bearer token; an
+        invalid Authorization value does not fall back to the session cookie.
+        Cookie sessions use their active organization unless X-Organization-ID
+        is provided; bearer tokens are resolved against the selected
+        organization. A supplied selector must match the resolved membership.
+        The strict JSON body is limited to 8192 bytes and rejects unknown
+        properties. The optional intentId is carried to the capability executor
+        as the idempotency key. Repeated marks are safe: the endpoint returns
+        the same {ok:true} success envelope when an existing receipt is reused.
+        Responses include Cache-Control: no-store.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      parameters:
+        - name: X-Organization-ID
+          in: header
+          required: false
+          description: Selects an organization membership for the request.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        description: Strict JSON body limited to 8192 bytes.
+        x-maxBodyBytes: 8192
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotificationReadRequest"
+      responses:
+        "200":
+          description: The notification was found and marked as read, including when already read.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationReadSuccess"
+        "400":
+          description: The organization selector or strict request body is invalid.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: No valid verified session is available for an organization, or the capability session is invalid.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            WWW-Authenticate:
+              description: Bearer authentication challenge.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The selector does not match membership, or cookie request origin is not same-origin.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No visible notification exists with the supplied ID.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: The governed capability rejected the requested mutation.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationReadFailure"
+        "500":
+          description: Capability execution or result validation failed.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The notification service is unavailable.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: >-
+            The mounted Go route received an unsupported method. The exact-path
+            method guard runs before authentication. With the default full
+            route, GET and POST are mounted; disabled methods continue to the
+            base owner.
+          headers:
+            Allow:
+              description: Configured methods on the exact Go-owned path.
+              schema:
+                type: string
+                const: GET, POST
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/team:
+    get:
+      operationId: getTeam
+      summary: List organization members, roles, and grantable permissions
+      description: >-
+        Returns organization-scoped members and roles plus the sorted
+        capability permission catalog. Cookie sessions use their active
+        organization unless X-Organization-ID is supplied; bearer tokens are
+        resolved against the selected organization. A malformed or repeated
+        selector returns 400; selector mismatch or resolver failure returns
+        401. Reads require a verified active organization and iam.read (or the
+        wildcard permission), rechecked against database membership and grants.
+        Reads do not require Origin. All responses include Cache-Control:
+        no-store and Pragma: no-cache. If Authorization is present, it must be
+        a valid Bearer value and invalid authorization does not fall back to a
+        session cookie.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      parameters:
+        - name: X-Organization-ID
+          in: header
+          required: false
+          description: Selects an organization membership for this request.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Members, roles, and the sorted permission catalog.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeamResponse"
+        "400":
+          description: The organization selector is malformed or repeated.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: The session is invalid, unverified, missing an organization, or does not match the requested organization.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+            WWW-Authenticate:
+              description: Bearer authentication challenge.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The actor lacks iam.read or the database recheck denied membership or permission.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The tenant-scoped team query failed.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The team service dependencies are unavailable.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: The exact-path mount rejected an unsupported method before authentication.
+          headers:
+            Allow:
+              description: Currently enabled GET and POST methods. The value reflects feature-flag configuration.
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: executeTeamAction
+      summary: Perform a governed organization team action
+      description: >-
+        Executes one of createRole, setPermissions, assignRole, or invite
+        through its governed IAM capability. Cookie and bearer authentication
+        are supported. Cookie-authenticated requests require an exact same-
+        origin Origin header (no Referer fallback); bearer requests bypass
+        this browser-origin check. A supplied Authorization value must be a
+        valid Bearer value and never falls back to the cookie. With no
+        X-Organization-ID, the active-organization cookie/session is used; an
+        explicit selector must match the resolved organization. Invalid
+        organization selection returns 401 on this write route. Requests use
+        an `intentId` to make capability execution replay-safe. The per-action
+        input body is limited to 65536 bytes. Unknown object
+        properties are accepted and ignored by Go. All responses include
+        Cache-Control: no-store. Unsupported methods return 405 before
+        authentication; Allow lists the currently enabled Go methods.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      parameters:
+        - name: X-Organization-ID
+          in: header
+          required: false
+          description: Selects an organization membership and must match the session.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        description: JSON request body limited to 65536 bytes. Unknown properties are ignored by Go.
+        x-maxBodyBytes: 65536
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TeamWriteRequest"
+      responses:
+        "200":
+          description: The selected action completed. The data shape depends on action.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeamWriteSuccess"
+        "202":
+          description: Capability execution requires approval and has not completed.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeamWritePending"
+        "400":
+          description: The request body, action, intent, or action-specific fields are invalid.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: The session, organization selection, or capability scope is invalid.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            WWW-Authenticate:
+              description: Bearer authentication challenge.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The cookie request origin is not same-origin or the actor is not an organization member.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: The governed IAM capability refused the mutation.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeamWriteFailure"
+        "500":
+          description: Capability execution failed unexpectedly.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Team dependencies are unavailable or the capability returned malformed success data.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: The exact-path mount rejected an unsupported method before authentication.
+          headers:
+            Allow:
+              description: Currently enabled GET and POST methods. The value reflects feature-flag configuration.
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Pragma:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/support/channels:
+    get:
+      operationId: getSupportChannels
+      summary: Read support channel settings
+      description: Reads the current organization's support channel settings. The embed token is returned only to members with permission to manage support.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current support channel settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SupportChannelsResponse"
+        "401":
+          description: The session is invalid or the actor is not an organization member.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The support module is not enabled for this organization.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The settings could not be read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Support settings are temporarily unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: updateSupportChannels
+      summary: Update support channel settings
+      description: Updates support settings for the active organization. Cookie-authenticated requests must include a same-origin Origin header. At least one field must be provided.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: UUID for this exact settings update. Reuse it with the same body after an uncertain result.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SupportChannelsPatch"
+      responses:
+        "202":
+          description: The change is waiting for an authorized reviewer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PendingApprovalResponse"
+        "200":
+          description: Updated support channel settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SupportChannelsResponse"
+        "400":
+          description: The patch is malformed, empty, or outside the supported bounds.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: The session is invalid or the actor is not an organization member.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The origin is not allowed or the actor cannot manage support settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The support module is not enabled for this organization.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The settings could not be updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: The capability rejected the requested change.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Support settings are temporarily unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: better-auth.session_token
+    bearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    ConversationAgentReplyRequest:
+      type: object
+      additionalProperties: false
+      required: [messageId, intentId]
+      properties:
+        messageId:
+          type: string
+          format: uuid
+          x-go-type: string
+        intentId:
+          type: string
+          format: uuid
+          x-go-type: string
+          description: Client intent identifier; this endpoint validates the UUID while deriving replay identity from organization, conversation, and message.
+    ConversationAgentReplySuccess:
+      type: object
+      additionalProperties: false
+      required: [ok, messageId, reply, replayed]
+      properties:
+        ok:
+          type: boolean
+          const: true
+        messageId:
+          type: string
+          format: uuid
+          x-go-type: string
+        reply:
+          type: string
+        replayed:
+          type: boolean
+    ConversationAgentReplyPending:
+      type: object
+      additionalProperties: false
+      required: [ok, pendingApproval, approvalId, reason]
+      properties:
+        ok:
+          type: boolean
+          const: false
+        pendingApproval:
+          type: boolean
+          const: true
+        approvalId:
+          type: string
+          format: uuid
+          x-go-type: string
+        reason:
+          type: string
+    OrganizationSummary:
+      type: object
+      additionalProperties: false
+      required: [id, name, baseCurrency]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        baseCurrency:
+          type: string
+          pattern: '^[A-Z]{3}$'
+    OrganizationListResponse:
+      type: object
+      additionalProperties: false
+      required: [activeOrgId, orgs]
+      properties:
+        activeOrgId:
+          type: [string, "null"]
+          format: uuid
+        orgs:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrganizationSummary"
+    OrganizationSwitchRequest:
+      type: object
+      additionalProperties: true
+      required: [orgId]
+      properties:
+        orgId:
+          type: string
+          format: uuid
+    OrganizationSwitchSuccess:
+      type: object
+      additionalProperties: false
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+          const: true
+    AgentSoulResponse:
+      type: object
+      additionalProperties: false
+      required: [agentSoul]
+      properties:
+        agentSoul:
+          type: string
+    OrganizationSoulPatchRequest:
+      type: object
+      additionalProperties: true
+      required: [agentSoul]
+      properties:
+        agentSoul:
+          type: string
+          x-maxUtf16Length: 8000
+          description: Trimmed before storage; an empty or whitespace-only value clears the persona. The server rejects values exceeding 8000 UTF-16 code units.
+    OrganizationWriteSuccess:
+      type: object
+      additionalProperties: false
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+          const: true
+    Signal:
+      type: object
+      additionalProperties: false
+      required: [id, severity, module, subject, detail]
+      properties:
+        id:
+          type: string
+          minLength: 1
+        severity:
+          type: string
+          enum: [red, orange, green]
+        module:
+          type: string
+          minLength: 1
+        subject:
+          type: string
+        detail:
+          type: string
+        evidence:
+          type: [object, "null"]
+          additionalProperties: false
+          required: [refType]
+          properties:
+            refType:
+              type: string
+            refId:
+              type: [string, "null"]
+        suggestedAction:
+          type: [object, "null"]
+          additionalProperties: false
+          required: [capabilityId]
+          properties:
+            capabilityId:
+              type: string
+              minLength: 1
+            inputDraft:
+              type: object
+              additionalProperties: true
+              x-go-type: apicontract.RawJSON
+              x-go-type-import:
+                path: github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract
+                name: apicontract
+    SignalResponse:
+      type: object
+      additionalProperties: false
+      required: [signals]
+      properties:
+        signals:
+          type: array
+          items:
+            $ref: "#/components/schemas/Signal"
+    DashboardSignal:
+      $ref: "#/components/schemas/Signal"
+    DashboardResponse:
+      type: object
+      additionalProperties: false
+      required: [signals, money, workingCapital, pipeline, ops, trend, activity]
+      properties:
+        signals:
+          type: array
+          maxItems: 8
+          items:
+            $ref: "#/components/schemas/DashboardSignal"
+        money:
+          type: object
+          additionalProperties: false
+          required: [revenueMinor, expenseMinor, netIncomeMinor, cashMinor, balanced, assetsMinor, liabilitiesMinor, equityMinor]
+          properties:
+            revenueMinor:
+              type: integer
+              format: int64
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+            expenseMinor:
+              type: integer
+              format: int64
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+            netIncomeMinor:
+              type: integer
+              format: int64
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+            cashMinor:
+              type: [integer, "null"]
+              format: int64
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+            balanced:
+              type: [boolean, "null"]
+            assetsMinor:
+              type: integer
+              format: int64
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+            liabilitiesMinor:
+              type: integer
+              format: int64
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+            equityMinor:
+              type: integer
+              format: int64
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+        workingCapital:
+          type: object
+          additionalProperties: false
+          required: [arOutstandingMinor, overdueCount, overdueAmountMinor, apOutstandingMinor]
+          properties:
+            arOutstandingMinor:
+              type: integer
+              format: int64
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+            overdueCount:
+              type: integer
+              format: int64
+              minimum: 0
+              maximum: 9007199254740991
+            overdueAmountMinor:
+              type: integer
+              format: int64
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+            apOutstandingMinor:
+              type: integer
+              format: int64
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+        pipeline:
+          type: object
+          additionalProperties: false
+          required: [stages, openCount, weightedForecastMinor]
+          properties:
+            stages:
+              type: array
+              minItems: 6
+              maxItems: 6
+              items:
+                type: object
+                additionalProperties: false
+                required: [stage, count, valueMinor]
+                properties:
+                  stage:
+                    type: string
+                    enum: [lead, qualified, proposal, negotiation, won, lost]
+                  count:
+                    type: integer
+                    format: int64
+                    minimum: 0
+                    maximum: 9007199254740991
+                  valueMinor:
+                    type: integer
+                    format: int64
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+            openCount:
+              type: integer
+              format: int64
+              minimum: 0
+              maximum: 9007199254740991
+            weightedForecastMinor:
+              type: integer
+              format: int64
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+        ops:
+          type: object
+          additionalProperties: false
+          required: [headcount, pendingLeave, posOpen, lowStock, pendingApprovals, docsParsed, docsAwaitingCoding]
+          properties:
+            headcount:
+              type: integer
+              format: int64
+              minimum: 0
+              maximum: 9007199254740991
+            pendingLeave:
+              type: integer
+              format: int64
+              minimum: 0
+              maximum: 9007199254740991
+            posOpen:
+              oneOf:
+                - type: "null"
+                - type: object
+                  additionalProperties: false
+                  required: [register]
+                  properties:
+                    register:
+                      type: string
+            lowStock:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required: [sku, name]
+                properties:
+                  sku:
+                    type: string
+                  name:
+                    type: string
+            pendingApprovals:
+              type: integer
+              format: int64
+              minimum: 0
+              maximum: 9007199254740991
+            docsParsed:
+              type: integer
+              format: int64
+              minimum: 0
+              maximum: 9007199254740991
+            docsAwaitingCoding:
+              type: integer
+              format: int64
+              minimum: 0
+              maximum: 9007199254740991
+        trend:
+          type: array
+          minItems: 6
+          maxItems: 6
+          items:
+            type: object
+            additionalProperties: false
+            required: [month, incomeMinor, expenseMinor]
+            properties:
+              month:
+                type: string
+                pattern: '^\d{4}-(0[1-9]|1[0-2])$'
+              incomeMinor:
+                type: integer
+                format: int64
+                minimum: -9007199254740991
+                maximum: 9007199254740991
+              expenseMinor:
+                type: integer
+                format: int64
+                minimum: -9007199254740991
+                maximum: 9007199254740991
+        activity:
+          type: array
+          maxItems: 8
+          items:
+            type: object
+            additionalProperties: false
+            required: [seq, kind, capabilityId, actorType, occurredAt]
+            properties:
+              seq:
+                type: integer
+                format: int64
+                minimum: 0
+                maximum: 9007199254740991
+              kind:
+                type: string
+              capabilityId:
+                type: [string, "null"]
+              actorType:
+                type: string
+              occurredAt:
+                type: string
+                format: date-time
+    CapabilityExecutionRequest:
+      x-go-type: apicontract.CapabilityExecutionRequest
+      x-go-type-import:
+        path: github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract
+        name: apicontract
+      description: >-
+        The six named AR capability variants provide concrete input schemas.
+        The generic branch retains compatibility with every other registered
+        capability and future capability identifiers.
+      oneOf:
+        - $ref: "#/components/schemas/AccountingListInvoicesExecutionRequest"
+        - $ref: "#/components/schemas/AccountingCreateInvoiceExecutionRequest"
+        - $ref: "#/components/schemas/AccountingRecordPaymentExecutionRequest"
+        - $ref: "#/components/schemas/AccountingReversePaymentExecutionRequest"
+        - $ref: "#/components/schemas/AccountingCreditNoteExecutionRequest"
+        - $ref: "#/components/schemas/AccountingCustomerStatementExecutionRequest"
+        - $ref: "#/components/schemas/GenericCapabilityExecutionRequest"
+    GenericCapabilityExecutionRequest:
+      type: object
+      additionalProperties: false
+      required: [capabilityId, input]
+      not:
+        required: [capabilityId]
+        properties:
+          capabilityId:
+            enum:
+              - accounting.listInvoices
+              - accounting.createInvoice
+              - accounting.recordPayment
+              - accounting.reversePayment
+              - accounting.creditNote
+              - accounting.customerStatement
+      properties:
+        capabilityId:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Capability identifier other than one of the six AR variants documented here.
+        input:
+          description: Arbitrary JSON value retained by Go for capability-specific parsing and hashing.
+          x-go-type: apicontract.RawJSON
+          x-go-type-import:
+            path: github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract
+            name: apicontract
+        intentId:
+          type: [string, "null"]
+          maxLength: 200
+          description: Optional idempotency intent, limited to 200 Unicode code points. The server rejects CR, LF, and NUL characters.
+    AccountingListInvoicesExecutionRequest:
+      type: object
+      additionalProperties: false
+      required: [capabilityId, input]
+      properties:
+        capabilityId:
+          type: string
+          const: accounting.listInvoices
+        input:
+          $ref: "#/components/schemas/AccountingListInvoicesInput"
+        intentId:
+          $ref: "#/components/schemas/CapabilityExecutionIntentId"
+    AccountingCreateInvoiceExecutionRequest:
+      type: object
+      additionalProperties: false
+      required: [capabilityId, input]
+      properties:
+        capabilityId:
+          type: string
+          const: accounting.createInvoice
+        input:
+          $ref: "#/components/schemas/AccountingCreateInvoiceInput"
+        intentId:
+          $ref: "#/components/schemas/CapabilityExecutionIntentId"
+    AccountingRecordPaymentExecutionRequest:
+      type: object
+      additionalProperties: false
+      required: [capabilityId, input]
+      properties:
+        capabilityId:
+          type: string
+          const: accounting.recordPayment
+        input:
+          $ref: "#/components/schemas/AccountingRecordPaymentInput"
+        intentId:
+          $ref: "#/components/schemas/CapabilityExecutionIntentId"
+    AccountingReversePaymentExecutionRequest:
+      type: object
+      additionalProperties: false
+      required: [capabilityId, input]
+      properties:
+        capabilityId:
+          type: string
+          const: accounting.reversePayment
+        input:
+          $ref: "#/components/schemas/AccountingReversePaymentInput"
+        intentId:
+          $ref: "#/components/schemas/CapabilityExecutionIntentId"
+    AccountingCreditNoteExecutionRequest:
+      type: object
+      additionalProperties: false
+      required: [capabilityId, input]
+      properties:
+        capabilityId:
+          type: string
+          const: accounting.creditNote
+        input:
+          $ref: "#/components/schemas/AccountingCreditNoteInput"
+        intentId:
+          $ref: "#/components/schemas/CapabilityExecutionIntentId"
+    AccountingCustomerStatementExecutionRequest:
+      type: object
+      additionalProperties: false
+      required: [capabilityId, input]
+      properties:
+        capabilityId:
+          type: string
+          const: accounting.customerStatement
+        input:
+          $ref: "#/components/schemas/AccountingCustomerStatementInput"
+        intentId:
+          $ref: "#/components/schemas/CapabilityExecutionIntentId"
+    CapabilityExecutionIntentId:
+      type: [string, "null"]
+      maxLength: 200
+      description: Optional idempotency intent, limited to 200 Unicode code points. The server rejects CR, LF, and NUL characters.
+    AccountingListInvoicesInput:
+      type: object
+      description: Unknown properties are ignored by the Go parser. If omitted, limit defaults to 50.
+      properties:
+        customerId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [draft, sent, paid, void]
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: Defaults to 50 when omitted.
+      additionalProperties: true
+    AccountingCreateInvoiceInput:
+      type: object
+      description: Unknown properties are ignored by the Go parser. At least one line is required.
+      required: [customerId, lines]
+      properties:
+        customerId:
+          type: string
+          format: uuid
+        memo:
+          type: string
+        lines:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/AccountingCreateInvoiceLine"
+        currency:
+          type: string
+          description: Currency code. Omitted or empty uses the organization base currency; the server validates supported currencies and currency minor units.
+        fxRate:
+          type: string
+          description: Optional decimal exchange rate. Omitted or empty uses the latest stored rate; a non-empty value must be a positive decimal with up to 9 integer and 12 fractional digits.
+        dueAt:
+          type: string
+          format: date-time
+          pattern: 'Z$'
+          description: Optional UTC ISO datetime. Must end in Z; numeric offsets are rejected.
+      additionalProperties: true
+    AccountingCreateInvoiceLine:
+      type: object
+      required: [description, quantity, unitPriceMinor]
+      properties:
+        description:
+          type: string
+          minLength: 1
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+        unitPriceMinor:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        taxMinor:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        taxCodeId:
+          type: string
+          format: uuid
+      allOf:
+        - not:
+            required: [taxMinor, taxCodeId]
+      additionalProperties: true
+    AccountingRecordPaymentInput:
+      type: object
+      description: Unknown properties are ignored by the Go parser. method defaults to bank_transfer when omitted.
+      required: [invoiceNumber, amountMinor]
+      properties:
+        invoiceNumber:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+        amountMinor:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+        method:
+          type: string
+          enum: [cash, bank_transfer, card]
+        settleFxRate:
+          type: string
+          description: Optional decimal settlement exchange rate. Omitted or empty uses the latest stored rate; a non-empty value must be a positive decimal with up to 9 integer and 12 fractional digits.
+      additionalProperties: true
+    AccountingReversePaymentInput:
+      type: object
+      required: [paymentId, reason]
+      properties:
+        paymentId:
+          type: string
+          format: uuid
+        reason:
+          type: string
+          minLength: 3
+          maxLength: 500
+          description: The server requires 3 to 500 UTF-16 code units.
+      additionalProperties: true
+    AccountingCreditNoteInput:
+      type: object
+      required: [invoiceId, amountMinor, reason]
+      properties:
+        invoiceId:
+          type: string
+          format: uuid
+        amountMinor:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+        reason:
+          type: string
+          minLength: 3
+          maxLength: 500
+          description: The server requires 3 to 500 UTF-16 code units.
+      additionalProperties: true
+    AccountingCustomerStatementInput:
+      type: object
+      required: [customerId]
+      properties:
+        customerId:
+          type: string
+          format: uuid
+      additionalProperties: true
+    CapabilityExecutionSuccess:
+      type: object
+      additionalProperties: false
+      required: [ok, data]
+      properties:
+        ok:
+          type: boolean
+          const: true
+        data:
+          description: >-
+            Capability result. The six AR result forms are described below;
+            results from all other capabilities remain arbitrary JSON. Raw JSON
+            avoids rounding large integer values in Go clients.
+          anyOf:
+            - $ref: "#/components/schemas/AccountingListInvoicesOutput"
+            - $ref: "#/components/schemas/AccountingCreateInvoiceOutput"
+            - $ref: "#/components/schemas/AccountingRecordPaymentOutput"
+            - $ref: "#/components/schemas/AccountingReversePaymentOutput"
+            - $ref: "#/components/schemas/AccountingCreditNoteOutput"
+            - $ref: "#/components/schemas/AccountingCustomerStatementOutput"
+            - {}
+          x-go-type: apicontract.RawJSON
+          x-go-type-import:
+            path: github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract
+            name: apicontract
+    AccountingListInvoicesOutput:
+      type: object
+      required: [invoices]
+      properties:
+        invoices:
+          type: array
+          items:
+            $ref: "#/components/schemas/AccountingInvoiceRow"
+      additionalProperties: false
+    AccountingInvoiceRow:
+      type: object
+      required: [id, number, customerId, customerName, status, currency, totalMinor, paidMinor, creditedMinor, outstandingMinor, issuedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+        customerId:
+          type: string
+          format: uuid
+        customerName:
+          type: string
+        status:
+          type: string
+          enum: [draft, sent, paid, void]
+        currency:
+          type: string
+        totalMinor:
+          $ref: "#/components/schemas/AccountingSafeInteger"
+        paidMinor:
+          $ref: "#/components/schemas/AccountingSafeInteger"
+        creditedMinor:
+          $ref: "#/components/schemas/AccountingSafeInteger"
+        outstandingMinor:
+          $ref: "#/components/schemas/AccountingSafeInteger"
+        issuedAt:
+          type: [string, "null"]
+          format: date-time
+      additionalProperties: false
+    AccountingCreateInvoiceOutput:
+      type: object
+      required: [invoiceId, invoiceNumber, totalMinor, entryId, currency]
+      properties:
+        invoiceId:
+          type: string
+          format: uuid
+        invoiceNumber:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+        totalMinor:
+          $ref: "#/components/schemas/AccountingSafeInteger"
+        entryId:
+          type: string
+          format: uuid
+        currency:
+          type: string
+      additionalProperties: false
+    AccountingRecordPaymentOutput:
+      type: object
+      required: [paymentId, entryId, fullyPaid]
+      properties:
+        paymentId:
+          type: string
+          format: uuid
+        entryId:
+          type: string
+          format: uuid
+        fullyPaid:
+          type: boolean
+        gainLossMinor:
+          type: integer
+          minimum: -9007199254740991
+          maximum: 9007199254740991
+        baseEntryId:
+          type: string
+          format: uuid
+        foreignEntryId:
+          type: string
+          format: uuid
+      additionalProperties: false
+    AccountingReversePaymentOutput:
+      type: object
+      required: [reversalEntryIds, refundedMinor, invoiceNumber, outstandingMinor]
+      properties:
+        reversalEntryIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        refundedMinor:
+          $ref: "#/components/schemas/AccountingSafeInteger"
+        invoiceNumber:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+        outstandingMinor:
+          $ref: "#/components/schemas/AccountingSafeInteger"
+      additionalProperties: false
+    AccountingCreditNoteOutput:
+      type: object
+      required: [entryId, creditedMinor, invoiceBalanceMinor]
+      properties:
+        entryId:
+          type: string
+          format: uuid
+        creditedMinor:
+          $ref: "#/components/schemas/AccountingSafeInteger"
+        invoiceBalanceMinor:
+          $ref: "#/components/schemas/AccountingSafeInteger"
+      additionalProperties: false
+    AccountingCustomerStatementOutput:
+      type: object
+      required: [currencies]
+      properties:
+        currencies:
+          type: array
+          items:
+            $ref: "#/components/schemas/AccountingCustomerStatementCurrency"
+      additionalProperties: false
+    AccountingCustomerStatementCurrency:
+      type: object
+      required: [currency, openingBalanceMinor, closingBalanceMinor, rows]
+      properties:
+        currency:
+          type: string
+        openingBalanceMinor:
+          $ref: "#/components/schemas/AccountingSafeInteger"
+        closingBalanceMinor:
+          $ref: "#/components/schemas/AccountingSafeInteger"
+        rows:
+          type: array
+          items:
+            $ref: "#/components/schemas/AccountingCustomerStatementRow"
+      additionalProperties: false
+    AccountingCustomerStatementRow:
+      type: object
+      required: [date, kind, ref, amountMinor, balanceMinor]
+      properties:
+        date:
+          type: string
+          format: date-time
+        kind:
+          type: string
+        ref:
+          type: string
+        amountMinor:
+          $ref: "#/components/schemas/AccountingSafeInteger"
+        balanceMinor:
+          $ref: "#/components/schemas/AccountingSafeInteger"
+      additionalProperties: false
+    AccountingSafeInteger:
+      type: integer
+      minimum: -9007199254740991
+      maximum: 9007199254740991
+    CapabilityExecutionPending:
+      type: object
+      additionalProperties: false
+      required: [ok, pendingApproval, reason]
+      properties:
+        ok:
+          type: boolean
+          const: false
+        pendingApproval:
+          type: boolean
+          const: true
+        reason:
+          type: string
+        approvalId:
+          type: string
+          minLength: 1
+    CapabilityExecutionRefusal:
+      type: object
+      additionalProperties: false
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+          const: false
+        data:
+          description: Arbitrary JSON value. Raw JSON avoids rounding large integer values in Go clients.
+          x-go-type: apicontract.RawJSON
+          x-go-type-import:
+            path: github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract
+            name: apicontract
+        error:
+          type: string
+        approvalId:
+          type: string
+        approvalRationale:
+          type: string
+        replayed:
+          type: boolean
+    ModuleInfo:
+      type: object
+      additionalProperties: false
+      required: [id, label, description, href]
+      properties:
+        id:
+          type: string
+          minLength: 1
+        label:
+          type: string
+          minLength: 1
+        description:
+          type: string
+        href:
+          type: [string, "null"]
+        protected:
+          type: boolean
+    ModuleSwitchboardResponse:
+      type: object
+      additionalProperties: false
+      required: [catalog, enabledModules, usingDefaults]
+      properties:
+        catalog:
+          type: array
+          items:
+            $ref: "#/components/schemas/ModuleInfo"
+        enabledModules:
+          type: array
+          items:
+            type: string
+        usingDefaults:
+          type: boolean
+    ModuleSwitchboardRequest:
+      type: object
+      additionalProperties: false
+      required: [modules]
+      properties:
+        modules:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            minLength: 1
+            description: A currently cataloged module ID. The handler validates each value against its current module catalog.
+        intentId:
+          type: [string, "null"]
+          maxLength: 200
+          description: Optional idempotency intent; CR, LF, and NUL characters are rejected when non-null.
+    ModuleSwitchboardPending:
+      type: object
+      additionalProperties: false
+      required: [pendingApproval, hint]
+      properties:
+        pendingApproval:
+          type: boolean
+          const: true
+        hint:
+          type: string
+    ApprovalInboxResponse:
+      type: object
+      additionalProperties: false
+      required: [approvals, history]
+      properties:
+        approvals:
+          type: array
+          items:
+            $ref: "#/components/schemas/ApprovalInboxRow"
+        history:
+          type: array
+          items:
+            $ref: "#/components/schemas/ApprovalInboxRow"
+    ApprovalInboxRow:
+      type: object
+      additionalProperties: false
+      required: [id, orgId, sessionId, requestedByUserId, capabilityId, riskClass, payload, rationale, status, decidedByUserId, decisionComment, expiresAt, decidedAt, createdAt, raisedBy, decidedBy, relatedDocuments]
+      properties:
+        id:
+          type: string
+          format: uuid
+        orgId:
+          type: string
+          format: uuid
+        sessionId:
+          type: [string, "null"]
+          format: uuid
+        requestedByUserId:
+          type: [string, "null"]
+          format: uuid
+        capabilityId:
+          type: string
+        riskClass:
+          type: string
+        payload:
+          description: Arbitrary approval input, retained as raw JSON by Go.
+          x-go-type: apicontract.RawJSON
+          x-go-type-import:
+            path: github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract
+            name: apicontract
+        rationale:
+          type: [string, "null"]
+        status:
+          type: string
+          enum: [pending, executed, approved, rejected, expired]
+        decidedByUserId:
+          type: [string, "null"]
+          format: uuid
+        decisionComment:
+          type: [string, "null"]
+        expiresAt:
+          type: [string, "null"]
+          format: date-time
+        decidedAt:
+          type: [string, "null"]
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        raisedBy:
+          type: object
+          additionalProperties: false
+          required: [name, kind]
+          properties:
+            name:
+              type: string
+            kind:
+              type: string
+              enum: [agent, human]
+        decidedBy:
+          type: [string, "null"]
+        relatedDocuments:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, title]
+            properties:
+              id:
+                type: string
+                format: uuid
+              title:
+                type: string
+    ApprovalDecisionRequest:
+      type: object
+      additionalProperties: false
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [approve, reject]
+        comment:
+          type: string
+          maxLength: 2000
+          x-maxLength-unit: UTF-16 code units
+          description: Optional reviewer comment. The server counts UTF-16 code units, while OpenAPI maxLength counts Unicode code points, so this is an approximate schema bound and the server limit is authoritative. If provided, comment must be a string; null is rejected.
+    ApprovalDecisionSuccess:
+      type: object
+      additionalProperties: false
+      required: [ok, status]
+      properties:
+        ok:
+          type: boolean
+          const: true
+        status:
+          type: string
+          enum: [rejected, executed, approved]
+        result:
+          $ref: "#/components/schemas/ApprovalExecutionResult"
+    ApprovalExecutionResult:
+      type: object
+      additionalProperties: false
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+        data:
+          description: Arbitrary result JSON retained as raw JSON by Go.
+          x-go-type: apicontract.RawJSON
+          x-go-type-import:
+            path: github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract
+            name: apicontract
+        error:
+          type: string
+        pendingApproval:
+          type: boolean
+        approvalId:
+          type: string
+        approvalRationale:
+          type: string
+        replayed:
+          type: boolean
+    ApprovalDecisionFailure:
+      type: object
+      additionalProperties: false
+      required: [ok, error]
+      properties:
+        ok:
+          type: boolean
+          const: false
+        error:
+          type: string
+    TeamResponse:
+      type: object
+      additionalProperties: false
+      required: [members, roles, catalog]
+      properties:
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/TeamMember"
+        roles:
+          type: array
+          items:
+            $ref: "#/components/schemas/TeamRole"
+        catalog:
+          type: array
+          description: Sorted, deduplicated permission keys currently grantable through the team role editor.
+          items:
+            type: string
+    TeamMember:
+      type: object
+      additionalProperties: false
+      required: [userId, name, email, roleKeys]
+      properties:
+        userId:
+          type: string
+          format: uuid
+          x-go-type: string
+        name:
+          type: [string, "null"]
+        email:
+          type: string
+          format: email
+          pattern: "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+          description: ASCII email using the same practical validation profile as Zod 4 string.email().
+          x-go-type: string
+        roleKeys:
+          type: array
+          items:
+            type: string
+    TeamRole:
+      type: object
+      additionalProperties: false
+      required: [id, key, name, isSystem, permissions]
+      properties:
+        id:
+          type: string
+          format: uuid
+          x-go-type: string
+        key:
+          type: string
+          minLength: 1
+        name:
+          type: string
+          minLength: 1
+        isSystem:
+          type: boolean
+        permissions:
+          type: array
+          items:
+            type: string
+    TeamWriteRequest:
+      type: object
+      additionalProperties: true
+      required: [action, intentId]
+      description: >-
+        One of the four action variants listed in x-actionVariants. Go accepts
+        and ignores unknown properties, while Vite emits only the selected
+        action's fields.
+      oneOf:
+        - $ref: "#/components/schemas/TeamCreateRoleRequest"
+        - $ref: "#/components/schemas/TeamSetPermissionsRequest"
+        - $ref: "#/components/schemas/TeamAssignRoleRequest"
+        - $ref: "#/components/schemas/TeamInviteRequest"
+      x-actionVariants:
+        - $ref: "#/components/schemas/TeamCreateRoleRequest"
+        - $ref: "#/components/schemas/TeamSetPermissionsRequest"
+        - $ref: "#/components/schemas/TeamAssignRoleRequest"
+        - $ref: "#/components/schemas/TeamInviteRequest"
+      properties:
+        action:
+          type: string
+          enum: [createRole, setPermissions, assignRole, invite]
+          x-go-type: string
+        intentId:
+          type: string
+          x-maxUtf16Length: 200
+          description: >-
+            Required retry identity. Must contain 1 through 200 UTF-16 code
+            units, have non-whitespace content under ECMAScript trim semantics,
+            and contain no CR, LF, or NUL.
+        key:
+          type: string
+          pattern: "^[a-z][a-z0-9-]*$"
+          description: Required for createRole.
+          x-go-type: json.RawMessage
+        name:
+          type: string
+          minLength: 1
+          x-maxUtf16Length: 60
+          description: Required for createRole; length is measured in UTF-16 code units.
+          x-go-type: json.RawMessage
+        roleId:
+          type: string
+          minLength: 1
+          description: Required for setPermissions, assignRole, and invite.
+          x-go-type: json.RawMessage
+        permissions:
+          type: array
+          maxItems: 200
+          description: Required for setPermissions; empty arrays clear all permissions, and each item must be non-empty.
+          items:
+            type: string
+            minLength: 1
+          x-go-type: json.RawMessage
+        userId:
+          type: string
+          minLength: 1
+          description: Required for assignRole.
+          x-go-type: json.RawMessage
+        email:
+          type: string
+          format: email
+          pattern: "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+          description: Required for invite. Uses the same ASCII practical email profile as Go validation and Zod 4 string.email().
+          x-go-type: json.RawMessage
+    TeamCreateRoleRequest:
+      type: object
+      additionalProperties: true
+      required: [action, intentId, key, name]
+      properties:
+        action:
+          type: string
+          const: createRole
+        intentId:
+          $ref: "#/components/schemas/TeamIntentId"
+        key:
+          type: string
+          pattern: "^[a-z][a-z0-9-]*$"
+        name:
+          type: string
+          minLength: 1
+          x-maxUtf16Length: 60
+    TeamSetPermissionsRequest:
+      type: object
+      additionalProperties: true
+      required: [action, intentId, roleId, permissions]
+      properties:
+        action:
+          type: string
+          const: setPermissions
+        intentId:
+          $ref: "#/components/schemas/TeamIntentId"
+        roleId:
+          type: string
+          minLength: 1
+        permissions:
+          type: array
+          maxItems: 200
+          items:
+            type: string
+            minLength: 1
+    TeamAssignRoleRequest:
+      type: object
+      additionalProperties: true
+      required: [action, intentId, userId, roleId]
+      properties:
+        action:
+          type: string
+          const: assignRole
+        intentId:
+          $ref: "#/components/schemas/TeamIntentId"
+        userId:
+          type: string
+          minLength: 1
+        roleId:
+          type: string
+          minLength: 1
+    TeamInviteRequest:
+      type: object
+      additionalProperties: true
+      required: [action, intentId, email, roleId]
+      properties:
+        action:
+          type: string
+          const: invite
+        intentId:
+          $ref: "#/components/schemas/TeamIntentId"
+        email:
+          type: string
+          format: email
+          pattern: "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        roleId:
+          type: string
+          minLength: 1
+    TeamIntentId:
+      type: string
+      x-maxUtf16Length: 200
+      description: >-
+        Must contain 1 through 200 UTF-16 code units, have non-whitespace
+        content under ECMAScript trim semantics, and contain no CR, LF, or NUL.
+    TeamWriteSuccess:
+      type: object
+      additionalProperties: false
+      required: [ok, data]
+      properties:
+        ok:
+          type: boolean
+          const: true
+        data:
+          description: Action-specific result matching the selected Team action.
+          oneOf:
+            - $ref: "#/components/schemas/TeamCreateRoleResult"
+            - $ref: "#/components/schemas/TeamSetPermissionsResult"
+            - $ref: "#/components/schemas/TeamAssignRoleResult"
+            - $ref: "#/components/schemas/TeamInviteResult"
+          x-go-type: apicontract.RawJSON
+          x-go-type-import:
+            path: github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract
+            name: apicontract
+    TeamWritePending:
+      type: object
+      additionalProperties: false
+      required: [ok, pendingApproval, reason]
+      properties:
+        ok:
+          type: boolean
+          const: false
+        pendingApproval:
+          type: boolean
+          const: true
+        reason:
+          type: string
+    TeamWriteFailure:
+      type: object
+      additionalProperties: false
+      required: [ok, error]
+      properties:
+        ok:
+          type: boolean
+          const: false
+        error:
+          type: string
+    TeamCreateRoleResult:
+      type: object
+      additionalProperties: false
+      required: [roleId]
+      properties:
+        roleId:
+          type: string
+          format: uuid
+          x-go-type: string
+    TeamSetPermissionsResult:
+      type: object
+      additionalProperties: false
+      required: [permissionCount]
+      properties:
+        permissionCount:
+          type: integer
+          minimum: 0
+    TeamAssignRoleResult:
+      type: object
+      additionalProperties: false
+      required: [assigned]
+      properties:
+        assigned:
+          type: boolean
+          description: False is a valid idempotent result when the requested role assignment already exists.
+    TeamInviteResult:
+      type: object
+      additionalProperties: false
+      required: [invitationId, token, expiresAt]
+      properties:
+        invitationId:
+          type: string
+          format: uuid
+          x-go-type: string
+        token:
+          type: string
+          minLength: 1
+        expiresAt:
+          type: string
+          format: date-time
+          description: RFC 3339 UTC expiration timestamp.
+    SetupResponse:
+      type: object
+      additionalProperties: false
+      required: [items, remaining]
+      properties:
+        items:
+          type: array
+          description: >-
+            Current setup checklist entries. The Go runtime currently returns
+            seven entries, while clients should allow the list to grow.
+          items:
+            $ref: "#/components/schemas/SetupItem"
+        remaining:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9007199254740991
+          description: Number of checklist entries whose done value is false.
+    SetupItem:
+      type: object
+      additionalProperties: false
+      required: [id, title, why, href, done]
+      properties:
+        id:
+          type: string
+          minLength: 1
+        title:
+          type: string
+          minLength: 1
+        why:
+          type: string
+        href:
+          type: string
+          pattern: '^/(?![/\\])'
+          description: >-
+            Same-origin application path beginning with a single slash. The
+            Vite runtime validator also rejects paths that resolve outside the
+            application origin.
+        done:
+          type: boolean
+    MyWorkSummaryInput:
+      type: object
+      required: [cards]
+      description: >-
+        Unknown object properties are ignored by the Go decoder. Body size,
+        per-field UTF-16 units, and composed-prompt limits are documented on
+        the operation because JSON Schema maxLength counts Unicode code points,
+        not the UTF-16 units used by the server.
+      properties:
+        cards:
+          type: array
+          minItems: 1
+          maxItems: 30
+          items:
+            $ref: "#/components/schemas/MyWorkSummaryCard"
+    MyWorkSummaryCard:
+      type: object
+      required: [kind, title, detail]
+      description: Unknown object properties are ignored by the Go decoder.
+      properties:
+        kind:
+          type: string
+          minLength: 1
+          description: Limited to 4,096 UTF-16 code units.
+        title:
+          type: string
+          minLength: 1
+          description: Limited to 4,096 UTF-16 code units.
+        detail:
+          type: string
+          description: Limited to 4,096 UTF-16 code units; empty is allowed.
+    MyWorkSummaryResponse:
+      type: object
+      additionalProperties: false
+      required: [brief, model]
+      properties:
+        brief:
+          type: string
+          minLength: 1
+        model:
+          type: string
+          minLength: 1
+          description: Selected model identifier without provider credential data.
+    MyWorkSummaryError:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: string
+        detail:
+          type: string
+          description: Optional sanitized provider or coding-agent failure detail.
+        hint:
+          type: string
+          description: Optional user-facing setup hint; never includes credentials.
+    MyWorkResponse:
+      type: object
+      additionalProperties: false
+      required: [cards, generatedAt]
+      properties:
+        cards:
+          type: array
+          maxItems: 30
+          items:
+            $ref: "#/components/schemas/MyWorkCard"
+        generatedAt:
+          type: string
+          format: date-time
+          description: UTC timestamp when the response was assembled.
+    MyWorkCard:
+      type: object
+      additionalProperties: false
+      required: [kind, id, title, detail, whyItMatters, actionLabel, actionHref, createdAt, rank]
+      properties:
+        kind:
+          type: string
+          enum: [approval, receipt_remainder, signal]
+        id:
+          type: string
+          minLength: 1
+        title:
+          type: string
+          minLength: 1
+        detail:
+          type: string
+        whyItMatters:
+          type: string
+        actionLabel:
+          type: string
+          minLength: 1
+        actionHref:
+          type: string
+          pattern: '^/(?![/\\])'
+          description: Same-origin application path beginning with a single slash.
+        createdAt:
+          type: [string, "null"]
+          format: date-time
+        rank:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+    LedgerResponse:
+      type: object
+      additionalProperties: false
+      required: [events]
+      properties:
+        events:
+          type: array
+          description: Events are ordered by descending sequence.
+          items:
+            $ref: "#/components/schemas/LedgerEvent"
+    LedgerEvent:
+      type: object
+      additionalProperties: false
+      required: [seq, kind, capabilityId, actorType, actorId, sessionId, payload, hash, prevHash, occurredAt]
+      properties:
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+          description: Positive sequence number bounded to JavaScript's exact integer range for client pagination.
+        kind:
+          type: string
+          minLength: 1
+        capabilityId:
+          type: [string, "null"]
+        actorType:
+          type: string
+          minLength: 1
+        actorId:
+          type: [string, "null"]
+        sessionId:
+          type: [string, "null"]
+        payload:
+          description: Arbitrary event payload retained as raw JSON.
+          x-go-type: apicontract.RawJSON
+          x-go-type-import:
+            path: github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract
+            name: apicontract
+        hash:
+          type: string
+          minLength: 1
+        prevHash:
+          type: [string, "null"]
+        occurredAt:
+          type: string
+          format: date-time
+          x-go-type: string
+          description: UTC timestamp formatted with millisecond precision.
+    NotificationsResponse:
+      type: object
+      additionalProperties: false
+      required: [notifications, unreadCount]
+      properties:
+        notifications:
+          type: array
+          items:
+            $ref: "#/components/schemas/NotificationRow"
+        unreadCount:
+          type: integer
+          minimum: 0
+          description: Count of all unread notifications visible to this user, independent of the list limit.
+    NotificationRow:
+      type: object
+      additionalProperties: false
+      required: [id, kind, title, href, readAt, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          x-go-type: string
+        kind:
+          type: string
+        title:
+          type: string
+        href:
+          type: [string, "null"]
+        readAt:
+          type: [string, "null"]
+          format: date-time
+          x-go-type: string
+          description: Nullable UTC timestamp formatted to millisecond precision.
+        createdAt:
+          type: string
+          format: date-time
+          x-go-type: string
+          description: UTC timestamp formatted to millisecond precision.
+    NotificationReadRequest:
+      type: object
+      additionalProperties: false
+      required: [id]
+      properties:
+        id:
+          type: string
+          format: uuid
+          x-go-type: string
+        intentId:
+          type: [string, "null"]
+          x-maxBytes: 200
+          description: >-
+            Optional idempotency intent. Null is treated as omitted. The server
+            enforces 200 UTF-8 bytes and rejects CR, LF, and NUL characters.
+    NotificationReadSuccess:
+      type: object
+      additionalProperties: false
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+          const: true
+    NotificationReadFailure:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Governed capability refusal message.
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: string
+    PendingApprovalResponse:
+      type: object
+      additionalProperties: false
+      required: [pendingApproval, approvalId]
+      properties:
+        pendingApproval:
+          type: boolean
+          const: true
+        approvalId:
+          type: string
+          format: uuid
+    SupportChannelsResponse:
+      type: object
+      additionalProperties: false
+      required: [autoReplyEnabled, greeting, embedToken, canManage]
+      properties:
+        autoReplyEnabled:
+          type: boolean
+        greeting:
+          type: string
+        embedToken:
+          type: [string, "null"]
+        canManage:
+          type: boolean
+    SupportChannelsPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        autoReplyEnabled:
+          type: boolean
+        greeting:
+          type: string
+          minLength: 1
+          maxLength: 300
+        regenerateToken:
+          type: boolean
+          const: true

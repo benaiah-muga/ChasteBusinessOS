@@ -1,0 +1,32 @@
+{
+  "name": "ChasteBusinessOS",
+  "short_name": "Chaste",
+  "description": "Open-source, AI-native business operating system for governed operations.",
+  "lang": "en",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f4efe5",
+  "theme_color": "#171613",
+  "categories": ["business", "productivity", "finance"],
+  "icons": [
+    {
+      "src": "/brand/favicon-64.png",
+      "sizes": "64x64",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/brand/apple-touch-icon.png",
+      "sizes": "240x240",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/brand/chaste-mark-gold.png",
+      "sizes": "256x256",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

@@ -1,0 +1,117 @@
+import { z } from "zod";
+import type { components } from "../generated/business-v1";
+
+const SwitchboardSchema = z.object({
+  catalog: z.array(z.object({
+    id: z.string().min(1),
+    label: z.string(),
+    description: z.string(),
+    href: z.string().nullable(),
+    protected: z.boolean().optional(),
+  }).strict()),
+  enabledModules: z.array(z.string().min(1)),
+  usingDefaults: z.boolean(),
+}).strict();
+
+const invoiceFields = {
+  id: z.string().min(1),
+  number: z.number().int().positive().safe(),
+  customerId: z.string().min(1),
+  customerName: z.string(),
+  status: z.enum(["draft", "sent", "paid", "void"]),
+  currency: z.string().regex(/^[A-Z]{3}$/),
+  totalMinor: z.number().int().safe(),
+  paidMinor: z.number().int().safe(),
+  outstandingMinor: z.number().int().safe(),
+  issuedAt: z.string().datetime({ offset: true }).nullable(),
+};
+
+const GoInvoiceSchema = z.object({
+  ...invoiceFields,
+  creditedMinor: z.number().int().safe(),
+}).strict();
+const GoAccountingInvoicesSchema = z.object({ invoices: z.array(GoInvoiceSchema) }).strict() satisfies z.ZodType<components["schemas"]["AccountingListInvoicesOutput"]>;
+const CapabilityEnvelopeSchema = z.object({ ok: z.literal(true), data: z.unknown() }).strict();
+const CapabilityErrorSchema = z.object({ ok: z.literal(false), error: z.string().max(500) }).strict();
+
+export type AccountingInvoice = Omit<components["schemas"]["AccountingInvoiceRow"], "creditedMinor">;
+
+export class AccountingInvoicesApiError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+    this.name = "AccountingInvoicesApiError";
+  }
+}
+
+export async function fetchAccountingEnabled(signal?: AbortSignal): Promise<boolean> {
+  const { response, body } = await getJson("/api/modules", signal);
+  if (!response.ok) {
+    throw new AccountingInvoicesApiError(response.status, "Could not check whether Accounting is enabled.");
+  }
+
+  const parsed = SwitchboardSchema.safeParse(body);
+  if (!parsed.success) {
+    throw new AccountingInvoicesApiError(response.status, "The module switchboard returned data in an unexpected format.");
+  }
+  const catalogIds = new Set(parsed.data.catalog.map((module) => module.id));
+  if (!catalogIds.has("accounting") || parsed.data.enabledModules.some((id) => !catalogIds.has(id))) {
+    throw new AccountingInvoicesApiError(response.status, "The module switchboard returned an invalid Accounting configuration.");
+  }
+  return parsed.data.enabledModules.includes("accounting");
+}
+
+export async function fetchAccountingInvoices(signal?: AbortSignal): Promise<AccountingInvoice[]> {
+  const request: components["schemas"]["AccountingListInvoicesExecutionRequest"] = {
+    capabilityId: "accounting.listInvoices",
+    input: {},
+  };
+  const { response, body } = await getJson("/api/capabilities/execute", signal, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    const parsedError = CapabilityErrorSchema.safeParse(body);
+    if (response.status === 401) {
+      throw new AccountingInvoicesApiError(401, "Your session has ended. Sign in again to continue.");
+    }
+    if (response.status === 403 || response.status === 422) {
+      throw new AccountingInvoicesApiError(response.status, parsedError.success ? parsedError.data.error : "You do not have permission to view invoices.");
+    }
+    throw new AccountingInvoicesApiError(response.status, response.status >= 500
+      ? "The Accounting service is unavailable. Try again."
+      : parsedError.success ? parsedError.data.error : "The Accounting request could not be completed. Try again.");
+  }
+
+  const envelope = CapabilityEnvelopeSchema.safeParse(body);
+  if (!envelope.success || response.status !== 200) {
+    throw new AccountingInvoicesApiError(response.status, "The Accounting service returned an unexpected capability response.");
+  }
+  const parsed = GoAccountingInvoicesSchema.safeParse(envelope.data.data);
+  if (!parsed.success) {
+    throw new AccountingInvoicesApiError(response.status, "The Accounting service returned invoices in an unexpected format.");
+  }
+  return parsed.data.invoices;
+}
+
+async function getJson(path: string, signal?: AbortSignal, init?: RequestInit): Promise<{ response: Response; body: unknown }> {
+  let response: Response;
+  try {
+    const headers = new Headers(init?.headers);
+    headers.set("accept", "application/json");
+    response = await fetch(path, {
+      ...init,
+      credentials: "same-origin",
+      headers,
+      cache: "no-store",
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
+    });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    const timedOut = error instanceof DOMException && error.name === "TimeoutError";
+    throw new AccountingInvoicesApiError(0, timedOut
+      ? "The Accounting service took too long to respond. Try again."
+      : "Could not reach the Accounting service. Check your connection and try again.");
+  }
+  return { response, body: await response.json().catch(() => null) };
+}

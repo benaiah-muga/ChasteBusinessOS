@@ -1,0 +1,487 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  buildModuleSwitchboardRequest,
+  fetchAiConfig,
+  fetchAgentSoul,
+  fetchBranding,
+  fetchCompositions,
+  fetchModuleSettings,
+  fetchModuleSwitchboard,
+  fetchPolicy,
+  fetchPendingGovernedAttempt,
+  isProtectedModule,
+  PROTECTED_MODULE_IDS,
+  saveAiConfig,
+  saveAgentSoul,
+  sendEmailTest,
+  SettingsApiError,
+  submitGoverned,
+  retryPendingGoverned,
+} from "./settings";
+
+const switchboard = {
+  catalog: [
+    { id: "crm", label: "CRM", description: "Customers and deal pipeline", href: "/crm" },
+    { id: "iam", label: "Identity & access", description: "Roles, permissions, module switchboard", href: "/team", protected: true },
+  ],
+  enabledModules: ["crm", "iam", "routines", "signals"],
+  usingDefaults: true,
+};
+
+const aiConfig = {
+  provider: "nvidia",
+  baseUrl: "https://integrate.api.nvidia.com/v1",
+  models: {
+    primary: "moonshotai/kimi-k2.6",
+    fast: "meta/muse-glimmer-30b",
+    reasoning: "nvidia/nemotron-3-ultra-550b-a55b",
+    embeddings: "nvidia/nv-embedqa-e5-v5",
+  },
+  configured: true,
+  keyHint: "••••1234",
+  source: "workspace",
+};
+
+type Call = [input: RequestInfo | URL, init?: RequestInit | undefined];
+
+function postBodies(fetchMock: { mock: { calls: Call[] } }): Record<string, unknown>[] {
+  return fetchMock.mock.calls
+    .filter(([, init]) => init?.method === "POST")
+    .map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  localStorage.clear();
+  Reflect.deleteProperty(navigator, "locks");
+});
+
+function enableRetryLock() {
+  Object.defineProperty(navigator, "locks", {
+    configurable: true,
+    value: { request: (_name: string, _options: { mode: "exclusive" }, callback: () => unknown) => callback() },
+  });
+}
+
+describe("Vite settings API", () => {
+  it("builds the generated module switchboard request and validates its envelope", () => {
+    expect(buildModuleSwitchboardRequest(["crm"], "attempt-1")).toEqual({
+      modules: ["crm"],
+      intentId: "attempt-1",
+    });
+    expect(() => buildModuleSwitchboardRequest([], "attempt-1")).toThrow(SettingsApiError);
+    expect(() => buildModuleSwitchboardRequest(["crm"], "🙂".repeat(201))).toThrow(SettingsApiError);
+    expect(() => buildModuleSwitchboardRequest(["crm"], "bad\nintent")).toThrow(SettingsApiError);
+  });
+
+  it("reuses the exact routine intent after uncertain transport and clears it only on completion", async () => {
+    enableRetryLock();
+    const scope = { actorId: "actor-1", organizationId: "org-1" };
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError("connection dropped"))
+      .mockResolvedValueOnce(Response.json({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    const action = { action: "create", name: "Daily summary", prompt: "Summarize activity", scheduleText: "0 9 * * *" };
+
+    await expect(submitGoverned("/api/routines", action, undefined, scope)).rejects.toMatchObject({ status: 0 });
+    const saved = await fetchPendingGovernedAttempt(scope);
+    expect(saved).toMatchObject({ path: "/api/routines", action });
+    await expect(submitGoverned("/api/routines", action, undefined, scope)).resolves.toEqual({ kind: "completed", data: { ok: true } });
+
+    const [firstBody, secondBody] = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
+    expect(secondBody).toEqual(firstBody);
+    expect(await fetchPendingGovernedAttempt(scope)).toBeNull();
+  });
+
+  it("blocks a different routine action until the unresolved exact intent is retried", async () => {
+    enableRetryLock();
+    const scope = { actorId: "actor-2", organizationId: "org-2" };
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("connection dropped")));
+    await expect(submitGoverned("/api/routines", { action: "run_now", routineId: "routine-1" }, undefined, scope))
+      .rejects.toMatchObject({ status: 0 });
+    await expect(submitGoverned("/api/routines", { action: "create", name: "Other" }, undefined, scope))
+      .rejects.toMatchObject({ message: expect.stringContaining("Retry that exact change") });
+  });
+
+  it("keeps an unreadable retry marker and blocks fresh routine intents for reconciliation", async () => {
+    enableRetryLock();
+    const scope = { actorId: "actor-corrupt", organizationId: "org-corrupt" };
+    const storageKey = "chaste:governed-retry:v1:actor-corrupt:org-corrupt";
+    localStorage.setItem(storageKey, "not-json");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchPendingGovernedAttempt(scope)).rejects.toMatchObject({
+      message: expect.stringContaining("blocked until this workspace is reconciled"),
+    });
+    await expect(submitGoverned("/api/routines", { action: "create", name: "New routine" }, undefined, scope))
+      .rejects.toMatchObject({ message: expect.stringContaining("blocked until this workspace is reconciled") });
+    expect(localStorage.getItem(storageKey)).toBe("not-json");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps approval-pending routine intents and retries the identical request", async () => {
+    enableRetryLock();
+    const scope = { actorId: "actor-3", organizationId: "org-3" };
+    const pending = { pendingApproval: true, reason: "Approval required" };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json(pending, { status: 202 }))
+      .mockResolvedValueOnce(Response.json({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    const action = { action: "create", name: "Weekly summary", prompt: "Summarize", scheduleText: "0 9 * * 1" };
+
+    await expect(submitGoverned("/api/routines", action, undefined, scope)).resolves.toMatchObject({ kind: "pending" });
+    const original = await fetchPendingGovernedAttempt(scope);
+    await expect(retryPendingGoverned(scope)).resolves.toEqual({ kind: "completed", data: { ok: true } });
+    const [firstBody, secondBody] = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
+    expect(secondBody).toEqual(firstBody);
+    expect(original?.intentId).toBe(firstBody?.intentId);
+    expect(await fetchPendingGovernedAttempt(scope)).toBeNull();
+  });
+
+  it("reads and saves the persona through the exact organization contract", async () => {
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>()
+      .mockResolvedValueOnce(Response.json({ agentSoul: "Be concise." }))
+      .mockResolvedValueOnce(Response.json({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchAgentSoul()).resolves.toBe("Be concise.");
+    await expect(saveAgentSoul("Be thoughtful.")).resolves.toBeUndefined();
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/org", expect.objectContaining({
+      method: "PUT",
+      credentials: "same-origin",
+      headers: { accept: "application/json" },
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/org", expect.objectContaining({
+      method: "PATCH",
+      credentials: "same-origin",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: JSON.stringify({ agentSoul: "Be thoughtful." }),
+    }));
+  });
+
+  it("reads the module switchboard over the authenticated same-origin session", async () => {
+    const fetchMock = vi.fn(async () => Response.json(switchboard));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchModuleSwitchboard()).resolves.toEqual(switchboard);
+    expect(fetchMock).toHaveBeenCalledWith("/api/modules", expect.objectContaining({
+      credentials: "same-origin",
+      headers: { accept: "application/json" },
+    }));
+  });
+
+  it("reads inventory settings with the registered module response shape", async () => {
+    const fetchMock = vi.fn(async () => Response.json({
+      module: "inventory",
+      settings: { defaultUnitLabel: "each", defaultReorderPointUnits: 7 },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchModuleSettings("inventory")).resolves.toEqual({
+      module: "inventory",
+      settings: { defaultUnitLabel: "each", defaultReorderPointUnits: 7 },
+    });
+    expect(fetchMock).toHaveBeenCalledWith("/api/module-settings?module=inventory", expect.objectContaining({
+      credentials: "same-origin",
+      headers: { accept: "application/json" },
+    }));
+    await expect(fetchModuleSettings("bad.module")).rejects.toBeInstanceOf(SettingsApiError);
+  });
+
+  it("treats the platform spine as protected even when the flag is missing", () => {
+    expect([...PROTECTED_MODULE_IDS]).toEqual(["iam", "routines", "signals"]);
+    expect(isProtectedModule(switchboard.catalog[1]!)).toBe(true);
+    expect(isProtectedModule({ id: "routines", label: "Routines", description: "", href: null })).toBe(true);
+    expect(isProtectedModule(switchboard.catalog[0]!)).toBe(false);
+  });
+
+  it("rejects a switchboard payload with unexpected fields and maps refusals", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ...switchboard, surprise: true })));
+    await expect(fetchModuleSwitchboard()).rejects.toMatchObject({
+      name: "SettingsApiError",
+      message: "The settings service returned data in an unexpected format.",
+    });
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "unauthorized" }, { status: 401 })));
+    await expect(fetchModuleSwitchboard()).rejects.toMatchObject({
+      status: 401,
+      message: "Your session has ended. Sign in again to continue.",
+    });
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "forbidden: missing permission: iam.admin" }, { status: 403 })));
+    await expect(fetchModuleSwitchboard()).rejects.toMatchObject({
+      status: 403,
+      message: "You do not have permission to change this workspace setting.",
+    });
+  });
+
+  it("sends an intent id with every governed write and keeps 202 pending", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      Response.json({ ok: true, data: { module: "inventory" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitGoverned("/api/module-settings", { module: "inventory", settings: {} }))
+      .resolves.toEqual({ kind: "completed", data: { ok: true, data: { module: "inventory" } } });
+
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toBe("/api/module-settings");
+    expect(init?.credentials).toBe("same-origin");
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    expect(body).toMatchObject({ module: "inventory", intentId: expect.any(String) });
+    expect(String(body.intentId)).toHaveLength(36);
+  });
+
+  it("accepts the Go module switchboard success envelope", async () => {
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(async () => Response.json({
+      ok: true,
+      data: { enabledModules: ["iam", "crm", "routines", "signals"] },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitGoverned("/api/modules", { modules: ["crm", "iam", "routines", "signals"] }))
+      .resolves.toEqual({
+        kind: "completed",
+        data: { ok: true, data: { enabledModules: ["iam", "crm", "routines", "signals"] } },
+      });
+
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toBe("/api/modules");
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      modules: ["crm", "iam", "routines", "signals"],
+      intentId: expect.any(String),
+    });
+  });
+
+  it("reads the Go branding response with the permission indicator", async () => {
+    const branding = {
+      logoDataUrl: null,
+      accentColor: "#AABBCC",
+      invoiceFooter: "Thanks",
+      layout: "modern",
+    };
+    const fetchMock = vi.fn(async () => Response.json({ branding, canEdit: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchBranding()).resolves.toEqual({ branding, canEdit: true });
+    expect(fetchMock).toHaveBeenCalledWith("/api/branding", expect.objectContaining({
+      credentials: "same-origin",
+      headers: { accept: "application/json" },
+    }));
+  });
+
+  it("accepts the Go branding approval envelope", async () => {
+    const hint = "Branding changes proposed by the workmate wait for approval in the Approvals inbox.";
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ pendingApproval: true, hint }, { status: 202 })));
+
+    await expect(submitGoverned("/api/branding", { accentColor: "#AABBCC", layout: "modern" }))
+      .resolves.toEqual({ kind: "pending", reason: hint });
+  });
+
+  it("surfaces an approval-pending envelope as pending, not as an error or a success", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json(
+      { pendingApproval: true, hint: "Module changes proposed by the workmate wait for approval in the Approvals inbox." },
+      { status: 202 },
+    )));
+
+    await expect(submitGoverned("/api/modules", { modules: ["crm"] }))
+      .resolves.toEqual({
+        kind: "pending",
+        reason: "Module changes proposed by the workmate wait for approval in the Approvals inbox.",
+      });
+  });
+
+  it("refuses a 202 body that is not a recognisable approval envelope", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ queued: true }, { status: 202 })));
+    await expect(submitGoverned("/api/policy", { maxRiskAutonomous: "write" })).rejects.toMatchObject({
+      status: 202,
+      message: "The settings service returned an unexpected approval response.",
+    });
+  });
+
+  it("accepts the exact policy pending and success envelopes", async () => {
+    const hint = "Policy changes proposed by the workmate wait for approval in the Approvals inbox.";
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ pendingApproval: true, hint }, { status: 202 })));
+    await expect(submitGoverned("/api/policy", { maxRiskAutonomous: "write" }))
+      .resolves.toEqual({ kind: "pending", reason: hint });
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { saved: true } })));
+    await expect(submitGoverned("/api/policy", { maxRiskAutonomous: "write" }))
+      .resolves.toEqual({ kind: "completed", data: { ok: true, data: { saved: true } } });
+  });
+
+  it("reports a governed refusal as an error with the server reason", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "identity approval required" }, { status: 422 })));
+    await expect(submitGoverned("/api/modules", { modules: ["crm"] }))
+      .rejects.toBeInstanceOf(SettingsApiError);
+    await expect(submitGoverned("/api/modules", { modules: ["crm"] }))
+      .rejects.toMatchObject({ status: 422, message: "identity approval required" });
+  });
+
+  it("routes runtime inspection through the Go capability and validates its output", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { compositions: [] } }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchCompositions()).resolves.toEqual([]);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
+      method: "POST",
+      cache: "no-store",
+      body: expect.stringContaining('"capabilityId":"harness.listCompositions"'),
+    }));
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { compositions: [{ id: "tampered" }] } })));
+    await expect(fetchCompositions()).rejects.toMatchObject({
+      message: "The Go harness service returned data in an unexpected format.",
+    });
+  });
+
+  it("validates the runtime inspection permission message", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "requires harness.approve permission" }, { status: 403 })));
+    await expect(fetchCompositions()).rejects.toMatchObject({
+      message: "Runtime inspection needs the harness.approve permission.",
+    });
+  });
+
+  it("requires Go policy approvals to be a string list and rejects malformed entries", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+      policy: { maxRiskAutonomous: "write", moneyThresholdMinor: 50_000, requiresApprovalFor: ["identity", "money"] },
+      canEdit: true,
+    })));
+
+    const policy = await fetchPolicy();
+    expect(policy.policy.requiresApprovalFor).toEqual(["identity", "money"]);
+    expect(policy.canEdit).toBe(true);
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+      policy: { maxRiskAutonomous: "write", moneyThresholdMinor: 50_000, requiresApprovalFor: ["identity", 7, "money"] },
+      canEdit: true,
+    })));
+    await expect(fetchPolicy()).rejects.toMatchObject({
+      message: "The settings service returned data in an unexpected format.",
+    });
+  });
+
+  it("keeps only the short key hint from the model configuration contract", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json(aiConfig)));
+    await expect(fetchAiConfig()).resolves.toEqual(aiConfig);
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ...aiConfig, apiKey: "nvapi-secret-value" })));
+    await expect(fetchAiConfig()).rejects.toMatchObject({
+      message: "The settings service returned data in an unexpected format.",
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ...aiConfig, encryptedKey: "ciphertext" })));
+    await expect(fetchAiConfig()).rejects.toMatchObject({
+      message: "The settings service returned data in an unexpected format.",
+    });
+  });
+
+  it("rejects an oversized key hint so a whole credential can never render", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ...aiConfig, keyHint: "••••nvapi-this-is-a-real-key" })));
+    await expect(fetchAiConfig()).rejects.toMatchObject({
+      message: "The settings service returned data in an unexpected format.",
+    });
+  });
+
+  it.each(["\u00a0", "\u2003", "\u2028"])("rejects non-printable or non-ASCII spacing in a key hint", async (suffix) => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ...aiConfig, keyHint: `••••${suffix}` })));
+    await expect(fetchAiConfig()).rejects.toMatchObject({
+      message: "The settings service returned data in an unexpected format.",
+    });
+  });
+
+  it.each(["a", "ab", "abc", "秘密"])("accepts a masked API key hint ending in %s", async (suffix) => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ...aiConfig, keyHint: `••••${suffix}` })));
+    await expect(fetchAiConfig()).resolves.toMatchObject({ keyHint: `••••${suffix}` });
+  });
+
+  it("saves model configuration with an idempotency intent id", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      Response.json({ ok: true, ...aiConfig, configured: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await saveAiConfig({ provider: "nvidia", baseUrl: aiConfig.baseUrl, models: aiConfig.models, apiKey: "  nvapi-typed  " });
+    expect(result).toEqual({ kind: "completed", config: { ok: true, ...aiConfig, configured: true } });
+    const body = postBodies(fetchMock)[0] as Record<string, unknown>;
+    expect(body).toMatchObject({
+      provider: "nvidia",
+      baseUrl: aiConfig.baseUrl,
+      models: aiConfig.models,
+      apiKey: "nvapi-typed",
+    });
+    expect(body.intentId).toEqual(expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i));
+    expect(body.updatedAt).toEqual(expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/));
+  });
+
+  it("reuses caller supplied intent and timestamp values on exact retries", async () => {
+    const intentId = "aaaaaaaa-0000-4000-8000-000000000001";
+    const updatedAt = "2026-10-11T20:30:40.000Z";
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, ...aiConfig }));
+    vi.stubGlobal("fetch", fetchMock);
+    const retryableInput = { provider: "nvidia", baseUrl: aiConfig.baseUrl, models: aiConfig.models, intentId, updatedAt };
+    await saveAiConfig(retryableInput);
+    await saveAiConfig(retryableInput);
+    const [firstRequest, retryRequest] = postBodies(fetchMock);
+    expect(firstRequest).toMatchObject({ intentId, updatedAt });
+    expect(retryRequest).toEqual(firstRequest);
+  });
+
+  it("rejects credentials in the success DTO", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, ...aiConfig, credential: "plaintext-secret" })));
+    await expect(saveAiConfig({ provider: "nvidia", baseUrl: aiConfig.baseUrl, models: aiConfig.models }))
+      .rejects.toMatchObject({ message: "The settings service returned an unexpected action response." });
+  });
+
+  it("keeps an approval-gated credential change pending", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+      ok: false,
+      pendingApproval: true,
+      approvalId: "aaaaaaaa-0000-4000-8000-000000000002",
+      reason: "secret approval required",
+      error: "secret approval required",
+    }, { status: 202 })));
+    await expect(saveAiConfig({ provider: "nvidia", baseUrl: "https://a.example/v1", models: aiConfig.models, clearApiKey: true }))
+      .resolves.toEqual({ kind: "pending", reason: "secret approval required" });
+  });
+
+  it("rejects an invalid model configuration before touching the network", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(saveAiConfig({
+      provider: "nvidia",
+      baseUrl: "https://a.example/v1",
+      models: { ...aiConfig.models, primary: "   " },
+    })).rejects.toMatchObject({ message: "The model configuration contains invalid details." });
+    await expect(saveAiConfig({ provider: "nvidia", baseUrl: "not-a-url", models: aiConfig.models })).rejects.toBeInstanceOf(SettingsApiError);
+    await expect(saveAiConfig({ provider: "nvidia", baseUrl: "https://a.example/v1", models: aiConfig.models, apiKey: "   " })).rejects.toMatchObject({
+      message: "The model configuration contains invalid details.",
+    });
+    await expect(saveAiConfig({
+      provider: "nvidia",
+      baseUrl: "https://a.example/v1",
+      models: aiConfig.models,
+      intentId: "not-a-uuid",
+    })).rejects.toMatchObject({ message: "The model configuration contains invalid details." });
+    await expect(saveAiConfig({
+      provider: "nvidia",
+      baseUrl: "https://a.example/v1",
+      models: aiConfig.models,
+      updatedAt: "2026-10-11T20:30:40+03:00",
+    })).rejects.toMatchObject({ message: "The model configuration contains invalid details." });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("validates module names and email recipients on the client", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchModuleSettings("Not A Module")).rejects.toMatchObject({ message: "That module name is not valid." });
+    await expect(sendEmailTest("not-an-email")).rejects.toMatchObject({ message: "Enter a valid email address first." });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("reports a failed SMTP proof send instead of claiming success", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ sent: false, error: "SMTP_HOST is not set" }, { status: 422 })));
+    await expect(sendEmailTest("ops@example.com")).rejects.toMatchObject({ status: 422, message: "SMTP_HOST is not set" });
+  });
+});

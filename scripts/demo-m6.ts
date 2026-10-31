@@ -15,8 +15,7 @@ import {
   users,
 } from "@chaste/db";
 import { formatMinor } from "@chaste/erp-core";
-import { buildExecutor, buildRegistry } from "../apps/web/src/server/kernel";
-import { runOnboarding } from "../apps/web/src/server/onboarding";
+import { buildExecutor, buildRegistry, runOnboarding } from "./lib/go-driver";
 
 let passed = 0;
 function ok(label: string, condition?: boolean) {
@@ -44,7 +43,7 @@ async function main() {
   const { orgId } = await runOnboarding(db, {
     userId: owner.id,
     userEmail: owner.email,
-    orgName: "M6 Everything Co",
+    orgName: `M6 Everything Co ${Date.now()}`,
     businessDescription: "Retail and wholesale hardware store testing teams, inventory, matching, and creator mode.",
   });
   const ownerCtx = {
@@ -57,12 +56,12 @@ async function main() {
   // ── 1. TEAMS & RBAC ────────────────────────────────────────────────
   console.log("\n── teams & rbac ──");
 
-  const clerk = await executor.execute("iam.createRole", ownerCtx, { key: "clerk", name: "Clerk" });
-  ok("role creation is identity-class and was gated for approval");
-  void clerk;
-  // createRole is identity → forced approval even for the owner. Approve it.
+  await executor.execute("iam.createRole", agentCtx, { key: "clerk", name: "Clerk" });
+  // Agent identity changes need human approval; a human acting for the
+  // organization executes directly under their own authority.
   const pending = (await db.select().from(approvals).where(and(eq(approvals.orgId, orgId), eq(approvals.status, "pending")))).at(-1);
-  if (!pending) throw new Error("createRole did not gate");
+  if (!pending) throw new Error("agent createRole did not gate");
+  ok("agent role creation is identity-class and gated for approval");
   const approvedRole = await executor.execute("iam.createRole", ownerCtx, pending.payload, {
     approvedApprovalId: pending.id,
   });
@@ -74,7 +73,6 @@ async function main() {
     "iam.updateRolePermissions",
     ownerCtx,
     { roleId, permissions: ["inventory.read", "pos.sell"] },
-    { approvedApprovalId: (await db.select().from(approvals).where(and(eq(approvals.orgId, orgId), eq(approvals.status, "pending")))).at(-1)!.id },
   );
   ok(`permissions set on clerk role (${setPerms.data?.permissionCount})`);
 
@@ -121,9 +119,10 @@ async function main() {
   const itemId = item.data!.itemId as string;
   ok(`item created ${itemId.slice(0, 8)}`);
 
-  // Receive goods against a purchase order.
+  // Receive goods against a purchase order. A purchase order is a money
+  // commitment, so the owner commits it; the agent still performs the receipt.
   const vendor = await executor.execute("purchasing.createVendor", agentCtx, { name: "Lamp Parts Ltd" });
-  const po = await executor.execute("purchasing.createPurchaseOrder", agentCtx, {
+  const po = await executor.execute("purchasing.createPurchaseOrder", ownerCtx, {
     vendorId: vendor.data!.vendorId as string,
     lines: [{ description: "Desk lamp", quantity: 20_000, unitPriceMinor: 3_000, sku: "LAMP-01" }],
   });
@@ -240,7 +239,7 @@ async function main() {
       title: "Add low-stock webhook to purchasing module",
       summary:
         "When a POS sale drives an item below its reorder point, POST a JSON event to NOTIFICATION_WEBHOOK_URL so suppliers can be pinged automatically. Uses the existing notification sink.",
-      diffText: "--- a/modules/pos/src/index.ts\n+++ b/modules/pos/src/index.ts\n@@ -1,3 +1,4 @@\n+// check reorder after sale",
+      diffText: "--- a/apps/api/internal/capability/generated_pos_reorder_webhook.go\n+++ b/apps/api/internal/capability/generated_pos_reorder_webhook.go\n@@ -1,3 +1,4 @@\n+// check reorder after sale",
       testEvidence: "demo:m5 still passes; added unit test for threshold boundary",
       riskAssessment: "Low: additive notification only, no postings change. Worst case a duplicate supplier ping.",
     },

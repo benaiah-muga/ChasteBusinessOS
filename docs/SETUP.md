@@ -13,14 +13,14 @@ then follow the common steps. You need a database, but you do *not* need Docker.
 
 | Tool | Version | Check | Notes |
 |---|---|---|---|
-| **Node.js** | 24 (CI runs 24; Next.js 16 requires ≥ 20.9) | `node -v` | |
+| **Node.js** | 24 (matches CI) | `node -v` | |
 | **pnpm** | 11 | `pnpm -v` | `corepack enable && corepack prepare pnpm@11.9.0 --activate` |
 | **Git** | any recent | `git --version` | |
 | **Postgres** | 16 **with pgvector** | - | one of the three paths below |
 | **A model provider key** | - | - | **optional to boot**, see [§5](#5-optional-the-ai-provider-key) |
 
-Everything else (TypeScript, Next.js, Drizzle, Vitest) is installed by
-`pnpm install`.
+Everything else (TypeScript, Drizzle, Vitest) is installed by `pnpm install`;
+the Go toolchain is pinned in `.go-version`.
 
 ### What pgvector is for
 
@@ -77,12 +77,13 @@ To run the production-shaped web image and database together:
 ```sh
 cp .env.example .env      # set BETTER_AUTH_SECRET
 docker compose up -d --build
-docker compose ps          # app and db should be healthy
+docker compose ps          # api, web, and db should be healthy
 curl http://localhost:3000/api/health
-docker compose logs -f app
+docker compose logs -f web
 ```
 
-The web container applies pending migrations before serving in production.
+The `migrate-schema` and `migrate` one-shot services apply schema migrations
+and runtime-role grants before the API and web containers report healthy.
 The app uses `db:5432` inside Compose while host-side commands continue to use
 `localhost:5433`. Set `CHASTE_WEB_PORT` or `CHASTE_DB_PORT` when those host
 ports are already in use. `node scripts/verify-docker.mjs` runs an isolated
@@ -180,17 +181,26 @@ BETTER_AUTH_SECRET=""
 
 ```sh
 pnpm --filter @chaste/db db:migrate
+pnpm db:provision-runtime
 ```
 
-You can skip this: the web server applies pending migrations once at boot
-before serving requests, serialized across instances by a Postgres advisory
-lock. Running it by hand just means you see errors sooner and in isolation.
+The provisioning command creates or repairs the dedicated `chaste_app`
+database role used by Go. Keep `DATABASE_URL` for migrations and the existing
+application runtime. Set `GO_DATABASE_URL` to the matching `chaste_app` URL.
+Production also needs a strong `CHASTE_APP_DB_PASSWORD`; provisioning fails
+closed when it is missing. The Go API refuses to start with a superuser,
+`BYPASSRLS` role, or a role with additional memberships.
+
+For demo verification, set `GO_DATABASE_URL` to the provisioned `chaste_app`
+connection and set `GO_INTERNAL_AUTH_SECRET` to at least 32 bytes. Generate a
+value with `openssl rand -hex 32` and place it in `.env`. Demo scripts run
+through the authenticated Go assertion bridge against a running `pnpm dev:api`
+instance.
 
 A `pg_dump` snapshot is taken before every migration into
 `packages/db/backups/` (newest 10 kept), so a bad migration is recoverable.
 See the *Upgrading* section of [README.md](../README.md) for the restore
-procedure and the `CHASTE_STRICT_MIGRATION_BACKUP` / `AUTO_MIGRATE_ON_BOOT`
-controls.
+procedure and the `CHASTE_STRICT_MIGRATION_BACKUP` control.
 
 ---
 
@@ -200,8 +210,10 @@ controls.
 pnpm dev
 ```
 
-Open <http://localhost:3000>. If port 3000 is taken, Next picks the next free
-port and prints it - check the terminal.
+Open <http://localhost:3000>. This is the React/Vite app, the only web runtime
+since the Next.js app was retired. Vite proxies every API request to Go, so
+run the Go API in another terminal with `pnpm dev:api` (port 8080 by default).
+Use `localhost` so the browser sends the existing host-scoped session cookie.
 
 Then:
 
@@ -222,8 +234,11 @@ pnpm demo:slice                            # invoice → gated payment → appro
 pnpm demo:m5                               # POS session → sale → drawer variance
 ```
 
-`demo:m5` needs no model key. `demo:slice` drives the real agent, so it needs
-one. Full list in [README.md](../README.md#demo-proofs).
+`demo:m5` and the `demo:slice` proof need no model key. `demo:slice` runs
+agent-context actions through the capability pipeline without calling a model.
+Start the Go API in another terminal with `pnpm dev:api` before running any
+demo; every proof runs through the authenticated Go assertion bridge. Full list
+in [README.md](../README.md#demo-proofs).
 
 ---
 
@@ -237,7 +252,7 @@ you lose without one:
 |---|---|
 | Sign-up, onboarding, all business modules | Agent chat and tool calls |
 | Ledger postings, approvals, reports | `askYourBusiness`, `explainChange` narration |
-| `demo:m5`, `demo:m9`, and other deterministic proofs | `demo:slice`, `demo:m7`, embedding-based memory search |
+| `demo:slice`, `demo:m5`, `demo:m9`, and other deterministic proofs | `demo:m7`, embedding-based memory search |
 
 Onboarding degrades gracefully: if embedding fails, a zero vector is stored and
 retrieval falls back to keyword search rather than erroring.
@@ -245,8 +260,8 @@ retrieval falls back to keyword search rather than erroring.
 To enable the agent, add one provider to `.env`:
 
 ```sh
-NVIDIA_API_KEY=""      # default; free tier at build.nvidia.com
-# or set MODEL_PROVIDER to openrouter | groq | mistral | zai and supply that key
+DEEPSEEK_API_KEY=""   # default; OpenAI-compatible DeepSeek chat
+# or set MODEL_PROVIDER to nvidia | openrouter | groq | mistral | zai and supply that key
 ```
 
 ---
@@ -262,13 +277,29 @@ NVIDIA_API_KEY=""      # default; free tier at build.nvidia.com
 | `password authentication failed for user "chaste"` | Role doesn't exist or password mismatch | Recreate the role; a stale volume from an earlier run keeps old credentials - `docker compose down -v` |
 | `Tenant or user not found` (Neon/Supabase) | Wrong host or branch string | Re-copy the connection string from the dashboard |
 | Migrations hang | Another instance holds the advisory lock | Stop other dev servers; check `pg_stat_activity` |
-| Port 3000 in use | | Next auto-selects the next free port - read the terminal output |
+| Port 3000 in use | Vite uses a strict local port | Stop the conflicting service before running `pnpm dev` |
 | Sign-up succeeds, then loops back to login | `BETTER_AUTH_SECRET` empty or changed | Set a stable secret, restart |
+| Policy screen shows an upstream error | Go API stopped or unreachable | Start `pnpm dev:api` |
+| Ledger screen shows an upstream error | Go API stopped or unreachable | Start `pnpm dev:api` |
+| Organization switching shows an upstream error | Go API unavailable or `GO_INTERNAL_AUTH_SECRET` missing | Start `pnpm dev:api` and set a 32-byte `GO_INTERNAL_AUTH_SECRET` |
+| Approval decision shows an upstream error | Go API unavailable or the outcome could not be confirmed | Start `pnpm dev:api`; refresh the approval queue before deciding again |
+| Projects shows an upstream error | Go API unavailable | Start `pnpm dev:api` |
+| A business write shows an upstream error | The Go API is stopped or unreachable; writes are Go-owned and fail closed | Start `pnpm dev:api`; check the record before retrying an uncertain write |
+| HR Overview report shows an upstream error | Go is unavailable or returned an error | Start `pnpm dev:api` and check `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` and `GO_SESSION_CAPABILITY_ROUTE=1`; Overview reads fail closed |
+| Tax return filing shows an upstream error | Go is unavailable or the write outcome could not be confirmed | Start `pnpm dev:api`; check the return before retrying an uncertain write |
+| Leave or time write shows an upstream error | Go is unavailable or the write outcome could not be confirmed | Start `pnpm dev:api`; check the request or entry before retrying an uncertain write |
+| Payroll or applicant write shows an upstream error | Go is unavailable or the write outcome could not be confirmed | Start `pnpm dev:api`; check the run or applicant before retrying an uncertain write |
+| AP aging read shows an upstream error | The API capability slice is off, or Go is unavailable | Set `GO_PURCHASING_AP_AGING_READS=1` on the API and start `pnpm dev:api` |
+| Analytics report generation fails | The Go report route is unmounted or Go is unavailable | Leave `GO_ANALYTICS_REPORT_ROUTE` and `CHASTE_GO_ANALYTICS_REPORT_ROUTE` unset or `1`, and start `pnpm dev:api` |
+| Vite inventory reads show an upstream error | The Go inventory reader is unmounted or unavailable | Start `pnpm dev:api` and confirm `GO_INVENTORY_READ_ROUTE` is unset or not `0`; setting it to `0` unmounts the handler. Vite routes catalog and SKU history reads to Go and returns Go errors directly without fallback |
+| Vite Documents library fails | The Go service is unavailable or ingested-document reads are explicitly disabled | Start `pnpm dev:api` and confirm `GO_DOCUMENT_INGESTED_READS` is unset or not `0`; Go errors do not retry elsewhere |
+| Vite authored document version history or compare preview fails | Go is unavailable, returned invalid data, or version reads are explicitly disabled | Start `pnpm dev:api` and confirm `GO_DOCUMENTS_VERSION_READS` is unset or not `0`; Go errors do not retry elsewhere |
+| Vite editor detail fails | Go is unavailable, returned invalid data, or editor detail is explicitly disabled | Start `pnpm dev:api` and confirm `GO_DOCUMENTS_EDITOR_READS` and `GO_DOCUMENTS_VERSION_READS` are unset or not `0`; Go errors do not retry elsewhere |
+| Document version history shows an upstream error | Go is unavailable or returned an invalid response | Start `pnpm dev:api`; set `GO_DOCUMENTS_VERSION_READS=0` only to intentionally disable these reads |
 | `NVIDIA_API_KEY is not set` at runtime | No provider key | Expected without one - see [§5](#5-optional-the-ai-provider-key) |
 
 **Still stuck?** The `packages/db` package has `db:studio` (Drizzle Studio) for
-inspecting the schema, and `LOG_LEVEL=debug` in `.env` makes the server
-verbose.
+inspecting the schema, and the Go API logs structured JSON to stdout.
 
 ---
 
@@ -282,7 +313,7 @@ verbose.
 | Generate a migration after a schema change | `pnpm --filter @chaste/db db:generate` |
 | Inspect the database | `pnpm --filter @chaste/db db:studio` |
 | Run one milestone proof | `pnpm demo:m9 fulfillment` |
-| Production build | `pnpm build && pnpm start` |
+| Production-shaped stack | `docker compose up -d --build` |
 | Stop everything (Docker path) | `docker compose down` |
 
 Before opening a PR, read [CONTRIBUTING.md](../CONTRIBUTING.md) - in particular

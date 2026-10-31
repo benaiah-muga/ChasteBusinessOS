@@ -1,0 +1,150 @@
+.marketplace-page {
+  display: grid;
+  gap: 1.25rem;
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+.marketplace-header h1 {
+  margin: 0.2rem 0;
+  font-size: 1.65rem;
+  letter-spacing: -0.035em;
+}
+
+.marketplace-header > p:last-child,
+.marketplace-listing > p,
+.marketplace-empty p {
+  color: #64706f;
+}
+
+.marketplace-panel,
+.marketplace-listing,
+.marketplace-empty {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1.25rem;
+  border: 1px solid #dfe5df;
+  border-radius: 0.9rem;
+  background: #fff;
+  box-shadow: 0 8px 24px rgb(23 38 31 / 4%);
+}
+
+.marketplace-panel h2,
+.marketplace-listing h2,
+.marketplace-empty h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.marketplace-panel label {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: #37433f;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.marketplace-panel textarea,
+.marketplace-panel input {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid #cbd5cf;
+  border-radius: 0.55rem;
+  padding: 0.65rem 0.75rem;
+  color: #18221e;
+  background: #fff;
+  font: inherit;
+}
+
+.marketplace-panel textarea {
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+}
+
+.marketplace-credentials,
+.marketplace-listings {
+  display: grid;
+  gap: 1rem;
+}
+
+.marketplace-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.marketplace-help,
+.marketplace-metadata {
+  margin: 0;
+  color: #718078;
+  font-size: 0.78rem;
+}
+
+.marketplace-listing-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.marketplace-status {
+  border-radius: 999px;
+  padding: 0.25rem 0.65rem;
+  color: #315d7a;
+  background: #e6f2fb;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.marketplace-status-installed {
+  color: #276047;
+  background: #e5f5eb;
+}
+
+.marketplace-notice {
+  border: 1px solid #d6e0d9;
+  border-radius: 0.65rem;
+  padding: 0.75rem 1rem;
+  background: #f7faf7;
+}
+
+.marketplace-notice-success,
+.marketplace-valid {
+  color: #276047;
+}
+
+.marketplace-notice-pending {
+  color: #775d23;
+  background: #fff9e9;
+}
+
+.marketplace-notice-error,
+.marketplace-invalid {
+  color: #9d3434;
+}
+
+.marketplace-valid,
+.marketplace-invalid {
+  font-size: 0.84rem;
+}
+
+.shell-button-secondary {
+  color: #26352e;
+  border-color: #cbd5cf;
+  background: #fff;
+}
+
+@media (min-width: 48rem) {
+  .marketplace-page {
+    padding: 2rem;
+  }
+
+  .marketplace-credentials,
+  .marketplace-listings {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

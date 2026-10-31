@@ -51,8 +51,12 @@ function dayFromName(word: string): number | null {
  * structure the text or reject the input.
  */
 export function parseScheduleText(raw: string): ParsedSchedule {
-  const text = raw.trim().toLowerCase();
+  let text = raw.trim().toLowerCase();
   if (!text) return { ok: false };
+
+  if (["twice a day", "twice daily", "two times a day"].includes(text)) {
+    text = "every 12 hours";
+  }
 
   // "every N minutes/hours", "hourly", "every half/quarter hour"
   let minutes: number | null = null;
@@ -72,6 +76,15 @@ export function parseScheduleText(raw: string): ParsedSchedule {
       return { ok: false };
     }
     const schedule: RoutineSchedule = { kind: "interval", everyMinutes: minutes };
+    return { ok: true, schedule, normalized: describeSchedule(schedule) };
+  }
+
+  // "each morning at 8" and "every morning at 8"
+  const morning = /^(?:each|every) morning\s+(?:at\s+)?(.+)$/.exec(text);
+  if (morning) {
+    const atTime = parseTime(morning[1]!);
+    if (!atTime) return { ok: false };
+    const schedule: RoutineSchedule = { kind: "daily", atTime };
     return { ok: true, schedule, normalized: describeSchedule(schedule) };
   }
 

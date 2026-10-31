@@ -1,0 +1,680 @@
+import { z } from "zod";
+import type { components } from "../generated/business-v1";
+
+/**
+ * Settings client for the Vite app. Every governed write carries an
+ * `intentId` for idempotency and an HTTP 202 is surfaced as `pending`, never
+ * as an error and never as a silent success.
+ */
+
+const READ_TIMEOUT_MS = 15_000;
+const WRITE_TIMEOUT_MS = 20_000;
+
+export class SettingsApiError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+    this.name = "SettingsApiError";
+  }
+}
+
+function requestSignal(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
+
+const ErrorBodySchema = z.object({
+  error: z.string().optional(),
+  message: z.string().optional(),
+  hint: z.string().optional(),
+});
+
+async function readJson(response: Response): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch {
+    throw new SettingsApiError(response.status, "The settings service returned an unreadable response.");
+  }
+}
+
+function usableServerMessage(raw: unknown): string | undefined {
+  const body = ErrorBodySchema.safeParse(raw);
+  const message = body.success ? body.data.error ?? body.data.message ?? body.data.hint : undefined;
+  if (!message || message.length > 240 || /[{}<>]/.test(message)) return undefined;
+  return message;
+}
+
+function errorMessage(status: number, raw: unknown): string {
+  const serverMessage = usableServerMessage(raw);
+  if (status === 401) return "Your session has ended. Sign in again to continue.";
+  if (status === 403) {
+    return serverMessage?.includes("harness.approve")
+      ? "Runtime inspection needs the harness.approve permission."
+      : "You do not have permission to change this workspace setting.";
+  }
+  if (status === 404) return "That setting is no longer available. Refresh and try again.";
+  if (status === 409) return "The workspace changed elsewhere. Refresh and try again.";
+  if (status >= 500) return "The settings service is unavailable. Try again.";
+  return serverMessage ?? "The settings request could not be completed. Check the details and try again.";
+}
+
+interface RawResult {
+  response: Response;
+  body: unknown;
+}
+
+async function request(path: string, init: RequestInit, signal?: AbortSignal): Promise<RawResult> {
+  let response: Response;
+  const method = init.method ?? "GET";
+  try {
+    response = await fetch(path, {
+      ...init,
+      credentials: "same-origin",
+      headers: {
+        accept: "application/json",
+        ...(init.body ? { "content-type": "application/json" } : {}),
+        ...init.headers,
+      },
+      signal: requestSignal(signal, method === "GET" ? READ_TIMEOUT_MS : WRITE_TIMEOUT_MS),
+    });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    if (error instanceof DOMException && error.name === "TimeoutError") {
+      throw new SettingsApiError(0, "The settings service took too long to respond. Try again.");
+    }
+    throw new SettingsApiError(0, "Could not reach the settings service. Check your connection and try again.");
+  }
+  return { response, body: await readJson(response) };
+}
+
+async function read<T>(path: string, schema: z.ZodType<T>, init: RequestInit = {}, signal?: AbortSignal): Promise<T> {
+  const { response, body } = await request(path, init, signal);
+  if (!response.ok) throw new SettingsApiError(response.status, errorMessage(response.status, body));
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) throw new SettingsApiError(response.status, "The settings service returned data in an unexpected format.");
+  return parsed.data;
+}
+
+/* --------------------------------------------------------------- modules -- */
+
+const ModuleInfoSchema: z.ZodType<components["schemas"]["ModuleInfo"]> = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  description: z.string(),
+  href: z.string().nullable(),
+  protected: z.boolean().optional(),
+}).strict();
+
+const ModuleSwitchboardSchema: z.ZodType<components["schemas"]["ModuleSwitchboardResponse"]> = z.object({
+  catalog: z.array(ModuleInfoSchema),
+  enabledModules: z.array(z.string()),
+  usingDefaults: z.boolean(),
+}).strict();
+
+/**
+ * Platform spine, mirrored from the legacy module catalog so the client can
+ * refuse to switch a core module off even if the server ever omits the flag.
+ * `settings` has no catalog row at all, which is why it stays reachable no
+ * matter how the switchboard is set.
+ */
+export const PROTECTED_MODULE_IDS = ["iam", "routines", "signals"] as const;
+
+export type ModuleInfo = components["schemas"]["ModuleInfo"];
+export type ModuleSwitchboard = components["schemas"]["ModuleSwitchboardResponse"];
+
+export function isProtectedModule(module: ModuleInfo): boolean {
+  return module.protected === true || (PROTECTED_MODULE_IDS as readonly string[]).includes(module.id);
+}
+
+export function fetchModuleSwitchboard(signal?: AbortSignal): Promise<ModuleSwitchboard> {
+  return read("/api/modules", ModuleSwitchboardSchema, {}, signal);
+}
+
+const ModuleSwitchboardModulesSchema = z.array(z.string().min(1)).min(1);
+const ModuleSwitchboardActionSchema = z.object({ modules: ModuleSwitchboardModulesSchema }).strict();
+
+export function buildModuleSwitchboardRequest(
+  modules: string[],
+  intentId: string,
+): components["schemas"]["ModuleSwitchboardRequest"] {
+  if (
+    !ModuleSwitchboardModulesSchema.safeParse(modules).success ||
+    Array.from(intentId).length > 200 || /[\r\n\0]/.test(intentId)
+  ) {
+    throw new SettingsApiError(0, "The module switchboard request contains invalid details.");
+  }
+  return { modules: [...modules], intentId };
+}
+
+const ModuleSettingsReadSchema = z.object({
+  module: z.string(),
+  settings: z.record(z.string(), z.unknown()),
+}).strict();
+
+export type ModuleSettingsRead = z.infer<typeof ModuleSettingsReadSchema>;
+
+const MODULE_ID_PATTERN = /^[a-z][a-z0-9_-]{0,39}$/;
+
+export async function fetchModuleSettings(module: string, signal?: AbortSignal): Promise<ModuleSettingsRead> {
+  if (!MODULE_ID_PATTERN.test(module)) throw new SettingsApiError(0, "That module name is not valid.");
+  return read(`/api/module-settings?module=${encodeURIComponent(module)}`, ModuleSettingsReadSchema, {}, signal);
+}
+
+/* ---------------------------------------------------------------- policy -- */
+
+const PolicySchema = z.object({
+  maxRiskAutonomous: z.string(),
+  moneyThresholdMinor: z.number().int(),
+  requiresApprovalFor: z.array(z.string()),
+}).strict();
+
+const PolicyReadSchema = z.object({
+  policy: PolicySchema,
+  canEdit: z.boolean(),
+}).strict();
+
+export type Policy = z.infer<typeof PolicySchema>;
+export type PolicyRead = z.infer<typeof PolicyReadSchema>;
+
+export const POLICY_RISKS = [
+  { id: "read", label: "Read" },
+  { id: "write", label: "Write" },
+  { id: "money", label: "Money" },
+  { id: "identity", label: "Identity" },
+  { id: "destructive", label: "Destructive" },
+] as const;
+
+export function fetchPolicy(signal?: AbortSignal): Promise<PolicyRead> {
+  return read("/api/policy", PolicyReadSchema, {}, signal);
+}
+
+/* ---------------------------------------------------------- ai + secrets -- */
+
+const AiModelsSchema = z.object({
+  primary: z.string().trim().min(1).max(200),
+  fast: z.string().trim().min(1).max(200),
+  reasoning: z.string().trim().min(1).max(200),
+  embeddings: z.string().trim().min(1).max(200),
+}).strict();
+
+/**
+ * The public model configuration carries only a masked key hint. Strict
+ * shapes keep unexpected fields carrying credential material out of React.
+ */
+const AiConfigSchema = z.object({
+  provider: z.string().min(1),
+  baseUrl: z.string(),
+  models: AiModelsSchema,
+  configured: z.boolean(),
+  keyHint: z.string().regex(/^•{4}(?: |[^\p{C}\p{Zs}\p{Zl}\p{Zp}]){1,4}$/u).nullable(),
+  source: z.enum(["workspace", "environment"]),
+}).strict();
+
+const AiConfigSaveSchema = AiConfigSchema.extend({ ok: z.literal(true) }).strict();
+
+export type AiModels = z.infer<typeof AiModelsSchema>;
+export type AiConfig = z.infer<typeof AiConfigSchema>;
+export type AiSaveOutcome =
+  | { kind: "completed"; config: AiConfig }
+  | { kind: "pending"; reason: string };
+
+export const AI_PROVIDER_IDS = ["nvidia", "openrouter", "groq", "mistral", "zai", "openai", "deepseek", "custom"] as const;
+export type AiProviderId = (typeof AI_PROVIDER_IDS)[number];
+
+export const AI_PROVIDER_OPTIONS: ReadonlyArray<{ id: AiProviderId; label: string; baseUrl: string }> = [
+  { id: "nvidia", label: "NVIDIA NIM", baseUrl: "https://integrate.api.nvidia.com/v1" },
+  { id: "openrouter", label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1" },
+  { id: "groq", label: "Groq", baseUrl: "https://api.groq.com/openai/v1" },
+  { id: "mistral", label: "Mistral", baseUrl: "https://api.mistral.ai/v1" },
+  { id: "zai", label: "Z.ai (GLM)", baseUrl: "https://api.z.ai/api/paas/v4" },
+  { id: "openai", label: "OpenAI", baseUrl: "https://api.openai.com/v1" },
+  { id: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com" },
+  { id: "custom", label: "Custom OpenAI-compatible", baseUrl: "" },
+];
+
+export const DEFAULT_AI_MODELS: AiModels = {
+  primary: "deepseek-chat",
+  fast: "deepseek-chat",
+  reasoning: "deepseek-reasoner",
+  embeddings: "nvidia/nv-embedqa-e5-v5",
+};
+
+export function isAiProviderId(value: string): value is AiProviderId {
+  return (AI_PROVIDER_IDS as readonly string[]).includes(value);
+}
+
+export function fetchAiConfig(signal?: AbortSignal): Promise<AiConfig> {
+  return read("/api/ai-config", AiConfigSchema, {}, signal);
+}
+
+const AiSaveBodySchema = z.object({
+  provider: z.string().min(1),
+  // Mirrors the route: a custom provider still needs a concrete endpoint.
+  baseUrl: z.string().url().max(500),
+  models: AiModelsSchema,
+  apiKey: z.string().trim().min(1).max(1000).optional(),
+  clearApiKey: z.boolean().optional(),
+  intentId: z.string().uuid().optional(),
+  updatedAt: z.string().datetime({ offset: false }).optional(),
+}).strict();
+
+export type AiSaveInput = z.infer<typeof AiSaveBodySchema>;
+
+/** Saves the model configuration. The server encrypts credentials and returns only its public DTO. */
+export async function saveAiConfig(input: AiSaveInput, signal?: AbortSignal): Promise<AiSaveOutcome> {
+  const parsed = AiSaveBodySchema.safeParse(input);
+  if (!parsed.success) throw new SettingsApiError(0, "The model configuration contains invalid details.");
+  const { intentId, updatedAt, ...saveConfigFields } = parsed.data;
+  const { response, body } = await request(
+    "/api/ai-config",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        ...saveConfigFields,
+        intentId: intentId ?? crypto.randomUUID(),
+        updatedAt: updatedAt ?? new Date().toISOString(),
+      }),
+    },
+    signal,
+  );
+  if (response.status === 202) {
+    const pending = PendingApprovalSchema.safeParse(body);
+    if (!pending.success) throw new SettingsApiError(202, "The settings service returned an unexpected approval response.");
+    return { kind: "pending", reason: pendingReason(pending.data) };
+  }
+  if (!response.ok) throw new SettingsApiError(response.status, errorMessage(response.status, body));
+  const config = AiConfigSaveSchema.safeParse(body);
+  if (!config.success) throw new SettingsApiError(response.status, "The settings service returned an unexpected action response.");
+  return { kind: "completed", config: config.data };
+}
+
+/* --------------------------------------------------------------- governed -- */
+
+const PendingApprovalSchema = z.object({
+  ok: z.literal(false).optional(),
+  pendingApproval: z.literal(true),
+  hint: z.string().optional(),
+  reason: z.string().optional(),
+  error: z.string().nullable().optional(),
+  approvalId: z.string().uuid().optional(),
+}).strict();
+
+const CompletedRecordSchema = z.record(z.string(), z.unknown());
+
+export type GovernedOutcome =
+  | { kind: "completed"; data: Record<string, unknown> }
+  | { kind: "pending"; reason: string };
+
+export type GovernedPath =
+  | "/api/modules"
+  | "/api/module-settings"
+  | "/api/policy"
+  | "/api/branding"
+  | "/api/routines"
+  | "/api/memory";
+
+export interface GovernedRetryScope {
+  actorId: string;
+  organizationId: string;
+}
+
+export interface GovernedAttempt {
+  version: 1;
+  path: GovernedPath;
+  action: Record<string, unknown>;
+  fingerprint: string;
+  intentId: string;
+}
+
+function retryStorageKey(scope: GovernedRetryScope): string {
+  return `chaste:governed-retry:v1:${encodeURIComponent(scope.actorId)}:${encodeURIComponent(scope.organizationId)}`;
+}
+
+function retryLockKey(scope: GovernedRetryScope): string {
+  return `${retryStorageKey(scope)}:lock`;
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map((entry) => entry === undefined ? "null" : canonicalJson(entry)).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, entry]) => entry !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right));
+    return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function actionFingerprint(path: GovernedPath, action: Record<string, unknown>): string {
+  return canonicalJson({ path, action });
+}
+
+function parseAttempt(raw: string | null): GovernedAttempt | null {
+  if (raw === null) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed === null || typeof parsed !== "object") return null;
+    const value = parsed as Partial<GovernedAttempt>;
+    if (
+      value.version !== 1 ||
+      typeof value.path !== "string" ||
+      !["/api/modules", "/api/module-settings", "/api/policy", "/api/branding", "/api/routines", "/api/memory"].includes(value.path) ||
+      value.action === null || typeof value.action !== "object" || Array.isArray(value.action) ||
+      typeof value.fingerprint !== "string" || !z.string().uuid().safeParse(value.intentId).success
+    ) return null;
+    const attempt = value as GovernedAttempt;
+    return actionFingerprint(attempt.path, attempt.action) === attempt.fingerprint ? attempt : null;
+  } catch {
+    return null;
+  }
+}
+
+async function withRetryLock<T>(scope: GovernedRetryScope, callback: () => T | Promise<T>): Promise<T> {
+  const locks = typeof navigator === "undefined" ? undefined : navigator.locks;
+  if (!locks || typeof localStorage === "undefined") {
+    throw new SettingsApiError(0, "This browser cannot safely preserve a pending routine change. Use a supported browser and try again.");
+  }
+  try {
+    return await locks.request(retryLockKey(scope), { mode: "exclusive" }, callback);
+  } catch (error) {
+    if (error instanceof SettingsApiError) throw error;
+    throw new SettingsApiError(0, "Could not safely access the saved routine change. Try again.");
+  }
+}
+
+function readAttempt(scope: GovernedRetryScope): GovernedAttempt | null {
+  const storageKey = retryStorageKey(scope);
+  const raw = localStorage.getItem(storageKey);
+  const attempt = parseAttempt(raw);
+  if (raw !== null && !attempt) {
+    throw new SettingsApiError(0, "A saved routine retry record is unreadable. New routine changes are blocked until this workspace is reconciled.");
+  }
+  return attempt;
+}
+
+export async function fetchPendingGovernedAttempt(scope: GovernedRetryScope): Promise<GovernedAttempt | null> {
+  return withRetryLock(scope, () => readAttempt(scope));
+}
+
+async function clearAttempt(scope: GovernedRetryScope, intentId: string): Promise<void> {
+  await withRetryLock(scope, () => {
+    const current = readAttempt(scope);
+    if (current?.intentId === intentId) localStorage.removeItem(retryStorageKey(scope));
+  });
+}
+
+async function reserveAttempt(
+  scope: GovernedRetryScope,
+  path: GovernedPath,
+  action: Record<string, unknown>,
+): Promise<GovernedAttempt> {
+  return withRetryLock(scope, () => {
+    const fingerprint = actionFingerprint(path, action);
+    const existing = readAttempt(scope);
+    if (existing) {
+      if (existing.fingerprint !== fingerprint) {
+        throw new SettingsApiError(0, "A previous routine change has an uncertain result. Retry that exact change before submitting another.");
+      }
+      return existing;
+    }
+    const attempt: GovernedAttempt = {
+      version: 1,
+      path,
+      action,
+      fingerprint,
+      intentId: crypto.randomUUID(),
+    };
+    const storageKey = retryStorageKey(scope);
+    const serialized = JSON.stringify(attempt);
+    localStorage.setItem(storageKey, serialized);
+    if (localStorage.getItem(storageKey) !== serialized) {
+      localStorage.removeItem(storageKey);
+      throw new SettingsApiError(0, "Could not save the routine change for safe retry. Try again.");
+    }
+    return attempt;
+  });
+}
+
+function pendingReason(body: z.infer<typeof PendingApprovalSchema>): string {
+  return body.hint ?? body.reason ?? body.error ?? "This change is waiting for approval.";
+}
+
+/**
+ * Every governed write in one place: a stable `intentId` for idempotency,
+ * HTTP 202 preserved as a pending outcome, and the raw success body handed
+ * back because these routes answer with different envelopes.
+ */
+export async function submitGoverned(
+  path: GovernedPath,
+  action: Record<string, unknown>,
+  signal?: AbortSignal,
+  retryScope?: GovernedRetryScope,
+): Promise<GovernedOutcome> {
+  if (path === "/api/routines" && retryScope) {
+    const attempt = await reserveAttempt(retryScope, path, action);
+    return sendGovernedAttempt(attempt, retryScope, signal);
+  }
+  return sendGovernedAttempt({
+    version: 1,
+    path,
+    action,
+    fingerprint: actionFingerprint(path, action),
+    intentId: crypto.randomUUID(),
+  }, undefined, signal);
+}
+
+export async function retryPendingGoverned(
+  scope: GovernedRetryScope,
+  signal?: AbortSignal,
+): Promise<GovernedOutcome | null> {
+  const attempt = await fetchPendingGovernedAttempt(scope);
+  return attempt ? sendGovernedAttempt(attempt, scope, signal) : null;
+}
+
+async function sendGovernedAttempt(
+  attempt: GovernedAttempt,
+  retryScope: GovernedRetryScope | undefined,
+  signal?: AbortSignal,
+): Promise<GovernedOutcome> {
+  let requestBody: object;
+  if (attempt.path === "/api/modules") {
+    const action = ModuleSwitchboardActionSchema.safeParse(attempt.action);
+    if (!action.success) throw new SettingsApiError(0, "The module switchboard request contains invalid details.");
+    requestBody = buildModuleSwitchboardRequest(action.data.modules, attempt.intentId);
+  } else {
+    requestBody = { ...attempt.action, intentId: attempt.intentId };
+  }
+  const { response, body } = await request(
+    attempt.path,
+    { method: "POST", body: JSON.stringify(requestBody) },
+    signal,
+  );
+  if (response.status === 202) {
+    const pending = PendingApprovalSchema.safeParse(body);
+    if (!pending.success) throw new SettingsApiError(202, "The settings service returned an unexpected approval response.");
+    return { kind: "pending", reason: pendingReason(pending.data) };
+  }
+  if (!response.ok) {
+    if (retryScope && response.status < 500 && response.status !== 408 && response.status !== 429) {
+      await clearAttempt(retryScope, attempt.intentId);
+    }
+    throw new SettingsApiError(response.status, errorMessage(response.status, body));
+  }
+  const completed = CompletedRecordSchema.safeParse(body);
+  if (!completed.success) throw new SettingsApiError(response.status, "The settings service returned an unexpected action response.");
+  if (retryScope) await clearAttempt(retryScope, attempt.intentId);
+  return { kind: "completed", data: completed.data };
+}
+
+/* --------------------------------------------------------------- branding -- */
+
+const BrandingSchema = z.object({
+  logoDataUrl: z.string().nullable(),
+  accentColor: z.string().nullable(),
+  invoiceFooter: z.string().nullable(),
+  layout: z.string(),
+}).strict();
+
+const BrandingReadSchema = z.object({
+  branding: BrandingSchema.nullable(),
+  canEdit: z.boolean(),
+}).strict();
+
+export type Branding = z.infer<typeof BrandingSchema>;
+export type BrandingRead = z.infer<typeof BrandingReadSchema>;
+
+export function fetchBranding(signal?: AbortSignal): Promise<BrandingRead> {
+  return read("/api/branding", BrandingReadSchema, {}, signal);
+}
+
+/* ------------------------------------------------------------------ email -- */
+
+const EmailStatusSchema = z.object({
+  configured: z.boolean(),
+  from: z.string().nullable(),
+}).strict();
+
+export type EmailStatus = z.infer<typeof EmailStatusSchema>;
+
+export function fetchEmailStatus(signal?: AbortSignal): Promise<EmailStatus> {
+  return read("/api/email", EmailStatusSchema, {}, signal);
+}
+
+/** SMTP proof send. Not a capability, so it never parks for approval. */
+export async function sendEmailTest(to: string, signal?: AbortSignal): Promise<void> {
+  const recipient = to.trim();
+  if (!/.+@.+\..+/.test(recipient)) throw new SettingsApiError(0, "Enter a valid email address first.");
+  const { response, body } = await request(
+    "/api/email",
+    { method: "POST", body: JSON.stringify({ action: "test", to: recipient, intentId: crypto.randomUUID() }) },
+    signal,
+  );
+  if (!response.ok) throw new SettingsApiError(response.status, errorMessage(response.status, body));
+}
+
+/* --------------------------------------------------------------- routines -- */
+
+const RoutineSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  scheduleLabel: z.string(),
+  triggerType: z.string(),
+  enabled: z.boolean(),
+  nextRunAt: z.string().nullable(),
+  lastRunAt: z.string().nullable(),
+  lastStatus: z.string().nullable(),
+  lastError: z.string().nullable(),
+  webhookUrl: z.string().nullable(),
+}).strict();
+
+const RoutinesReadSchema = z.object({ routines: z.array(RoutineSchema) }).strict();
+
+export type Routine = z.infer<typeof RoutineSchema>;
+
+export function fetchRoutines(signal?: AbortSignal): Promise<Routine[]> {
+  return read("/api/routines", RoutinesReadSchema, {}, signal).then((data) => data.routines);
+}
+
+/* ----------------------------------------------------------------- memory -- */
+
+const MemoryEntrySchema = z.object({
+  id: z.string(),
+  kind: z.string(),
+  source: z.string().nullable(),
+  content: z.string(),
+  preview: z.string(),
+  createdAt: z.string(),
+}).strict();
+
+const MemoryReadSchema = z.object({
+  memories: z.array(MemoryEntrySchema),
+  total: z.number().int(),
+  canEdit: z.boolean(),
+}).strict();
+
+export type MemoryEntry = z.infer<typeof MemoryEntrySchema>;
+export type MemoryRead = z.infer<typeof MemoryReadSchema>;
+
+export function fetchMemory(query: string, signal?: AbortSignal): Promise<MemoryRead> {
+  const trimmed = query.trim();
+  const path = trimmed ? `/api/memory?q=${encodeURIComponent(trimmed)}` : "/api/memory";
+  return read(path, MemoryReadSchema, {}, signal);
+}
+
+/* ---------------------------------------------------------------- runtime -- */
+
+const CompositionInspectionSchema = z.object({
+  profile: z.object({
+    id: z.string(),
+    version: z.string(),
+    environment: z.string(),
+  }).strict(),
+  profileDigest: z.string(),
+  compositionDigest: z.string(),
+  bundles: z.array(z.object({
+    id: z.string(),
+    version: z.string(),
+    serviceIds: z.array(z.string()),
+    requiredBundleIds: z.array(z.string()).optional(),
+  }).strict()),
+  patches: z.array(z.object({
+    id: z.string(),
+    version: z.string(),
+    configKeys: z.array(z.string()),
+  }).strict()),
+}).strict();
+
+const CompositionsReadSchema = z.object({
+  compositions: z.array(z.object({
+    id: z.string(),
+    createdAt: z.string(),
+    inspection: CompositionInspectionSchema,
+  }).strict()),
+}).strict();
+
+export type CompositionInspection = z.infer<typeof CompositionInspectionSchema>;
+export type CompositionRow = z.infer<typeof CompositionsReadSchema>["compositions"][number];
+
+const HarnessListCapabilityEnvelopeSchema = z.object({
+  ok: z.boolean(),
+  data: z.unknown().optional(),
+  error: z.string().optional(),
+}).strict();
+
+export async function fetchCompositions(signal?: AbortSignal): Promise<CompositionRow[]> {
+  const { response, body } = await request("/api/capabilities/execute", {
+    method: "POST",
+    cache: "no-store",
+    body: JSON.stringify({ capabilityId: "harness.listCompositions", input: {}, intentId: crypto.randomUUID() }),
+  }, signal);
+  if (!response.ok) throw new SettingsApiError(response.status, errorMessage(response.status, body));
+  const envelope = HarnessListCapabilityEnvelopeSchema.safeParse(body);
+  if (!envelope.success || !envelope.data.ok || envelope.data.data === undefined) {
+    const message = envelope.success ? envelope.data.error : undefined;
+    throw new SettingsApiError(response.status, message ?? "The Go harness service returned an unexpected response.");
+  }
+  const parsed = CompositionsReadSchema.safeParse(envelope.data.data);
+  if (!parsed.success) throw new SettingsApiError(response.status, "The Go harness service returned data in an unexpected format.");
+  return parsed.data.compositions;
+}
+
+/* ------------------------------------------------------------ agent soul -- */
+
+const SoulSchema: z.ZodType<components["schemas"]["AgentSoulResponse"]> = z.object({ agentSoul: z.string() }).strict();
+const SoulSavedSchema: z.ZodType<components["schemas"]["OrganizationWriteSuccess"]> = z.object({ ok: z.literal(true) }).strict();
+
+/** The soul editor reads with PUT on the authenticated Go `/api/org` route. */
+export function fetchAgentSoul(signal?: AbortSignal): Promise<string> {
+  return read("/api/org", SoulSchema, { method: "PUT" }, signal).then((data) => data.agentSoul);
+}
+
+export async function saveAgentSoul(agentSoul: string, signal?: AbortSignal): Promise<void> {
+  const requestBody: components["schemas"]["OrganizationSoulPatchRequest"] = { agentSoul };
+  const { response, body: responseBody } = await request(
+    "/api/org",
+    { method: "PATCH", body: JSON.stringify(requestBody) },
+    signal,
+  );
+  if (!response.ok) throw new SettingsApiError(response.status, errorMessage(response.status, responseBody));
+  const saved = SoulSavedSchema.safeParse(responseBody);
+  if (!saved.success) throw new SettingsApiError(response.status, "The settings service returned an unexpected save response.");
+}

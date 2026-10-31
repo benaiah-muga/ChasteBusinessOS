@@ -1,0 +1,5 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/oapi-codegen/oapi-codegen/v2.8.0/configuration-schema.json
+package: apicontract
+output: internal/apicontract/go_internal_v1.gen.go
+generate:
+  models: true

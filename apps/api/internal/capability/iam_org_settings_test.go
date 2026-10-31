@@ -1,0 +1,294 @@
+package capability
+
+import (
+	"context"
+	"encoding/json"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/dbx"
+	"github.com/jackc/pgx/v5"
+)
+
+func TestIAMOrgSettingsParsersMirrorZodContracts(t *testing.T) {
+	modules, err := ParseIAMSetModulesInput(json.RawMessage(`{"modules":["pos","inventory"]}`))
+	if err != nil || len(modules.Modules) != 2 {
+		t.Fatalf("modules parse=%+v err=%v", modules, err)
+	}
+	if _, err := ParseIAMSetModulesInput(json.RawMessage(`{"modules":[]}`)); err == nil {
+		t.Fatal("empty modules refused")
+	}
+	config, err := ParseIAMSetModuleConfigInput(json.RawMessage(`{"module":"inventory","settings":{"defaultUnit":"pc"}}`))
+	if err != nil || config.Module != "inventory" || string(config.Settings) != `{}` {
+		t.Fatalf("config parse=%+v err=%v", config, err)
+	}
+	config, err = ParseIAMSetModuleConfigInput(json.RawMessage(`{"module":"inventory","settings":{"defaultUnitLabel":"  each ","defaultReorderPointUnits":3,"unknown":true}}`))
+	if err != nil || string(config.Settings) != `{"defaultReorderPointUnits":3,"defaultUnitLabel":"each"}` {
+		t.Fatalf("inventory settings should trim known fields and strip unknown keys, got %s err=%v", config.Settings, err)
+	}
+	if _, err := ParseIAMSetModuleConfigInput(json.RawMessage(`{"module":"inventory","settings":{"defaultUnitLabel":"😀😀😀😀😀😀😀😀😀😀"}}`)); err != nil {
+		t.Fatalf("10 supplementary Unicode characters should fit the 20 UTF-16 code-unit limit: %v", err)
+	}
+	if _, err := ParseIAMSetModuleConfigInput(json.RawMessage(`{"module":"inventory","settings":[1]}`)); err == nil {
+		t.Fatal("non-object settings refused")
+	}
+	for _, raw := range []string{
+		`{"module":"inventory","settings":null}`,
+		`{"module":"inventory","settings":{"defaultUnitLabel":" "}}`,
+		`{"module":"inventory","settings":{"defaultUnitLabel":"123456789012345678901"}}`,
+		`{"module":"inventory","settings":{"defaultReorderPointUnits":-1}}`,
+		`{"module":"inventory","settings":{"defaultReorderPointUnits":1000001}}`,
+		`{"module":"inventory","settings":{"defaultReorderPointUnits":1.5}}`,
+	} {
+		if _, err := ParseIAMSetModuleConfigInput(json.RawMessage(raw)); err == nil {
+			t.Errorf("invalid module settings accepted: %s", raw)
+		}
+	}
+	policy, err := ParseIAMSetOrgPolicyInput(json.RawMessage(`{"maxRiskAutonomous":"money","moneyThresholdMinor":250000,"requiresApprovalFor":["identity","*"]}`))
+	if err != nil || policy.MaxRiskAutonomous != "money" || *policy.MoneyThresholdMinor != 250000 {
+		t.Fatalf("policy parse=%+v err=%v", policy, err)
+	}
+	if _, err := ParseIAMSetOrgPolicyInput(json.RawMessage(`{"maxRiskAutonomous":"cosmic"}`)); err == nil {
+		t.Fatal("unknown risk class refused")
+	}
+	if _, err := ParseIAMSetOrgPolicyInput(json.RawMessage(`{"maxRiskAutonomous":"read","moneyThresholdMinor":null}`)); err == nil {
+		t.Fatal("explicit null money threshold should be rejected like the legacy route")
+	}
+	if _, err := ParseIAMSetOrgPolicyInput(json.RawMessage(`{"maxRiskAutonomous":"read","requiresApprovalFor":null}`)); err == nil {
+		t.Fatal("explicit null approval list should be rejected")
+	}
+	defaultPolicy, err := ParseIAMSetOrgPolicyInput(json.RawMessage(`{"maxRiskAutonomous":"read"}`))
+	if err != nil || defaultPolicy.RequiresApprovalFor == nil || len(defaultPolicy.RequiresApprovalFor) != 0 {
+		t.Fatalf("omitted approval list should default to empty array, policy=%+v err=%v", defaultPolicy, err)
+	}
+	branding, err := ParseIAMSetOrgBrandingInput(json.RawMessage(`{"accentColor":"#33AAFF","layout":"modern"}`))
+	if err != nil || branding.Layout == nil || *branding.Layout != "modern" {
+		t.Fatalf("branding parse=%+v err=%v", branding, err)
+	}
+	if _, err := ParseIAMSetOrgBrandingInput(json.RawMessage(`{"invoiceFooter":"` + strings.Repeat("😀", 150) + `"}`)); err != nil {
+		t.Fatalf("300 UTF-16 code-unit footer should be accepted: %v", err)
+	}
+	if _, err := ParseIAMSetOrgBrandingInput(json.RawMessage(`{"invoiceFooter":"` + strings.Repeat("😀", 151) + `"}`)); err == nil {
+		t.Fatal("301 UTF-16 code-unit footer should be rejected")
+	}
+	if _, err := ParseIAMSetOrgBrandingInput(json.RawMessage(`{"logoDataUrl":"data:text/plain;base64,AAA"}`)); err == nil {
+		t.Fatal("non-image logo refused")
+	}
+	if _, err := parseIAMOrgSettingsInput(iamSetOrgBrandingCapabilityID, json.RawMessage(`{}`)); err != nil {
+		t.Fatalf("dispatcher refused branding: %v", err)
+	}
+	if _, err := parseIAMOrgSettingsInput("iam.unknown", json.RawMessage(`{}`)); err == nil {
+		t.Fatal("dispatcher refused unknown id")
+	}
+}
+
+func TestIAMOrgSettingsLifecycle(t *testing.T) {
+	fx := newExecutorFixture(t)
+
+	if _, err := dbx.WithOrgTx(fx.ctx, fx.owner, fx.orgID, func(tx pgx.Tx) (struct{}, error) {
+		set, err := iamSetModules(context.Background(), tx, fx.orgID, IAMModulesInput{Modules: []string{"pos", "inventory"}})
+		if err != nil {
+			return struct{}{}, err
+		}
+		if len(set.PreviousModules) != 0 {
+			t.Fatalf("previous modules=%v, want empty on first set", set.PreviousModules)
+		}
+		next := map[string]bool{}
+		for _, module := range set.EnabledModules {
+			next[module] = true
+		}
+		for _, protected := range []string{"iam", "signals", "routines"} {
+			if !next[protected] {
+				t.Fatalf("enabled=%v, want protected module %s unioned in", set.EnabledModules, protected)
+			}
+		}
+		if !next["pos"] {
+			t.Fatalf("enabled=%v, want requested module pos", set.EnabledModules)
+		}
+
+		restored, err := iamRestoreModules(context.Background(), tx, fx.orgID, IAMModulesInput{Modules: []string{"accounting"}})
+		if err != nil {
+			return struct{}{}, err
+		}
+		restoredSet := map[string]bool{}
+		for _, module := range restored.EnabledModules {
+			restoredSet[module] = true
+		}
+		if restoredSet["pos"] || !restoredSet["accounting"] || !restoredSet["iam"] {
+			t.Fatalf("restored=%v, want pos dropped and accounting added", restored.EnabledModules)
+		}
+
+		saved, err := iamSetModuleConfig(context.Background(), tx, fx.orgID, IAMSetModuleConfigInput{
+			Module: "inventory", Settings: json.RawMessage(`{"defaultUnit":"pc"}`),
+		})
+		if err != nil || saved.Module != "inventory" {
+			t.Fatalf("setModuleConfig output=%+v err=%v", saved, err)
+		}
+		resaved, err := iamSetModuleConfig(context.Background(), tx, fx.orgID, IAMSetModuleConfigInput{
+			Module: "inventory", Settings: json.RawMessage(`{"defaultUnit":"box"}`),
+		})
+		if err != nil || string(resaved.Settings) != `{"defaultUnit":"box"}` {
+			t.Fatalf("setModuleConfig resave=%+v err=%v", resaved, err)
+		}
+
+		policy, err := iamSetOrgPolicy(context.Background(), tx, fx.orgID, IAMSetOrgPolicyInput{
+			MaxRiskAutonomous:   "money",
+			RequiresApprovalFor: []string{"destructive"},
+		})
+		if err != nil || !policy.Saved {
+			t.Fatalf("setOrgPolicy output=%+v err=%v", policy, err)
+		}
+		var pattern string
+		var threshold *int64
+		if err := tx.QueryRow(context.Background(), `
+			SELECT capability_pattern, money_threshold_minor FROM policies WHERE org_id=$1::uuid AND capability_pattern='*'`,
+			fx.orgID).Scan(&pattern, &threshold); err != nil {
+			return struct{}{}, err
+		}
+		if pattern != "*" || threshold != nil {
+			t.Fatalf("policy row pattern=%s threshold=%v, want wildcard with null threshold", pattern, threshold)
+		}
+
+		branding, err := iamSetOrgBranding(context.Background(), tx, fx.orgID, IAMSetOrgBrandingInput{
+			AccentColor: strPtr("#33AAFF"), Layout: strPtr("modern"),
+		}, time.Now().UTC())
+		if err != nil || !branding.Saved {
+			t.Fatalf("setOrgBranding output=%+v err=%v", branding, err)
+		}
+		merged, err := iamSetOrgBranding(context.Background(), tx, fx.orgID, IAMSetOrgBrandingInput{
+			InvoiceFooter: strPtr("Thank you"),
+		}, time.Now().UTC())
+		if err != nil || !merged.Saved {
+			t.Fatalf("setOrgBranding merge output=%+v err=%v", merged, err)
+		}
+		var accent, footer, layout string
+		var logo *string
+		if err := tx.QueryRow(context.Background(), `
+			SELECT coalesce(accent_color,''), coalesce(invoice_footer,''), layout, logo_data_url
+			FROM org_branding WHERE org_id=$1::uuid`, fx.orgID).Scan(&accent, &footer, &layout, &logo); err != nil {
+			return struct{}{}, err
+		}
+		if accent != "#33AAFF" || footer != "Thank you" || layout != "modern" || logo != nil {
+			t.Fatalf("branding row accent=%s footer=%s layout=%s logo=%v, want merged values with no logo", accent, footer, layout, logo)
+		}
+		return struct{}{}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func strPtr(v string) *string {
+	return &v
+}
+
+func TestIAMAgentSoulParserTrimsBoundsAndClears(t *testing.T) {
+	input, err := ParseIAMSetAgentSoulInput(json.RawMessage(`{"agentSoul":"  Be concise.  "}`))
+	if err != nil || input.AgentSoul != "Be concise." {
+		t.Fatalf("persona parse=%+v err=%v", input, err)
+	}
+	cleared, err := ParseIAMSetAgentSoulInput(json.RawMessage(`{"agentSoul":"   "}`))
+	if err != nil || cleared.AgentSoul != "" {
+		t.Fatalf("whitespace persona parse=%+v err=%v", cleared, err)
+	}
+	if _, err := ParseIAMSetAgentSoulInput(json.RawMessage(`{}`)); err == nil {
+		t.Fatal("missing agentSoul accepted")
+	}
+	if _, err := ParseIAMSetAgentSoulInput(json.RawMessage(`{"agentSoul":42}`)); err == nil {
+		t.Fatal("non-string agentSoul accepted")
+	}
+	if _, err := ParseIAMSetAgentSoulInput(json.RawMessage(`{"agentSoul":"` + strings.Repeat("界", iamMaxAgentSoulUnits+1) + `"}`)); err == nil {
+		t.Fatal("persona over 8000 UTF-16 units accepted")
+	}
+}
+
+func TestIAMAgentSoulIsGovernedAuditedAndReversible(t *testing.T) {
+	fx := newExecutorFixture(t)
+	if _, err := fx.owner.Exec(fx.ctx, `
+		INSERT INTO role_permissions (role_id, permission_key, org_id)
+		VALUES ($1::uuid, 'iam.admin', $2::uuid) ON CONFLICT DO NOTHING`, fx.roleID, fx.orgID); err != nil {
+		t.Fatal(err)
+	}
+	input := json.RawMessage(`{"agentSoul":"  Be concise and mention outstanding balances.  "}`)
+	claims := fx.humanClaims(input, "")
+	claims.CapabilityID = iamSetAgentSoulCapabilityID
+	claims.Permissions = []string{"iam.admin"}
+	result, err := fx.executor.Execute(fx.ctx, claims, iamSetAgentSoulCapabilityID, input)
+	if err != nil || !result.OK {
+		t.Fatalf("set persona result=%+v err=%v", result, err)
+	}
+	var set IAMSetAgentSoulOutput
+	if err := json.Unmarshal(result.Data, &set); err != nil {
+		t.Fatalf("decode persona result %s: %v", result.Data, err)
+	}
+	if set.AgentSoul != "Be concise and mention outstanding balances." || set.PreviousAgentSoul != "" {
+		t.Fatalf("persona set=%+v, want trimmed persona and empty previous", set)
+	}
+	var stored *string
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT agent_soul FROM organizations WHERE id=$1::uuid`, fx.orgID).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored == nil || *stored != "Be concise and mention outstanding balances." {
+		t.Fatalf("stored persona=%v, want the trimmed value", stored)
+	}
+	if audits := fx.count(`SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id=$2`, fx.orgID, iamSetAgentSoulCapabilityID); audits != 1 {
+		t.Fatalf("persona audit events=%d, want 1", audits)
+	}
+
+	plan, ok := PlanInverse(iamSetAgentSoulCapabilityID, result.Data)
+	if !ok || plan.CapabilityID != iamRestoreAgentSoulCapabilityID {
+		t.Fatalf("persona inverse plan=%+v ok=%t", plan, ok)
+	}
+	restoreClaims := fx.humanClaims(plan.Input, "")
+	restoreClaims.CapabilityID = plan.CapabilityID
+	restoreClaims.Permissions = []string{"iam.admin"}
+	if restored, err := fx.executor.Execute(fx.ctx, restoreClaims, plan.CapabilityID, plan.Input); err != nil || !restored.OK {
+		t.Fatalf("restore persona result=%+v err=%v", restored, err)
+	}
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT agent_soul FROM organizations WHERE id=$1::uuid`, fx.orgID).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored != nil {
+		t.Fatalf("restored persona=%v, want an empty persona", stored)
+	}
+}
+
+func TestIAMGetOrgPolicyReadsDefaultsAndSavedPolicy(t *testing.T) {
+	fx := newExecutorFixture(t)
+	if _, err := fx.owner.Exec(fx.ctx, `
+		INSERT INTO role_permissions (role_id, permission_key, org_id)
+		VALUES ($1::uuid, 'iam.read', $2::uuid) ON CONFLICT DO NOTHING`, fx.roleID, fx.orgID); err != nil {
+		t.Fatal(err)
+	}
+	run := func() IAMGetOrgPolicyOutput {
+		input := json.RawMessage(`{}`)
+		claims := fx.humanClaims(input, "")
+		claims.CapabilityID = iamGetOrgPolicyCapabilityID
+		claims.Permissions = []string{"iam.read"}
+		result, err := fx.executor.Execute(fx.ctx, claims, iamGetOrgPolicyCapabilityID, input)
+		if err != nil || !result.OK {
+			t.Fatalf("policy read result=%+v err=%v", result, err)
+		}
+		var output IAMGetOrgPolicyOutput
+		if err := json.Unmarshal(result.Data, &output); err != nil {
+			t.Fatalf("decode policy %s: %v", result.Data, err)
+		}
+		return output
+	}
+	defaults := run()
+	if defaults.MaxRiskAutonomous != "write" || defaults.MoneyThresholdMinor != 50_000 || len(defaults.RequiresApprovalFor) != 0 {
+		t.Fatalf("default policy=%+v, want write/50000/[]", defaults)
+	}
+	if _, err := fx.owner.Exec(fx.ctx, `
+		INSERT INTO policies (org_id, capability_pattern, max_risk_autonomous, money_threshold_minor, requires_approval_for)
+		VALUES ($1::uuid, '*', 'money', 250000, '["identity"]'::jsonb)`, fx.orgID); err != nil {
+		t.Fatal(err)
+	}
+	saved := run()
+	if saved.MaxRiskAutonomous != "money" || saved.MoneyThresholdMinor != 250000 || len(saved.RequiresApprovalFor) != 1 || saved.RequiresApprovalFor[0] != "identity" {
+		t.Fatalf("saved policy=%+v, want money/250000/[identity]", saved)
+	}
+	if audits := fx.count(`SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id=$2`, fx.orgID, iamGetOrgPolicyCapabilityID); audits != 2 {
+		t.Fatalf("policy read audit events=%d, want 2", audits)
+	}
+}

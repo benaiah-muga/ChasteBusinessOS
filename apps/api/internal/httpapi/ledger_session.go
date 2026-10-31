@@ -1,0 +1,121 @@
+package httpapi
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"net/http"
+	"strings"
+
+	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract"
+	businesscontract "github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract/business"
+	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/session"
+)
+
+type ledgerSessionResolver interface {
+	Resolve(context.Context, string, string) (*session.ResolvedUser, error)
+	ResolveBearerToken(context.Context, string, string) (*session.ResolvedUser, error)
+}
+
+type LedgerSessionHandler struct {
+	resolver ledgerSessionResolver
+	reader   LedgerReader
+	logger   *slog.Logger
+}
+
+func NewLedgerSessionHandler(resolver ledgerSessionResolver, reader LedgerReader, logger *slog.Logger) http.Handler {
+	return &LedgerSessionHandler{resolver: resolver, reader: reader, logger: logger}
+}
+
+func (h *LedgerSessionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	if h == nil || h.resolver == nil || h.reader == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "ledger service unavailable"})
+		return
+	}
+
+	selector, valid := modulesOrganizationSelector(r)
+	if !valid {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid organization selector"})
+		return
+	}
+	resolved, err := h.resolve(r, selector)
+	if err != nil {
+		if errors.Is(err, session.ErrNoSession) {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="chaste"`)
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+		if errors.Is(err, session.ErrSecretTooShort) {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "ledger service unavailable"})
+			return
+		}
+		if h.logger != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			h.logger.Error("ledger session resolution failed", "error", err)
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	if resolved == nil || !resolved.EmailVerified || resolved.OrgID == nil ||
+		!isUUID(resolved.UserID) || !isUUID(*resolved.OrgID) || resolved.AuthSessionID == "" {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="chaste"`)
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	if !matchesRequestedOrganization(r, resolved) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "organization access denied"})
+		return
+	}
+	if !resolved.HasPermission("accounting.read") && !resolved.HasPermission("*") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden: missing accounting.read"})
+		return
+	}
+
+	limit := parseLedgerLimit(r.URL.Query().Get("limit"), r.URL.Query().Has("limit"))
+	before, valid := parseLedgerCursor(r.URL.Query().Get("before"), r.URL.Query().Has("before"))
+	if !valid {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid ledger cursor"})
+		return
+	}
+	events, err := readLedgerPage(r.Context(), h.reader, *resolved.OrgID, before, limit)
+	if err != nil {
+		if h.logger != nil {
+			h.logger.Error("ledger read failed", "error", err)
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	response := businesscontract.LedgerResponse{Events: make([]businesscontract.LedgerEvent, 0, len(events))}
+	for _, event := range events {
+		if event.Seq < 1 || event.Seq > maxSafeLedgerSequence {
+			if h.logger != nil {
+				h.logger.Error("ledger sequence exceeds client safe-integer range", "sequence", event.Seq)
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+			return
+		}
+		response.Events = append(response.Events, businesscontract.LedgerEvent{
+			Seq: event.Seq, Kind: event.Kind, CapabilityId: event.CapabilityID, ActorType: event.ActorType,
+			ActorId: event.ActorID, SessionId: event.SessionID,
+			Payload: apicontract.RawJSON(event.Payload), Hash: event.Hash, PrevHash: event.PrevHash, OccurredAt: event.OccurredAt,
+		})
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (h *LedgerSessionHandler) resolve(r *http.Request, selector string) (*session.ResolvedUser, error) {
+	if authorization := strings.TrimSpace(r.Header.Get("Authorization")); authorization != "" {
+		fields := strings.Fields(authorization)
+		if len(fields) != 2 || !strings.EqualFold(fields[0], "Bearer") || fields[1] == "" {
+			return nil, session.ErrNoSession
+		}
+		return h.resolver.ResolveBearerToken(r.Context(), fields[1], selector)
+	}
+	return h.resolver.Resolve(r.Context(), session.CookieFromRequest(r, session.SessionCookieName), selector)
+}

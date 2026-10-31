@@ -1,0 +1,1442 @@
+{
+  "schemaVersion": 1,
+  "overrides": [
+    {
+      "kind": "page",
+      "path": "/",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/analytics",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/analytics",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/analytics",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/ai-config",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/ai-config",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/approvals",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/approvals",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/customers",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/auth/[...all]",
+      "method": "GET",
+      "owner": "auth",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/auth/[...all]",
+      "method": "POST",
+      "owner": "auth",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/branding",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/branding",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/conversations/[id]/presence",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/conversations/[id]/presence",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/crm",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/dashboard",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/docs/[id]/workspace",
+      "method": "DELETE",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/docs/[id]/workspace",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/durable-runs",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/durable-runs/[id]",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/email",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/email",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/inventory",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/ledger",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/memory",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/memory",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/metrics",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/module-settings",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/module-settings",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/modules",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/modules",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/my-work",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/my-work/summarize",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/notifications",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/notifications",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/onboarding",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/onboarding",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/onboarding",
+      "method": "PATCH",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/org",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/org",
+      "method": "PATCH",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/org",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/org",
+      "method": "PUT",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/policy",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/policy",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/portal/invoice/[token]",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/pos",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/projects",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/projects",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/routines",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/routines",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/routines/webhook/[token]",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/sales",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/sales/[orderId]",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/scim/tokens",
+      "method": "DELETE",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/scim/tokens",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/scim/tokens",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/scim/v2/Users",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/scim/v2/Users",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/scim/v2/Users/[id]",
+      "method": "DELETE",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/scim/v2/Users/[id]",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/sessions",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/sessions/[id]",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/sessions/[id]/replay",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/setup",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/signals",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/support/channels",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/support/channels",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/support/public",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/team",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/team",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/team/sso",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/team/sso",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/team/sso",
+      "method": "DELETE",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/approvals",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/crm",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/ledger",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/login",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/marketing",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/portal/[token]",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/pos",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/proposals",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/print/invoice/[orderId]",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/products",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/projects",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/sessions",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/onboarding",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/team",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/widget/[token]",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/inventory",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/purchasing/receiving",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/manufacturing",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/sales",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/hr",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/marketplace",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/purchasing",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/settings",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/accounting",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/documents",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/documents/editor/[id]",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/messages",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/support",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/accounting/budgets",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/accounting/budgets",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/accounting/close",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/accounting/close",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/accounting/tax",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/accounting/tax",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/expenses",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/expenses",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/accounting",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/health",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/docs/assist",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/accounting",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/hr",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/hr",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/marketing",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/marketing",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/message-attachments/[id]",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/pos",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/banking",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/banking",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/time",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/time",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/conversations",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/conversations",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/conversations/[id]",
+      "method": "PATCH",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/conversations/[id]/messages",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/conversations/[id]/messages",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/conversations/[id]/read",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/conversations/people",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/conversations/[id]/attachments",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/conversations/[id]/attachments",
+      "method": "DELETE",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/messages/[id]",
+      "method": "PATCH",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/messages/[id]",
+      "method": "DELETE",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/messages/[id]/pin",
+      "method": "PATCH",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/messages/[id]/reactions",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/messages/search",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/docs",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/docs",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/docs/[id]",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/docs/[id]",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/docs/folders",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/docs/folders",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/docs/next-number",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/docs/records",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/documents",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/documents",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/documents/[id]/content",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/crm",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/crm/views",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/crm/views",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/customers",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/deals",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/deals",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/import",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/purchasing",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/purchasing",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/purchasing/payment-runs",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/purchasing/payment-runs",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/quotes",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/quotes",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/recurring",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/recurring",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/reports",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/sales",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/inventory",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/ai-connections",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/ai-connections",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/ai-tools/mcp",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/capability-gaps",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/harness/compositions",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/proposals",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/proposals",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/marketplace",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/marketplace",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/creator/agent",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/creator/evolution",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/invite/[token]",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/invite/[token]",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/support",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/support",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/manufacturing",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/manufacturing",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/scim/v2/Users",
+      "method": "DELETE",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/routines/webhook/[token]",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/chat",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/chat/steer",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    }
+  ],
+  "goRoutes": [
+    {
+      "kind": "api",
+      "path": "/api/conversations/[id]/agent-reply",
+      "method": "POST",
+      "source": "apps/api/internal/httpapi/messaging_agent_session.go",
+      "owner": "go",
+      "parity": "verified",
+      "note": "2026-10-18 live pass + browser sweep"
+    },
+    {
+      "kind": "api",
+      "path": "/api/go/documents/[id]/content",
+      "method": "GET",
+      "source": "apps/api/internal/httpapi/document_content_download.go",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/pos/customers",
+      "method": "GET",
+      "source": "apps/api/internal/httpapi/pos_customers_session.go",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/pos/shift-summary",
+      "method": "POST",
+      "source": "apps/api/internal/httpapi/pos_shift_summary_session.go",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/support/customers",
+      "method": "GET",
+      "source": "apps/api/internal/httpapi/support_customers_session.go",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/sales/customers",
+      "method": "GET",
+      "source": "apps/api/internal/httpapi/sales_customers_session.go",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/durable-runs",
+      "method": "POST",
+      "source": "apps/api/internal/httpapi/durable_runs_create_session.go",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/evaluations",
+      "method": "GET",
+      "source": "apps/api/internal/httpapi/evaluations_http.go",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/evaluations/run",
+      "method": "POST",
+      "source": "apps/api/internal/httpapi/evaluations_http.go",
+      "owner": "go",
+      "parity": "verified"
+    }
+,
+    {
+      "kind": "api",
+      "path": "/api/evaluations/baseline",
+      "method": "POST",
+      "source": "apps/api/internal/httpapi/evaluations_http.go",
+      "owner": "go",
+      "parity": "verified"
+    }
+  ]
+}

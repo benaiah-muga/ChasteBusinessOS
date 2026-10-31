@@ -1,5 +1,40 @@
 # ChasteBusinessOS, Roadmap
 
+Milestone entries record what shipped when. The TypeScript kernel, module, and
+AI packages named in early entries were retired in the React + Go migration
+(see `docs/REACT_GO_MIGRATION_PLAN.md`); their behavior now lives in
+`apps/api` and is proven by the same demo proofs.
+
+## Post-migration, agentic operations (current)
+
+The strategy note is [docs/strategy/2026-10-19-post-migration-agentic-erp.md](docs/strategy/2026-10-19-post-migration-agentic-erp.md).
+The sequence is evidence-gated, not date-gated.
+
+- [x] Retire the Next.js runtime and prove Vite plus Go on fresh and upgraded databases.
+- [x] Register the Go business signal producers in the live API process.
+- [x] Create and dispatch durable runs with approval gates, receipts, and worker recovery.
+- [x] Deterministic live-data replenishment planning (`inventory.replenishmentPlan`, read-only).
+- [x] Purchase commitments and quote awards require human authority for agent and system actors; deactivated suppliers are rejected, and high-impact public writes require an intent.
+- [x] Versioned purchase proposal and a line-level quote commitment.
+- [x] Persistent exceptions, business objectives, and Decision Records.
+- [x] Durable exception lifecycle in the Inbox: acknowledge, take ownership, resolve, reopen, and keep no-longer-detected exceptions visible until a person closes them.
+- [x] Quote-to-cash continuity: SKU-aware quote lines, award into a sales order, credit and stock checks on confirmation, delivery-created invoice linked back to the order, and quote restoration when an untouched order is cancelled.
+- [x] Opportunity attribution: quotes link to their CRM deal with customer-consistency checks, quote rows show the deal, and deal stage remains an explicit `crm.moveDealStage` action after order confirmation.
+- [x] Exception ownership: exceptions assign to any workspace member through the governed record path, with membership validation, owner names, preserved ownership on resolve, and a Mine queue.
+- [x] Document-to-action continuity: reviewed coding suggestions become a vendor bill with the source document linked atomically, and parsed documents awaiting review raise an exception.
+- [x] Replenishment-to-payment skill spans cash forecast, payables context, supplier comparison, purchase approval, receiving, three-way matching, and a reviewed payment run.
+- [x] Workmate purchase proposal card: supplier context, exact approval payload, approve and reject in the conversation.
+- [x] Post-approval order status: remaining quantities and receipt history, with a backend plan-to-receipt acceptance proof.
+- [x] Workmate cards for exception, progress, waiting, and verified result.
+- [x] Live agent evaluation harness with a Settings Quality surface, durable run history, pass-rate trends, an 80% baseline, stored-run detail, a four-scenario scripted baseline, and DeepSeek flash scenarios.
+- [x] Scheduled nightly evaluation, configurable regression baseline, bounded retention, release metrics, model comparison, and seven scenarios.
+- [x] Deterministic Workmate turn contract: code-read `<turn_facts>` for approvals, notifications, and read time; post-turn verification of the answer against executor effects; approval and failure notices the model cannot omit; dash-free prose; and an authoritative final reply in the client.
+- [x] Entity identity resolution: normalized email, phone, and name-token evidence for customers, vendors, and employees; merged customer duplicates resolve to the surviving record with the old name reported; a pure ranker with unit and migrated-database proofs.
+- [x] Generic in-conversation approval card for any gated action, with the purchase-order line-item view kept only for purchase orders.
+- [x] Progressive coding-agent tool surface: three MCP meta tools (discover, describe, dispatch), direct tools only when pinned, deterministic ranked discovery, and the full governed catalog reachable without advertising it.
+- [x] Customer Support as the first composable app surface: horizontal Inbox, Overview, Knowledge, and Channels tabs, URL-addressable conversations, a three-pane queue, thread, and context desk, the customer's own invoice balance, human-released copilot drafts, and a reusable Northwind seed.
+- [ ] Module-aware rail filtering and a support focus mode, so a workspace that installs only customer support gets a complete support-only experience without unrelated module links.
+
 ## M0, Foundation (current sprint)
 - [x] Monorepo scaffold: Turborepo, pnpm, TS strict, Next.js 15 web app
 - [x] Postgres 16 + pgvector dev database (Docker `chaste-pgvector`, :5433)
@@ -113,7 +148,7 @@
       boot-time tool-schema serializability + name-collision conformance,
       registry cached per process instead of per request
 - [ ] Playwright e2e happy path (approvals inbox through posting)
-- [ ] pino/OTel export behind the structured logger seam; per-org ledger
+- [ ] OTel export behind the structured logger seam; per-org ledger
       chain heads + partitioning (ADR 0022); multi-currency phases 2-3
       (ADR 0021); sandboxed proposal runner (ADR 0023)
 - [ ] Pen-test pass; per-org data residency notes
@@ -224,3 +259,12 @@ Plan: `docs/BUSINESS_OS_PLAN.md` (eleven external module audits, triaged)
 ## Proposed enterprise evolution programme
 
 The [Enterprise Evolution Plan](docs/ENTERPRISE_EVOLUTION_PLAN.md) extends the [Cordis-like engine proposal](docs/CORDIS_LIKE_ENGINE_PLAN.md) with an evidence register, integrity-first delivery order, bounded autonomy levels, enterprise operations, onboarding/UX/UI, developer setup and independently verified self-development. This programme is proposed and its implementation gates remain open; historical milestone checkmarks above are not enterprise readiness certification. See the [planning review](docs/ENTERPRISE_PLAN_REVIEW.md) for this documentation task’s verification limits.
+
+## React and Go migration programme
+
+The approved target is a Vite-built React app with Go business APIs, agent
+runtime, and workers. Preserve the current database and behavior through
+single-writer, parity-gated cutovers. See the
+[migration plan](docs/REACT_GO_MIGRATION_PLAN.md) and [ADR 0070](docs/adr/0070-react-vite-and-go-migration.md).
+Implementation gates are open; this planning decision is not a completed
+runtime migration.

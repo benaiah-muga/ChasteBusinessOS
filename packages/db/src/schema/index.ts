@@ -3,6 +3,7 @@ import { type AnyPgColumn,
   bigserial,
   boolean,
   check,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -177,6 +178,8 @@ export const ledgerEvents = pgTable(
     capabilityId: text("capability_id"),
     /** Attribution context: the agent session that produced this event. Not hash-covered. */
     sessionId: uuid("session_id").references(() => agentSessions.id, { onDelete: "set null" }),
+    /** Immutable Better Auth attribution. Deliberately has no FK because logout deletes auth sessions. */
+    authSessionId: text("auth_session_id"),
     payload: jsonb("payload").notNull(),
     prevHash: text("prev_hash"),
     hash: text("hash").notNull(),
@@ -186,6 +189,67 @@ export const ledgerEvents = pgTable(
     index("ledger_org_kind_idx").on(t.orgId, t.kind),
     index("ledger_occurred_idx").on(t.occurredAt),
     uniqueIndex("ledger_seq_idx").on(t.seq),
+    check("ledger_events_auth_session_id_check", sql`${t.authSessionId} IS NULL OR length(${t.authSessionId}) BETWEEN 1 AND 200`),
+  ],
+);
+
+/** Durable evaluation runs. The payload is evidence, not business state. */
+export const evaluationRuns = pgTable(
+  "evaluation_runs",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    scenarioId: text("scenario_id").notNull(),
+    status: text("status").notNull(), // passed | failed | error
+    model: text("model").notNull(),
+    finalAnswer: text("final_answer").notNull().default(""),
+    durationMs: integer("duration_ms").notNull().default(0),
+    inputTokens: bigint("input_tokens", { mode: "number" }).notNull().default(0),
+    outputTokens: bigint("output_tokens", { mode: "number" }).notNull().default(0),
+    cachedTokens: bigint("cached_tokens", { mode: "number" }).notNull().default(0),
+    toolCalls: jsonb("tool_calls").notNull().default([]),
+    checks: jsonb("checks").notNull().default([]),
+    error: text("error"),
+    actorId: uuid("actor_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("evaluation_run_org_created_idx").on(t.orgId, t.createdAt),
+    index("evaluation_run_org_scenario_idx").on(t.orgId, t.scenarioId, t.createdAt),
+    check("evaluation_run_status_valid", sql`${t.status} IN ('passed', 'failed', 'error')`),
+    check("evaluation_run_duration_nonnegative", sql`${t.durationMs} >= 0`),
+    check("evaluation_run_tokens_nonnegative", sql`${t.inputTokens} >= 0 AND ${t.outputTokens} >= 0 AND ${t.cachedTokens} >= 0`),
+  ],
+);
+
+/** Persistent operating records: objective, exception, or Decision Record. */
+export const operationalRecords = pgTable(
+  "operational_records",
+  {
+    id: id(),
+    orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(), // objective | exception | decision
+    stableKey: text("stable_key").notNull(),
+    status: text("status").notNull(),
+    title: text("title").notNull(),
+    summary: text("summary"),
+    details: jsonb("details").notNull().default({}),
+    revision: integer("revision").notNull().default(1),
+    authorityRef: text("authority_ref"),
+    approvalId: uuid("approval_id").references(() => approvals.id, { onDelete: "set null" }),
+    ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("operational_record_key_idx").on(t.orgId, t.kind, t.stableKey),
+    index("operational_record_org_status_idx").on(t.orgId, t.kind, t.status, t.updatedAt),
+    check("operational_record_kind_valid", sql`${t.kind} IN ('objective', 'exception', 'decision')`),
+    check("operational_record_revision_positive", sql`${t.revision} > 0`),
   ],
 );
 
@@ -239,6 +303,10 @@ export const approvals = pgTable(
     capabilityId: text("capability_id").notNull(),
     riskClass: text("risk_class").notNull(),
     payload: jsonb("payload").notNull(),
+    intentId: text("intent_id"),
+    inputHash: text("input_hash"),
+    version: integer("version").notNull().default(1),
+    supersedesApprovalId: uuid("supersedes_approval_id"),
     rationale: text("rationale"),
     status: text("status").notNull().default("pending"), // pending | approved | rejected | expired | executed
     decidedByUserId: uuid("decided_by_user_id").references(() => users.id),
@@ -247,7 +315,12 @@ export const approvals = pgTable(
     decidedAt: timestamp("decided_at", { withTimezone: true }),
     createdAt: createdAt(),
   },
-  (t) => [index("approval_org_status_idx").on(t.orgId, t.status)],
+  (t) => [
+    index("approval_org_status_idx").on(t.orgId, t.status),
+    index("approval_org_capability_requester_idx").on(t.orgId, t.capabilityId, t.requestedByUserId, t.createdAt),
+    uniqueIndex("approval_org_intent_idx").on(t.orgId, t.intentId).where(sql`${t.intentId} IS NOT NULL`),
+    check("approval_intent_digest_pair_check", sql`(${t.intentId} IS NULL) = (${t.inputHash} IS NULL)`),
+  ],
 );
 
 /**
@@ -477,6 +550,8 @@ export const invoices = pgTable(
     fxRateNum: bigint("fx_rate_num", { mode: "number" }),
     fxRateDen: integer("fx_rate_den"),
     memo: text("memo"),
+    /** Sales order whose delivery produced this invoice, when sold through fulfilment. */
+    salesOrderId: uuid("sales_order_id").references((): AnyPgColumn => salesOrders.id, { onDelete: "set null" }),
     posSessionId: uuid("pos_session_id").references(() => posSessions.id, { onDelete: "set null" }),
     /** When payment is expected; from the customer's payment terms (M10). */
     dueAt: timestamp("due_at", { withTimezone: true }),
@@ -486,7 +561,7 @@ export const invoices = pgTable(
     voidedAt: timestamp("voided_at", { withTimezone: true }),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex("invoice_org_number_idx").on(t.orgId, t.number), index("invoice_org_customer_idx").on(t.orgId, t.customerId)],
+  (t) => [uniqueIndex("invoice_org_number_idx").on(t.orgId, t.number), index("invoice_org_customer_idx").on(t.orgId, t.customerId), index("invoice_org_sales_order_idx").on(t.orgId, t.salesOrderId)],
 );
 
 export const invoiceLines = pgTable(
@@ -2127,6 +2202,8 @@ export const salesOrders = pgTable(
       .references(() => customers.id, { onDelete: "restrict" }),
     status: text("status").notNull().default("draft"), // draft | confirmed | delivered | cancelled
     backordered: boolean("backordered").notNull().default(false),
+    /** Quote this order fulfils; set when the quote is awarded, never rewritten. */
+    quoteId: uuid("quote_id").references((): AnyPgColumn => quotes.id, { onDelete: "set null" }),
     note: text("note"),
     createdByActorType: text("created_by_actor_type"),
     createdByActorId: uuid("created_by_actor_id"),
@@ -2137,6 +2214,7 @@ export const salesOrders = pgTable(
   (t) => [
     uniqueIndex("sales_order_org_number_idx").on(t.orgId, t.number),
     index("sales_order_org_status_idx").on(t.orgId, t.status),
+    index("sales_order_org_quote_idx").on(t.orgId, t.quoteId),
   ],
 );
 
@@ -2244,8 +2322,8 @@ export const scimTokens = pgTable(
 
 /**
  * A published capability package. The manifest is canonical JSON signed by
- * the publisher's ed25519 key (see @chaste/plugin-kit); verification happens
- * before a listing can be marked verified, and again on install.
+ * the publisher's ed25519 key; verification happens before a listing can be
+ * marked verified, and again on install.
  */
 export const marketplaceListings = pgTable(
   "marketplace_listings",
@@ -2418,10 +2496,31 @@ export const fxSettlements = pgTable(
 );
 
 
+/** Line-level RFQ quote, so an award can carry real lines into the PO. */
+export const rfqQuoteLines = pgTable(
+  "rfq_quote_lines",
+  {
+    id: id(),
+    orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    rfqId: uuid("rfq_id").notNull().references(() => rfqs.id, { onDelete: "cascade" }),
+    position: integer("position").notNull(),
+    description: text("description").notNull(),
+    quantityThousandths: bigint("quantity_thousandths", { mode: "number" }).notNull(),
+    unitPriceMinor: bigint("unit_price_minor", { mode: "number" }).notNull(),
+    sku: text("sku"),
+  },
+  (t) => [
+    uniqueIndex("rfq_quote_line_position_idx").on(t.rfqId, t.position),
+    index("rfq_quote_line_org_idx").on(t.orgId, t.rfqId),
+    check("rfq_quote_line_quantity_positive", sql`${t.quantityThousandths} > 0`),
+    check("rfq_quote_line_price_nonnegative", sql`${t.unitPriceMinor} >= 0`),
+  ],
+);
+
 // ── Functional gap batch: quotes, recurring billing, timesheets,
 //    expense claims, customer portal shares, in-app notifications ──
 
-/** Sales quotes; accepting one converts it into an invoice verbatim. */
+/** Sales quotes; awarding one converts it into a sales order, not an invoice. */
 export const quotes = pgTable(
   "quotes",
   {
@@ -2439,7 +2538,10 @@ export const quotes = pgTable(
     taxMinor: integer("tax_minor").notNull(),
     totalMinor: integer("total_minor").notNull(),
     memo: text("memo"),
+    /** CRM opportunity this quote was written against, when one exists. */
+    dealId: uuid("deal_id").references(() => deals.id, { onDelete: "set null" }),
     convertedInvoiceId: uuid("converted_invoice_id").references(() => invoices.id, { onDelete: "set null" }),
+    convertedOrderId: uuid("converted_order_id").references((): AnyPgColumn => salesOrders.id, { onDelete: "set null" }),
     /** Past this instant the quote can no longer be accepted (M9). */
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     decidedAt: timestamp("decided_at", { withTimezone: true }),
@@ -2447,7 +2549,7 @@ export const quotes = pgTable(
     createdByActorId: uuid("created_by_actor_id"),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex("quote_org_number_idx").on(t.orgId, t.number)],
+  (t) => [uniqueIndex("quote_org_number_idx").on(t.orgId, t.number), index("quote_org_deal_idx").on(t.orgId, t.dealId)],
 );
 
 export const quoteLines = pgTable("quote_lines", {
@@ -2459,6 +2561,8 @@ export const quoteLines = pgTable("quote_lines", {
   quantity: integer("quantity").notNull(), // thousandths
   unitPriceMinor: integer("unit_price_minor").notNull(),
   taxMinor: integer("tax_minor").notNull().default(0),
+  /** Stock-backed line that reserves inventory when the quote becomes an order. */
+  itemId: uuid("item_id").references(() => items.id, { onDelete: "set null" }),
 });
 
 /**
@@ -2504,6 +2608,7 @@ export const recurringInvoiceRuns = pgTable(
     recurringInvoiceId: uuid("recurring_invoice_id")
       .notNull()
       .references(() => recurringInvoices.id, { onDelete: "cascade" }),
+    jobId: uuid("job_id").references(() => jobs.id, { onDelete: "set null" }),
     scheduledFor: timestamp("scheduled_for", { withTimezone: true }).notNull(),
     invoiceId: uuid("invoice_id").references(() => invoices.id, { onDelete: "restrict" }),
     status: text("status").notNull().default("completed"),
@@ -2513,6 +2618,7 @@ export const recurringInvoiceRuns = pgTable(
   (t) => [
     uniqueIndex("recurring_invoice_run_occurrence_idx").on(t.orgId, t.recurringInvoiceId, t.scheduledFor),
     index("recurring_invoice_run_org_idx").on(t.orgId, t.createdAt),
+    index("recurring_invoice_run_job_idx").on(t.jobId),
   ],
 );
 
@@ -2614,6 +2720,24 @@ export const notifications = pgTable(
 
 // ── better-auth managed tables ──────────────────────────────────────────
 
+export const authEmailOutbox = pgTable(
+  "auth_email_outbox",
+  {
+    id: text("id").primaryKey(),
+    kind: text("kind").notNull(),
+    recipient: text("recipient").notNull(),
+    link: text("link").notNull(),
+    tokenIdentifier: text("token_identifier"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    availableAt: timestamp("available_at", { withTimezone: true }).notNull().defaultNow(),
+    attempts: integer("attempts").notNull().default(0),
+    leaseOwner: text("lease_owner"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("auth_email_outbox_ready_idx").on(t.availableAt, t.leaseExpiresAt, t.expiresAt)],
+);
+
 export const authUser = pgTable("auth_user", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
@@ -2656,7 +2780,11 @@ export const authAccount = pgTable("auth_account", {
   issuer: text("issuer"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => [
+  uniqueIndex("auth_account_oidc_subject_unique")
+    .on(table.issuer, table.accountId)
+    .where(sql`${table.providerId} = 'oidc' AND ${table.issuer} IS NOT NULL`),
+]);
 
 export const authVerification = pgTable("auth_verification", {
   id: text("id").primaryKey(),
@@ -3054,10 +3182,67 @@ export const supportKbArticles = pgTable(
     title: text("title").notNull(),
     body: text("body").notNull(),
     category: text("category"),
+    isPublic: boolean("is_public").notNull().default(false),
     createdAt: createdAt(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("support_kb_org_idx").on(t.orgId)],
+  (t) => [
+    index("support_kb_org_idx").on(t.orgId),
+    uniqueIndex("support_kb_org_article_unique_idx").on(t.orgId, t.id),
+  ],
+);
+
+export const supportKbArticleEmbeddings = pgTable(
+  "support_kb_article_embeddings",
+  {
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    articleId: uuid("article_id").notNull(),
+    embeddingModel: text("embedding_model").notNull(),
+    contentMd5: text("content_md5").notNull(),
+    embedding: vector("embedding", { dimensions: 1024 }).notNull(),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.orgId, t.articleId] }),
+    foreignKey({
+      columns: [t.orgId, t.articleId],
+      foreignColumns: [supportKbArticles.orgId, supportKbArticles.id],
+      name: "support_kb_article_embeddings_article_fk",
+    }).onDelete("cascade"),
+    index("support_kb_article_embeddings_cosine_idx").using("hnsw", t.embedding.op("vector_cosine_ops")),
+    check("support_kb_article_embeddings_model_check", sql`length(${t.embeddingModel}) BETWEEN 1 AND 200`),
+    check("support_kb_article_embeddings_hash_check", sql`${t.contentMd5} ~ '^[0-9a-f]{32}$'`),
+  ],
+);
+
+export const supportKbArticleEmbeddingJobs = pgTable(
+  "support_kb_article_embedding_jobs",
+  {
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    articleId: uuid("article_id").notNull(),
+    contentMd5: text("content_md5").notNull(),
+    requestedModel: text("requested_model").notNull().default(""),
+    queuedAt: timestamp("queued_at", { withTimezone: true }).notNull().defaultNow(),
+    attempts: integer("attempts").notNull().default(0),
+    availableAt: timestamp("available_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.orgId, t.articleId] }),
+    foreignKey({
+      columns: [t.orgId, t.articleId],
+      foreignColumns: [supportKbArticles.orgId, supportKbArticles.id],
+      name: "support_kb_article_embedding_jobs_article_fk",
+    }).onDelete("cascade"),
+    index("support_kb_article_embedding_jobs_queue_idx").on(t.orgId, t.availableAt, t.queuedAt, t.articleId),
+    check("support_kb_article_embedding_jobs_attempts_check", sql`${t.attempts} >= 0`),
+    check("support_kb_article_embedding_jobs_model_check", sql`length(${t.requestedModel}) <= 200`),
+    check("support_kb_article_embedding_jobs_hash_check", sql`${t.contentMd5} ~ '^[0-9a-f]{32}$'`),
+  ],
 );
 
 // ── Marketing-lite (M13): saved filters, campaigns, honest send log ─────
@@ -3071,7 +3256,7 @@ export const marketingSegments = pgTable(
       .references(() => organizations.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     /** Deterministic filter: min lifetime spend in minor units. */
-    minSpendMinor: integer("min_spend_minor").notNull().default(0),
+    minSpendMinor: bigint("min_spend_minor", { mode: "number" }).notNull().default(0),
     createdAt: createdAt(),
   },
   (t) => [index("marketing_segment_org_idx").on(t.orgId)],
@@ -3226,4 +3411,25 @@ export const notificationReads = pgTable(
     readAt: timestamp("read_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("notification_read_per_user_idx").on(t.notificationId, t.userId)],
+);
+
+/**
+ * Per-user notification delivery preferences. Muted kinds stay in the feed
+ * table for audit and reconciliation but are omitted from the recipient's
+ * in-app inbox and unread count.
+ */
+export const notificationPreferences = pgTable(
+  "notification_preferences",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    mutedKinds: text("muted_kinds").array().notNull().default(sql`ARRAY[]::text[]`),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("notification_preference_user_idx").on(t.orgId, t.userId)],
 );

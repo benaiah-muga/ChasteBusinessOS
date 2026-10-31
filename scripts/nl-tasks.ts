@@ -6,6 +6,8 @@
  * Prereqs: web app on :3000 (NL_BASE_URL to override) + Postgres + NVIDIA_API_KEY.
  * Run: pnpm nl:test
  */
+import { randomUUID } from "node:crypto";
+
 /* eslint-disable @typescript-eslint/no-explicit-any -- a test driver probing untyped wire payloads; typing these here would just duplicate each API's zod schemas without adding real safety */
 const BASE = process.env.NL_BASE_URL ?? "http://localhost:3000";
 
@@ -18,12 +20,13 @@ interface Res {
   json: any;
 }
 
-async function req(method: string, path: string, body?: unknown): Promise<Res> {
+async function req(method: string, path: string, body?: unknown, idempotencyKey?: string): Promise<Res> {
   const res = await fetch(`${BASE}${path}`, {
     method,
     headers: {
       ...(body !== undefined ? { "content-type": "application/json" } : {}),
       ...(cookie ? { cookie } : {}),
+      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
       // better-auth rejects cross-origin-looking requests without this.
       origin: BASE,
     },
@@ -55,7 +58,7 @@ async function req(method: string, path: string, body?: unknown): Promise<Res> {
   return { status: res.status, json };
 }
 
-const post = (path: string, body?: unknown) => req("POST", path, body);
+const post = (path: string, body?: unknown, idempotencyKey?: string) => req("POST", path, body, idempotencyKey);
 const get = (path: string) => req("GET", path);
 
 /** Streams the agent console like the UI does; resolves the final reply. */
@@ -572,7 +575,7 @@ async function main() {
   record("complex", "Install plugin through the identity gate", installedHere);
 
   // N6, SCIM provisioning round-trip
-  const tok = await post("/api/scim/tokens", { label: "nl IdP" });
+  const tok = await post("/api/scim/tokens", { label: "nl IdP" }, randomUUID());
   const rawToken = tok.json?.token as string | undefined;
   let scimOk = !!rawToken;
   if (rawToken) {

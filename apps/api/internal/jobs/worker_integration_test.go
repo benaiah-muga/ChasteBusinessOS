@@ -1,0 +1,2313 @@
+package jobs
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/capability"
+	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/dbx"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type systemCapabilityExecutorFunc func(context.Context, capability.SystemClaims, json.RawMessage) (capability.Result, error)
+
+func (f systemCapabilityExecutorFunc) ExecuteSystem(ctx context.Context, claims capability.SystemClaims, input json.RawMessage) (capability.Result, error) {
+	return f(ctx, claims, input)
+}
+
+func TestStaleWorkerCannotAdvanceDurableRunAfterReclaim(t *testing.T) {
+	ownerURL := os.Getenv("DATABASE_URL")
+	if ownerURL == "" {
+		if os.Getenv("GO_RUNTIME_INTEGRATION_REQUIRED") == "1" {
+			t.Fatal("DATABASE_URL is required for the stale worker fencing proof")
+		}
+		t.Skip("DATABASE_URL is not configured")
+	}
+	appPassword := envOr("CHASTE_APP_DB_PASSWORD", "chaste_app_dev_only")
+	workerPassword := envOr("CHASTE_JOBS_WORKER_DB_PASSWORD", "chaste_jobs_worker_dev_only")
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	owner, err := pgxpool.New(ctx, ownerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close()
+	appPool, err := pgxpool.New(ctx, workerRoleURL(t, ownerURL, "chaste_app", appPassword))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer appPool.Close()
+	workerPool, err := pgxpool.New(ctx, workerRoleURL(t, ownerURL, "chaste_jobs_worker", workerPassword))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer workerPool.Close()
+	if err := dbx.VerifyAppRuntimeRole(ctx, appPool); err != nil {
+		t.Fatalf("verify app runtime role: %v", err)
+	}
+	if err := VerifyRole(ctx, workerPool); err != nil {
+		t.Fatalf("verify jobs worker role: %v", err)
+	}
+
+	tag := fmt.Sprintf("stale-worker-fence-%d", time.Now().UnixNano())
+	orgID := insertJobsTestOrg(t, ctx, owner, tag)
+	defer cleanupJobsTestOrgs(t, owner, orgID)
+	payload := json.RawMessage(`{"name":"Stale worker candidate"}`)
+	var approvalID, runID string
+	if err := owner.QueryRow(ctx, `
+		INSERT INTO approvals (org_id, capability_id, risk_class, payload, rationale, status, expires_at)
+		VALUES ($1::uuid, 'crm.createCustomer', 'write', $2::jsonb, 'stale worker fencing proof', 'executing', clock_timestamp() + interval '1 hour')
+		RETURNING id::text`, orgID, payload).Scan(&approvalID); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.QueryRow(ctx, `
+		INSERT INTO agent_runs (org_id, goal, status, registry_version, initiated_by_actor_type)
+		VALUES ($1::uuid, 'Stale worker fencing proof', 'waiting_approval', '1', 'agent')
+		RETURNING id::text`, orgID).Scan(&runID); err != nil {
+		t.Fatal(err)
+	}
+	const stepIndex = 1
+	if _, err := owner.Exec(ctx, `
+		INSERT INTO agent_run_steps (org_id, run_id, step_index, status, capability_id, capability_version, input_hash, input, approval_id)
+		VALUES ($1::uuid, $2::uuid, $3, 'waiting_approval', 'crm.createCustomer', '1', 'fixture-input-hash', $4::jsonb, $5::uuid)`, orgID, runID, stepIndex, payload, approvalID); err != nil {
+		t.Fatal(err)
+	}
+	jobID := insertJobsTestJobWithLinks(t, ctx, owner, orgID, "crm.createCustomer", payload, 3, time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC), runID, stepIndex, approvalID)
+
+	const staleWorkerID = "stale-durable-worker"
+	var staleClaim *ClaimedJob
+	var reclaimed *ClaimedJob
+	var executor SystemCapabilityExecutor
+	executor = systemCapabilityExecutorFunc(func(callCtx context.Context, _ capability.SystemClaims, _ json.RawMessage) (capability.Result, error) {
+		var ownerID string
+		var fencingToken int
+		if err := owner.QueryRow(callCtx, `SELECT lease_owner, fencing_token FROM jobs WHERE id=$1::uuid`, jobID).Scan(&ownerID, &fencingToken); err != nil {
+			return capability.Result{}, err
+		}
+		claimedStepIndex := stepIndex
+		staleClaim = &ClaimedJob{
+			ID: jobID, OrgID: orgID, Type: "crm.createCustomer", WorkerID: ownerID,
+			FencingToken: fencingToken, RunID: &runID, RunStepIndex: &claimedStepIndex, ApprovedApprovalID: &approvalID,
+		}
+		if _, err := owner.Exec(callCtx, `UPDATE jobs SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE id=$1::uuid`, jobID); err != nil {
+			return capability.Result{}, err
+		}
+		reclaimer, err := NewWorker(workerPool, workerPool, appPool, executor, Options{WorkerID: "fresh-durable-worker", LeaseDuration: 30 * time.Second})
+		if err != nil {
+			return capability.Result{}, err
+		}
+		reclaimed, err = reclaimer.ClaimOne(callCtx)
+		if err != nil {
+			return capability.Result{}, err
+		}
+		if reclaimed == nil || reclaimed.FencingToken <= fencingToken || reclaimed.WorkerID == ownerID {
+			return capability.Result{}, errors.New("job was not reclaimed with a newer lease fence")
+		}
+		return capability.Result{OK: true, Data: json.RawMessage(`{"customerId":"00000000-0000-4000-8000-000000000001"}`)}, nil
+	})
+	worker, err := NewWorker(workerPool, workerPool, appPool, executor, Options{WorkerID: staleWorkerID, LeaseDuration: 30 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	worked, err := worker.ProcessOne(ctx)
+	if !worked || !errors.Is(err, ErrJobLeaseLost) {
+		t.Fatalf("stale worker process worked=%v err=%v, want a fenced lease-loss error", worked, err)
+	}
+	if staleClaim == nil || reclaimed == nil {
+		t.Fatal("stale and replacement claims were not captured")
+	}
+
+	for _, update := range []struct {
+		name string
+		run  func() error
+	}{
+		{name: "run", run: func() error { return worker.transitionRun(ctx, staleClaim, "failed", stepIndex, "stale worker") }},
+		{name: "step", run: func() error {
+			return worker.transitionStep(ctx, staleClaim, stepIndex, "failed", nil, "stale worker", nil, nil)
+		}},
+		{name: "approval", run: func() error { return worker.finishApproval(ctx, staleClaim) }},
+	} {
+		if err := update.run(); !errors.Is(err, ErrJobLeaseLost) {
+			t.Errorf("stale %s update error=%v, want ErrJobLeaseLost", update.name, err)
+		}
+	}
+	var jobStatus, leaseOwner, runStatus, stepStatus, approvalStatus string
+	var fencingToken int
+	if err := owner.QueryRow(ctx, `SELECT status, lease_owner, fencing_token FROM jobs WHERE id=$1::uuid`, jobID).Scan(&jobStatus, &leaseOwner, &fencingToken); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.QueryRow(ctx, `SELECT status FROM agent_runs WHERE id=$1::uuid AND org_id=$2::uuid`, runID, orgID).Scan(&runStatus); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.QueryRow(ctx, `SELECT status FROM agent_run_steps WHERE run_id=$1::uuid AND org_id=$2::uuid AND step_index=$3`, runID, orgID, stepIndex).Scan(&stepStatus); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.QueryRow(ctx, `SELECT status FROM approvals WHERE id=$1::uuid AND org_id=$2::uuid`, approvalID, orgID).Scan(&approvalStatus); err != nil {
+		t.Fatal(err)
+	}
+	if jobStatus != "processing" || leaseOwner != reclaimed.WorkerID || fencingToken != reclaimed.FencingToken || runStatus != "running" || stepStatus != "running" || approvalStatus != "executing" {
+		t.Fatalf("stale state mutation: job=%s/%s/%d run=%s step=%s approval=%s", jobStatus, leaseOwner, fencingToken, runStatus, stepStatus, approvalStatus)
+	}
+
+	var routineID string
+	if err := owner.QueryRow(ctx, `
+		INSERT INTO routines (org_id, name, prompt, schedule, enabled, trigger_type)
+		VALUES ($1::uuid, 'Stale routine', 'No action', '{"kind":"daily"}', true, 'schedule')
+		RETURNING id::text`, orgID).Scan(&routineID); err != nil {
+		t.Fatal(err)
+	}
+	routineJSON, err := json.Marshal(routinePayload{RoutineID: routineID, Trigger: "manual"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	routineJobID := insertJobsTestJob(t, ctx, owner, orgID, routineJobType, routineJSON, 3, time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC))
+	routineClaimer, err := NewWorker(workerPool, workerPool, appPool, executor, Options{WorkerID: "stale-routine-worker", LeaseDuration: 30 * time.Second, RoutineAgentRunner: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	routineClaim, err := routineClaimer.ClaimOne(ctx)
+	if err != nil || routineClaim == nil || routineClaim.ID != routineJobID {
+		t.Fatalf("claim routine job=%+v err=%v", routineClaim, err)
+	}
+	routineReclaimer, err := NewWorker(workerPool, workerPool, appPool, executor, Options{WorkerID: "fresh-routine-worker", LeaseDuration: 30 * time.Second, RoutineAgentRunner: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The fake model reclaims the lease in the response that asks for a tool call.
+	// The routine then reaches ExecuteSystem with its stale claim.
+	actualExecutor := capability.NewExecutor(appPool, "", "", "")
+	var routineReclaimed *ClaimedJob
+	var handlerErr error
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/chat/completions" {
+			handlerErr = fmt.Errorf("unexpected model request %s %s", r.Method, r.URL.Path)
+			http.Error(w, handlerErr.Error(), http.StatusBadRequest)
+			return
+		}
+		if requests == 1 {
+			if _, err := owner.Exec(r.Context(), `UPDATE jobs SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE id=$1::uuid`, routineJobID); err != nil {
+				handlerErr = err
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			routineReclaimed, handlerErr = routineReclaimer.ClaimOne(r.Context())
+			if handlerErr != nil || routineReclaimed == nil || routineReclaimed.ID != routineJobID {
+				if handlerErr == nil {
+					handlerErr = errors.New("fake routine model could not reclaim the job")
+				}
+				http.Error(w, handlerErr.Error(), http.StatusInternalServerError)
+				return
+			}
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":null,"tool_calls":[{"id":"stale-routine-tool-call","type":"function","function":{"name":"crm_listCustomers","arguments":"{}"}}]}}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`))
+			return
+		}
+		var body struct {
+			Messages []struct {
+				Role    string          `json:"role"`
+				Content json.RawMessage `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			handlerErr = err
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		foundFencedTool := false
+		for _, message := range body.Messages {
+			if message.Role == "tool" && bytes.Contains(message.Content, []byte(capability.ErrSystemJobLeaseLost.Error())) {
+				foundFencedTool = true
+			}
+		}
+		if !foundFencedTool {
+			handlerErr = errors.New("routine model did not receive the fenced tool result")
+			http.Error(w, handlerErr.Error(), http.StatusInternalServerError)
+			return
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"routine finished"}}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`))
+	}))
+	defer server.Close()
+	routineRunner := newRoutineAgent(appPool, actualExecutor)
+	routineRunner.client = server.Client()
+	apiKey := "fake-routine-model-key"
+	config := routineConfig{BaseURL: server.URL + "/v1", APIKey: &apiKey}
+	config.Models.Primary = "fake-routine-model"
+	if _, _, err := routineRunner.agentLoop(ctx, routineClaim, "", routineRow{ID: routineID, Name: "Stale routine", Prompt: "List customers", OrgName: tag}, config); err != nil {
+		t.Fatalf("fake routine tool turn error=%v", err)
+	}
+	if handlerErr != nil || requests != 2 || routineReclaimed == nil {
+		t.Fatalf("fake model requests=%d reclaimer=%+v handler error=%v", requests, routineReclaimed, handlerErr)
+	}
+	toolIntent := routineIntent(routineJobID, 0, 0, "stale-routine-tool-call")
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2`, orgID, orgID+":"+toolIntent); got != 0 {
+		t.Fatalf("stale routine tool created %d receipts, want none", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id='crm.listCustomers' AND kind='capability.executed' AND actor_type='system'`, orgID); got != 0 {
+		t.Fatalf("stale routine tool created %d capability audit events, want none", got)
+	}
+	freshToolClaims := capability.SystemClaims{
+		OrganizationID: orgID, CapabilityID: "crm.listCustomers", Permission: GoCapabilityPermissions["crm.listCustomers"],
+		IntentID: toolIntent, LeaseExtensionMillis: 180_000,
+	}
+	freshToolClaims.JobID = routineReclaimed.ID
+	freshToolClaims.LeaseOwner = routineReclaimed.WorkerID
+	freshToolClaims.FencingToken = routineReclaimed.FencingToken
+	freshResult, err := actualExecutor.ExecuteSystem(ctx, freshToolClaims, json.RawMessage(`{}`))
+	if err != nil || !freshResult.OK {
+		t.Fatalf("fresh routine tool execution result=%+v err=%v, want success", freshResult, err)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2`, orgID, orgID+":"+toolIntent); got != 1 {
+		t.Fatalf("fresh routine tool created %d receipts, want one", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id='crm.listCustomers' AND kind='capability.executed' AND actor_type='system'`, orgID); got != 1 {
+		t.Fatalf("fresh routine tool created %d capability audit events, want one", got)
+	}
+
+	staleRoutineCtx := withJobLeaseContext(ctx, routineClaim)
+	routineAgent := newRoutineAgent(appPool, executor)
+	var staleRoutinePayload routinePayload
+	if err := json.Unmarshal(routineJSON, &staleRoutinePayload); err != nil {
+		t.Fatal(err)
+	}
+	if err := routineAgent.finish(staleRoutineCtx, orgID, staleRoutinePayload, routineID, "failed", "stale owner"); !errors.Is(err, ErrJobLeaseLost) {
+		t.Fatalf("stale routine state update error=%v, want ErrJobLeaseLost", err)
+	}
+	var routineLastStatus string
+	if err := owner.QueryRow(ctx, `SELECT COALESCE(last_status, '<null>') FROM routines WHERE id=$1::uuid AND org_id=$2::uuid`, routineID, orgID).Scan(&routineLastStatus); err != nil {
+		t.Fatal(err)
+	}
+	if routineLastStatus != "<null>" {
+		t.Fatalf("stale routine owner changed last_status to %q", routineLastStatus)
+	}
+}
+
+func TestSystemCapabilityLongEffectCoordinatesLeaseHeartbeatAndRollback(t *testing.T) {
+	ownerURL := os.Getenv("DATABASE_URL")
+	if ownerURL == "" {
+		if os.Getenv("GO_RUNTIME_INTEGRATION_REQUIRED") == "1" {
+			t.Fatal("DATABASE_URL is required for the long capability lease proof")
+		}
+		t.Skip("DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	owner, err := pgxpool.New(ctx, ownerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close()
+	appName := fmt.Sprintf("go-effect-lease-%d", time.Now().UnixNano())
+	appURL, err := url.Parse(workerRoleURL(t, ownerURL, "chaste_app", envOr("CHASTE_APP_DB_PASSWORD", "chaste_app_dev_only")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	appQuery := appURL.Query()
+	appQuery.Set("application_name", appName)
+	appURL.RawQuery = appQuery.Encode()
+	appPool, err := pgxpool.New(ctx, appURL.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer appPool.Close()
+	workerPool, err := pgxpool.New(ctx, workerRoleURL(t, ownerURL, "chaste_jobs_worker", envOr("CHASTE_JOBS_WORKER_DB_PASSWORD", "chaste_jobs_worker_dev_only")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer workerPool.Close()
+	if err := dbx.VerifyAppRuntimeRole(ctx, appPool); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyRole(ctx, workerPool); err != nil {
+		t.Fatal(err)
+	}
+	orgID := insertJobsTestOrg(t, ctx, owner, fmt.Sprintf("effect-lease-%d", time.Now().UnixNano()))
+	defer cleanupJobsTestOrgs(t, owner, orgID)
+	executor := capability.NewExecutor(appPool, "", "", "")
+	worker, err := NewWorker(workerPool, workerPool, appPool, executor, Options{WorkerID: "long-effect-worker", LeaseDuration: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// An unrelated table lock holds the governed capability transaction after
+	// it has acquired and extended its own job lease row.
+	longPayload := json.RawMessage(`{"name":"Lease protected long effect"}`)
+	longJobID := insertJobsTestJob(t, ctx, owner, orgID, "crm.createCustomer", longPayload, 3, time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC))
+	blocker, err := owner.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = blocker.Rollback(context.Background()) }()
+	if _, err := blocker.Exec(ctx, `LOCK TABLE public.customers IN ACCESS EXCLUSIVE MODE`); err != nil {
+		t.Fatal(err)
+	}
+	processDone := make(chan struct {
+		worked bool
+		err    error
+	}, 1)
+	go func() {
+		worked, err := worker.ProcessOne(ctx)
+		processDone <- struct {
+			worked bool
+			err    error
+		}{worked: worked, err: err}
+	}()
+	if err := waitForCapabilityTableLock(ctx, owner, appName); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case result := <-processDone:
+		t.Fatalf("long capability returned before lock release: worked=%v err=%v", result.worked, result.err)
+	case <-time.After(1200 * time.Millisecond):
+	}
+	assertJobRowLocked(t, ctx, owner, longJobID)
+	if err := blocker.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case result := <-processDone:
+		if !result.worked || result.err != nil {
+			t.Fatalf("long capability worker result worked=%v err=%v", result.worked, result.err)
+		}
+	case <-ctx.Done():
+		t.Fatal("long capability worker did not finish after table lock release")
+	}
+	assertJobsTestState(t, ctx, owner, longJobID, "done", 1)
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM customers WHERE org_id=$1::uuid AND name=$2`, orgID, "Lease protected long effect"); got != 1 {
+		t.Fatalf("long capability created %d customers, want one", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2`, orgID, orgID+":"+longJobID); got != 1 {
+		t.Fatalf("long capability created %d receipts, want one", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id='crm.createCustomer' AND kind='capability.executed' AND actor_type='system'`, orgID); got != 1 {
+		t.Fatalf("long capability created %d audit events, want one", got)
+	}
+
+	// routineTx takes the same job row lock as capability effects. A delayed
+	// routine read must extend the lease atomically, pause heartbeats while it
+	// owns the row, and leave enough time for the original owner to acknowledge.
+	var routineID string
+	if err := owner.QueryRow(ctx, `INSERT INTO routines (org_id,name,prompt,schedule,enabled,trigger_type) VALUES ($1::uuid,'Lease proof routine','Read only','{"kind":"daily"}',true,'schedule') RETURNING id::text`, orgID).Scan(&routineID); err != nil {
+		t.Fatal(err)
+	}
+	routinePayloadBytes, err := json.Marshal(routinePayload{RoutineID: routineID, Trigger: "manual"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	routineJobID := insertJobsTestJob(t, ctx, owner, orgID, routineJobType, routinePayloadBytes, 3, time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC))
+	routineWorker, err := NewWorker(workerPool, workerPool, appPool, executor, Options{WorkerID: "routine-tx-owner", LeaseDuration: time.Second, RoutineAgentRunner: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	routineClaim, err := routineWorker.ClaimOne(ctx)
+	if err != nil || routineClaim == nil || routineClaim.ID != routineJobID {
+		t.Fatalf("routine tx proof claim=%+v err=%v", routineClaim, err)
+	}
+	routineBlocker, err := owner.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = routineBlocker.Rollback(context.Background()) }()
+	if _, err := routineBlocker.Exec(ctx, `LOCK TABLE public.routines IN ACCESS EXCLUSIVE MODE`); err != nil {
+		t.Fatal(err)
+	}
+	routineCtx := withEffectHeartbeatGate(withJobLeaseContext(ctx, routineClaim), &effectHeartbeatGate{})
+	routineAgent := newRoutineAgent(appPool, executor)
+	routineLoaded := make(chan error, 1)
+	go func() {
+		_, _, loadErr := routineAgent.loadRoutine(routineCtx, orgID, routineID)
+		routineLoaded <- loadErr
+	}()
+	if err := waitForApplicationTableLock(ctx, owner, appName, "routines"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-routineLoaded:
+		t.Fatalf("routine transaction returned before lock release: %v", err)
+	case <-time.After(1200 * time.Millisecond):
+	}
+	routineGate := routineCtx.Value(effectHeartbeatGateContextKey{}).(*effectHeartbeatGate)
+	if renewed, err := routineGate.renew(ctx, func(ctx context.Context) (bool, error) { return routineWorker.renewLease(ctx, routineClaim) }); err != nil || !renewed {
+		t.Fatalf("heartbeat coordination while routineTx is in flight renewed=%v err=%v", renewed, err)
+	}
+	assertJobRowLocked(t, ctx, owner, routineJobID)
+	if err := routineBlocker.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-routineLoaded:
+		if err != nil {
+			t.Fatalf("routineTx load failed after unblock: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("routineTx did not finish after table lock release")
+	}
+	var routineLeaseExpiry time.Time
+	if err := owner.QueryRow(ctx, `SELECT lease_expires_at FROM jobs WHERE id=$1::uuid`, routineJobID).Scan(&routineLeaseExpiry); err != nil {
+		t.Fatal(err)
+	}
+	if !routineLeaseExpiry.After(time.Now().UTC().Add(2 * time.Minute)) {
+		t.Fatalf("routineTx did not commit the safety extension: expiry=%s", routineLeaseExpiry)
+	}
+	if renewed, err := routineGate.renew(ctx, func(ctx context.Context) (bool, error) { return routineWorker.renewLease(ctx, routineClaim) }); err != nil || !renewed {
+		t.Fatalf("heartbeat did not resume after routineTx committed: renewed=%v err=%v", renewed, err)
+	}
+	// The committed future lease above makes this job ineligible until after
+	// the original worker acknowledges it. Avoid claiming from the shared queue
+	// here, since that could mutate an unrelated integration-test job.
+	if finalized, err := routineWorker.finalize(ctx, routineClaim, "done", "", nil); err != nil || !finalized {
+		t.Fatalf("original routine owner could not acknowledge after routineTx: finalized=%v err=%v", finalized, err)
+	}
+	assertJobsTestState(t, ctx, owner, routineJobID, "done", 1)
+
+	// Cancel a second effect after its lease extension is staged but before its
+	// capability write can pass the table lock. The transaction rollback must
+	// discard both the extension and every governed effect, leaving it reclaimable.
+	rollbackPayload := json.RawMessage(`{"name":"Rolled back lease effect"}`)
+	rollbackJobID := insertJobsTestJob(t, ctx, owner, orgID, "crm.createCustomer", rollbackPayload, 3, time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC))
+	rollbackClaimer, err := NewWorker(workerPool, workerPool, appPool, executor, Options{WorkerID: "rollback-owner", LeaseDuration: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rollbackClaim, err := rollbackClaimer.ClaimOne(ctx)
+	if err != nil || rollbackClaim == nil || rollbackClaim.ID != rollbackJobID {
+		t.Fatalf("rollback proof claim=%+v err=%v", rollbackClaim, err)
+	}
+	rollbackBlocker, err := owner.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rollbackBlocker.Exec(ctx, `LOCK TABLE public.customers IN ACCESS EXCLUSIVE MODE`); err != nil {
+		_ = rollbackBlocker.Rollback(ctx)
+		t.Fatal(err)
+	}
+	callCtx, cancelCall := context.WithCancel(ctx)
+	callDone := make(chan error, 1)
+	go func() {
+		_, err := executor.ExecuteSystem(callCtx, capability.SystemClaims{
+			OrganizationID: orgID, CapabilityID: rollbackClaim.Type, Permission: GoCapabilityPermissions[rollbackClaim.Type],
+			IntentID: rollbackClaim.ID, JobID: rollbackClaim.ID, LeaseOwner: rollbackClaim.WorkerID,
+			FencingToken: rollbackClaim.FencingToken, LeaseExtensionMillis: rollbackClaim.LeaseExtensionMillis,
+		}, rollbackPayload)
+		callDone <- err
+	}()
+	if err := waitForCapabilityTableLock(ctx, owner, appName); err != nil {
+		cancelCall()
+		_ = rollbackBlocker.Rollback(ctx)
+		t.Fatal(err)
+	}
+	time.Sleep(1200 * time.Millisecond)
+	cancelCall()
+	_ = rollbackBlocker.Rollback(ctx)
+	select {
+	case err := <-callDone:
+		if err == nil {
+			t.Fatal("cancelled capability transaction unexpectedly committed")
+		}
+	case <-ctx.Done():
+		t.Fatal("cancelled capability transaction did not roll back")
+	}
+	var expiry time.Time
+	if err := owner.QueryRow(ctx, `SELECT lease_expires_at FROM jobs WHERE id=$1::uuid`, rollbackJobID).Scan(&expiry); err != nil {
+		t.Fatal(err)
+	}
+	if !expiry.Equal(rollbackClaim.LeaseExpiresAt) || expiry.After(time.Now().UTC()) {
+		t.Fatalf("rolled back effect changed lease expiry from %s to %s", rollbackClaim.LeaseExpiresAt, expiry)
+	}
+	if _, err := owner.Exec(ctx, `UPDATE jobs SET lease_expires_at=clock_timestamp()-interval '1 millisecond' WHERE id=$1::uuid AND status='processing' AND lease_owner=$2 AND fencing_token=$3`, rollbackJobID, rollbackClaim.WorkerID, rollbackClaim.FencingToken); err != nil {
+		t.Fatal(err)
+	}
+	var expired bool
+	if err := owner.QueryRow(ctx, `SELECT lease_expires_at < clock_timestamp() FROM jobs WHERE id=$1::uuid`, rollbackJobID).Scan(&expired); err != nil {
+		t.Fatal(err)
+	}
+	if !expired {
+		t.Fatal("rollback fixture lease did not expire before reclaim")
+	}
+	if renewed, err := rollbackClaimer.renewLease(ctx, rollbackClaim); err != nil || renewed {
+		t.Fatalf("expired same-owner heartbeat renewed=%v err=%v, want false without error", renewed, err)
+	}
+	if finalized, err := rollbackClaimer.finalize(ctx, rollbackClaim, "done", "expired owner", nil); err != nil || finalized {
+		t.Fatalf("expired same-owner finalization finalized=%v err=%v, want false without error", finalized, err)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM customers WHERE org_id=$1::uuid AND name=$2`, orgID, "Rolled back lease effect"); got != 0 {
+		t.Fatalf("rolled back capability created %d customers, want none", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2`, orgID, orgID+":"+rollbackJobID); got != 0 {
+		t.Fatalf("rolled back capability created %d receipts, want none", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id='crm.createCustomer' AND kind='capability.executed' AND actor_type='system'`, orgID); got != 1 {
+		t.Fatalf("rolled back capability changed audit count to %d, want only the successful long effect", got)
+	}
+	recoveryWorker, err := NewWorker(workerPool, workerPool, appPool, executor, Options{WorkerID: "rollback-recovery-owner", LeaseDuration: 30 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := recoveryWorker.ClaimOne(ctx)
+	if err != nil || recovered == nil || recovered.ID != rollbackJobID || recovered.FencingToken <= rollbackClaim.FencingToken {
+		t.Fatalf("rolled back job was not safely reclaimable: claim=%+v err=%v", recovered, err)
+	}
+	result, err := executor.ExecuteSystem(ctx, capability.SystemClaims{
+		OrganizationID: orgID, CapabilityID: recovered.Type, Permission: GoCapabilityPermissions[recovered.Type],
+		IntentID: recovered.ID, JobID: recovered.ID, LeaseOwner: recovered.WorkerID,
+		FencingToken: recovered.FencingToken, LeaseExtensionMillis: recovered.LeaseExtensionMillis,
+	}, rollbackPayload)
+	if err != nil || !result.OK {
+		t.Fatalf("recovered capability result=%+v err=%v", result, err)
+	}
+}
+
+func waitForCapabilityTableLock(ctx context.Context, owner *pgxpool.Pool, appName string) error {
+	return waitForApplicationTableLock(ctx, owner, appName, "customers")
+}
+
+func waitForApplicationTableLock(ctx context.Context, owner *pgxpool.Pool, appName, table string) error {
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		var blocked bool
+		if err := owner.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM pg_stat_activity
+				WHERE application_name=$1 AND wait_event_type='Lock' AND query ILIKE '%' || $2 || '%'
+			)`, appName, table).Scan(&blocked); err != nil {
+			return err
+		}
+		if blocked {
+			return nil
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return errors.New("capability executor did not reach the controlled customers table lock")
+}
+
+func TestGoCapabilityJobWorkerMatchesLegacy(t *testing.T) {
+	ownerURL := os.Getenv("DATABASE_URL")
+	if ownerURL == "" {
+		if os.Getenv("GO_RUNTIME_INTEGRATION_REQUIRED") == "1" {
+			t.Fatal("DATABASE_URL is required for the Go capability jobs database proof")
+		}
+		t.Skip("DATABASE_URL is not configured")
+	}
+	appPassword := os.Getenv("CHASTE_APP_DB_PASSWORD")
+	if appPassword == "" {
+		appPassword = "chaste_app_dev_only"
+	}
+	workerPassword := os.Getenv("CHASTE_JOBS_WORKER_DB_PASSWORD")
+	if workerPassword == "" {
+		if os.Getenv("GO_RUNTIME_INTEGRATION_REQUIRED") == "1" {
+			t.Fatal("CHASTE_JOBS_WORKER_DB_PASSWORD is required for the jobs worker database proof")
+		}
+		workerPassword = "chaste_jobs_worker_dev_only"
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	owner, err := pgxpool.New(ctx, ownerURL)
+	if err != nil {
+		t.Fatalf("connect database owner: %v", err)
+	}
+	defer owner.Close()
+	appPool, err := pgxpool.New(ctx, workerRoleURL(t, ownerURL, "chaste_app", appPassword))
+	if err != nil {
+		t.Fatalf("connect app runtime: %v", err)
+	}
+	defer appPool.Close()
+	workerPool, err := pgxpool.New(ctx, workerRoleURL(t, ownerURL, "chaste_jobs_worker", workerPassword))
+	if err != nil {
+		t.Fatalf("connect jobs worker: %v", err)
+	}
+	defer workerPool.Close()
+	if err := dbx.VerifyAppRuntimeRole(ctx, appPool); err != nil {
+		t.Fatalf("verify app runtime role: %v", err)
+	}
+	if err := VerifyRole(ctx, workerPool); err != nil {
+		t.Fatalf("verify jobs worker role: %v", err)
+	}
+
+	tag := fmt.Sprintf("go-jobs-%d", time.Now().UnixNano())
+	orgA := insertJobsTestOrg(t, ctx, owner, tag+"-a")
+	orgB := insertJobsTestOrg(t, ctx, owner, tag+"-b")
+	defer cleanupJobsTestOrgs(t, owner, orgA, orgB)
+
+	executor := capability.NewExecutor(appPool, "", "", "")
+	worker, err := NewWorker(workerPool, workerPool, appPool, executor, Options{
+		WorkerID:      "go-jobs-integration-worker",
+		LeaseDuration: time.Second,
+		PollInterval:  10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	unsupportedID := insertJobsTestJob(t, ctx, owner, orgA, "documents.suggestCoding", json.RawMessage(`{"documentId":"00000000-0000-4000-8000-000000000000"}`), 3, time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC))
+	routineID := insertJobsTestJob(t, ctx, owner, orgA, "routines.executeRoutine", json.RawMessage(`{"routineId":"00000000-0000-4000-8000-000000000000","trigger":"schedule"}`), 3, time.Date(2090, 1, 1, 0, 0, 0, 0, time.UTC))
+	foreignID := insertJobsTestJob(t, ctx, owner, orgB, "crm.createCustomer", json.RawMessage(`{"name":"Foreign tenant customer"}`), 3, time.Date(2090, 1, 1, 0, 0, 0, 0, time.UTC))
+
+	var unscopedPayload []byte
+	err = workerPool.QueryRow(ctx, `SELECT payload FROM public.jobs WHERE id = $1::uuid`, foreignID).Scan(&unscopedPayload)
+	if !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("jobs worker read payload without org context: err=%v", err)
+	}
+	var crossTenantID string
+	_, err = dbx.WithOrgTx(ctx, workerPool, orgA, func(tx pgx.Tx) (struct{}, error) {
+		return struct{}{}, tx.QueryRow(ctx, `SELECT id::text FROM public.jobs WHERE id = $1::uuid AND org_id = $2::uuid`, foreignID, orgB).Scan(&crossTenantID)
+	})
+	if !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("jobs worker crossed organization boundary: err=%v", err)
+	}
+	_, err = dbx.WithOrgTx(ctx, workerPool, orgA, func(tx pgx.Tx) (struct{}, error) {
+		return struct{}{}, tx.QueryRow(ctx, `SELECT payload FROM public.jobs WHERE id = $1::uuid`, unsupportedID).Scan(&unscopedPayload)
+	})
+	if !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("jobs worker read an unsupported capability payload: err=%v", err)
+	}
+
+	// Two concurrent claimers must receive different rows. The claim function
+	// returns metadata only, and its SQL allowlist skips unsupported jobs.
+	claimAID := insertJobsTestJob(t, ctx, owner, orgA, "crm.listTasks", json.RawMessage(`{}`), 3, time.Date(1901, 1, 1, 0, 0, 0, 0, time.UTC))
+	claimBID := insertJobsTestJob(t, ctx, owner, orgA, "crm.listTasks", json.RawMessage(`{}`), 3, time.Date(1901, 1, 1, 0, 0, 0, 0, time.UTC))
+	workerB, err := NewWorker(workerPool, workerPool, appPool, executor, Options{WorkerID: "go-jobs-integration-worker-b", LeaseDuration: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var claims [2]*ClaimedJob
+	var claimErrors [2]error
+	var concurrent sync.WaitGroup
+	concurrent.Add(2)
+	go func() {
+		defer concurrent.Done()
+		claims[0], claimErrors[0] = worker.ClaimOne(ctx)
+	}()
+	go func() {
+		defer concurrent.Done()
+		claims[1], claimErrors[1] = workerB.ClaimOne(ctx)
+	}()
+	concurrent.Wait()
+	for index, claimErr := range claimErrors {
+		if claimErr != nil {
+			t.Fatalf("claim %d: %v", index, claimErr)
+		}
+	}
+	if claims[0] == nil || claims[1] == nil || claims[0].ID == claims[1].ID {
+		t.Fatalf("concurrent claims were not unique: %#v", claims)
+	}
+	claimedIDs := map[string]bool{claims[0].ID: true, claims[1].ID: true}
+	if !claimedIDs[claimAID] || !claimedIDs[claimBID] {
+		t.Fatalf("claim function took unsupported work instead of the allowlisted jobs: %#v", claims)
+	}
+	if len(claims[0].Payload) != 0 || len(claims[1].Payload) != 0 {
+		t.Fatal("global claim returned a job payload")
+	}
+	for index, claim := range claims {
+		currentWorker := worker
+		if index == 1 {
+			currentWorker = workerB
+		}
+		if finalized, err := currentWorker.finalize(ctx, claim, "failed", "claim concurrency fixture released", nil); err != nil || !finalized {
+			t.Fatalf("release claim %d: finalized=%v err=%v", index, finalized, err)
+		}
+	}
+
+	// A worker crash after the governed receipt commits but before queue ack is
+	// recovered by the same job ID receipt without duplicating the customer.
+	replayInput := json.RawMessage(`{"name":"Go jobs receipt replay customer"}`)
+	replayID := insertJobsTestJob(t, ctx, owner, orgA, "crm.createCustomer", replayInput, 3, time.Date(1902, 1, 1, 0, 0, 0, 0, time.UTC))
+	firstClaim, err := worker.ClaimOne(ctx)
+	if err != nil || firstClaim == nil || firstClaim.ID != replayID {
+		t.Fatalf("first receipt claim=%#v err=%v", firstClaim, err)
+	}
+	if err := worker.loadPayload(ctx, firstClaim); err != nil {
+		t.Fatalf("load first payload: %v", err)
+	}
+	firstResult, err := executor.ExecuteSystem(ctx, capability.SystemClaims{
+		OrganizationID: orgA, CapabilityID: firstClaim.Type,
+		Permission: GoCapabilityPermissions[firstClaim.Type], IntentID: firstClaim.ID,
+		JobID: firstClaim.ID, LeaseOwner: firstClaim.WorkerID, FencingToken: firstClaim.FencingToken,
+		LeaseExtensionMillis: firstClaim.LeaseExtensionMillis,
+	}, firstClaim.Payload)
+	if err != nil || !firstResult.OK || firstResult.Replayed {
+		t.Fatalf("first effect result=%+v err=%v", firstResult, err)
+	}
+	if _, err := owner.Exec(ctx, `UPDATE jobs SET lease_expires_at = clock_timestamp() - interval '1 second' WHERE id = $1::uuid`, replayID); err != nil {
+		t.Fatal(err)
+	}
+	worked, err := worker.ProcessOne(ctx)
+	if err != nil || !worked {
+		t.Fatalf("replacement worker process worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, replayID, "done", 2)
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM customers WHERE org_id = $1::uuid AND name = $2`, orgA, "Go jobs receipt replay customer"); got != 1 {
+		t.Fatalf("receipt replay produced %d customers, want one", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id = $1::uuid AND intent_key = $2`, orgA, orgA+":"+replayID); got != 1 {
+		t.Fatalf("receipt replay produced %d action receipts, want one", got)
+	}
+
+	// Approval, effect receipt, and durable-step completion stay linked through
+	// the same organization-scoped queue row.
+	approvedInput := json.RawMessage(`{"name":"Go jobs approved durable customer","preferredContactMethod":"email","doNotContact":false}`)
+	if _, err := owner.Exec(ctx, `
+		INSERT INTO policies (org_id, capability_pattern, max_risk_autonomous, requires_approval_for)
+		VALUES ($1::uuid, 'crm.createCustomer', 'read', '[]'::jsonb)`, orgA); err != nil {
+		t.Fatal(err)
+	}
+	var approvalID string
+	if err := owner.QueryRow(ctx, `
+		INSERT INTO approvals (org_id, capability_id, risk_class, payload, rationale, status, expires_at)
+		VALUES ($1::uuid, 'crm.createCustomer', 'write', $2::jsonb, 'go jobs integration approval', 'executing', clock_timestamp() + interval '1 hour')
+		RETURNING id::text`, orgA, approvedInput).Scan(&approvalID); err != nil {
+		t.Fatal(err)
+	}
+	var runID string
+	if err := owner.QueryRow(ctx, `
+		INSERT INTO agent_runs (org_id, goal, status, registry_version, initiated_by_actor_type)
+		VALUES ($1::uuid, 'Go jobs durable worker proof', 'waiting_approval', '1', 'agent')
+		RETURNING id::text`, orgA).Scan(&runID); err != nil {
+		t.Fatal(err)
+	}
+	var stepIndex = 1
+	if _, err := owner.Exec(ctx, `
+		INSERT INTO agent_run_steps (org_id, run_id, step_index, status, capability_id, capability_version, input_hash, input, approval_id)
+		VALUES ($1::uuid, $2::uuid, $3, 'waiting_approval', 'crm.createCustomer', '1', 'fixture-input-hash', $4::jsonb, $5::uuid)`, orgA, runID, stepIndex, approvedInput, approvalID); err != nil {
+		t.Fatal(err)
+	}
+	durableJobID := insertJobsTestJobWithLinks(t, ctx, owner, orgA, "crm.createCustomer", approvedInput, 3, time.Date(1903, 1, 1, 0, 0, 0, 0, time.UTC), runID, stepIndex, approvalID)
+	worked, err = worker.ProcessOne(ctx)
+	if err != nil || !worked {
+		t.Fatalf("approved durable job process worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, durableJobID, "done", 1)
+	var stepStatus, runStatus, approvalStatus string
+	var receiptID *string
+	if err := owner.QueryRow(ctx, `SELECT status, receipt_id::text FROM agent_run_steps WHERE org_id = $1::uuid AND run_id = $2::uuid AND step_index = $3`, orgA, runID, stepIndex).Scan(&stepStatus, &receiptID); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.QueryRow(ctx, `SELECT status FROM agent_runs WHERE org_id = $1::uuid AND id = $2::uuid`, orgA, runID).Scan(&runStatus); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.QueryRow(ctx, `SELECT status FROM approvals WHERE id = $1::uuid AND org_id = $2::uuid`, approvalID, orgA).Scan(&approvalStatus); err != nil {
+		t.Fatal(err)
+	}
+	if stepStatus != "committed" || receiptID == nil || runStatus != "completed" || approvalStatus != "executed" {
+		t.Fatalf("linked durable state step=%q receipt=%v run=%q approval=%q", stepStatus, receiptID, runStatus, approvalStatus)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id = $1::uuid AND kind = 'capability.executed' AND capability_id = 'crm.createCustomer' AND actor_type = 'system' AND actor_id IS NULL AND session_id IS NULL`, orgA); got != 2 {
+		t.Fatalf("system-attributed execution events=%d, want two", got)
+	}
+
+	// Running and failed durable-step transitions clear approval_id when the
+	// queue row has no approval, while preserving a prior receipt_id. This
+	// matches the legacy Drizzle update's NULL-versus-omitted field semantics.
+	var priorReceiptID string
+	if err := owner.QueryRow(ctx, `SELECT id::text FROM action_receipts WHERE org_id = $1::uuid AND intent_key = $2`, orgA, orgA+":"+replayID).Scan(&priorReceiptID); err != nil {
+		t.Fatal(err)
+	}
+	var failedRunID string
+	if err := owner.QueryRow(ctx, `
+		INSERT INTO agent_runs (org_id, goal, status, registry_version, initiated_by_actor_type)
+		VALUES ($1::uuid, 'Go jobs durable failure transition', 'waiting_approval', '1', 'agent')
+		RETURNING id::text`, orgA).Scan(&failedRunID); err != nil {
+		t.Fatal(err)
+	}
+	failedStepIndex := 1
+	if _, err := owner.Exec(ctx, `
+		INSERT INTO agent_run_steps (org_id, run_id, step_index, status, capability_id, capability_version, input_hash, input, approval_id, receipt_id)
+		VALUES ($1::uuid, $2::uuid, $3, 'waiting_approval', 'crm.createCustomer', '1', 'fixture-input-hash', '{"name":""}'::jsonb, $4::uuid, $5::uuid)`, orgA, failedRunID, failedStepIndex, approvalID, priorReceiptID); err != nil {
+		t.Fatal(err)
+	}
+	linkedFailureID := insertJobsTestJobWithLinks(t, ctx, owner, orgA, "crm.createCustomer", json.RawMessage(`{"name":""}`), 2, time.Date(1904, 1, 1, 0, 0, 0, 0, time.UTC), failedRunID, failedStepIndex, "")
+	worked, err = worker.ProcessOne(ctx)
+	if err != nil || !worked {
+		t.Fatalf("linked retry process worked=%v err=%v", worked, err)
+	}
+	assertDurableStepRefs(t, ctx, owner, orgA, failedRunID, failedStepIndex, "running", priorReceiptID, false)
+	if _, err := owner.Exec(ctx, `UPDATE jobs SET attempts = max_attempts - 1, available_at = '1906-01-01'::timestamptz WHERE id = $1::uuid`, linkedFailureID); err != nil {
+		t.Fatal(err)
+	}
+	worked, err = worker.ProcessOne(ctx)
+	if err != nil || !worked {
+		t.Fatalf("linked exhausted process worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, linkedFailureID, "failed", 2)
+	assertDurableStepRefs(t, ctx, owner, orgA, failedRunID, failedStepIndex, "failed", priorReceiptID, false)
+
+	// A failed capability retries with the legacy exponential delay and is
+	// permanently failed at max_attempts.
+	invalidID := insertJobsTestJob(t, ctx, owner, orgA, "crm.createCustomer", json.RawMessage(`{"name":""}`), 3, time.Date(1905, 1, 1, 0, 0, 0, 0, time.UTC))
+	started := time.Now()
+	worked, err = worker.ProcessOne(ctx)
+	if err != nil || !worked {
+		t.Fatalf("invalid job retry process worked=%v err=%v", worked, err)
+	}
+	var retryStatus, retryError string
+	var attempts int
+	var availableAt time.Time
+	if err := owner.QueryRow(ctx, `SELECT status, attempts, last_error, available_at FROM jobs WHERE id = $1::uuid`, invalidID).Scan(&retryStatus, &attempts, &retryError, &availableAt); err != nil {
+		t.Fatal(err)
+	}
+	if retryStatus != "pending" || attempts != 1 || !strings.Contains(retryError, "invalid input") || availableAt.Before(started.Add(900*time.Millisecond)) {
+		t.Fatalf("retry state status=%q attempts=%d error=%q available=%s", retryStatus, attempts, retryError, availableAt)
+	}
+	if _, err := owner.Exec(ctx, `UPDATE jobs SET attempts = max_attempts - 1, available_at = '1905-01-01'::timestamptz WHERE id = $1::uuid`, invalidID); err != nil {
+		t.Fatal(err)
+	}
+	worked, err = worker.ProcessOne(ctx)
+	if err != nil || !worked {
+		t.Fatalf("exhausted invalid job process worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, invalidID, "failed", 3)
+	assertJobsTestState(t, ctx, owner, unsupportedID, "pending", 0)
+	assertJobsTestState(t, ctx, owner, routineID, "pending", 0)
+
+	// The Go worker owns asynchronous document parsing, including the
+	// capability receipt and derived memory write for pasted text.
+	const parsedText = "Quarterly supply review: 18 units are due for replenishment."
+	var documentID string
+	if err := owner.QueryRow(ctx, `
+		INSERT INTO documents (org_id, title, source_type, raw_text, status, created_by_actor_type)
+		VALUES ($1::uuid, 'Go worker parse proof', 'text', $2, 'received', 'human')
+		RETURNING id::text`, orgA, parsedText).Scan(&documentID); err != nil {
+		t.Fatal(err)
+	}
+	parsePayload, err := json.Marshal(map[string]string{"documentId": documentID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parseJobID := insertJobsTestJob(t, ctx, owner, orgA, "documents.parseDocument", parsePayload, 3, time.Date(1907, 1, 1, 0, 0, 0, 0, time.UTC))
+	worked, err = worker.ProcessOne(ctx)
+	if err != nil || !worked {
+		t.Fatalf("document parse job process worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, parseJobID, "done", 1)
+	var documentStatus, parsedMarkdown string
+	var parseError *string
+	if err := owner.QueryRow(ctx, `SELECT status, parsed_markdown, parse_error FROM documents WHERE org_id=$1::uuid AND id=$2::uuid`, orgA, documentID).
+		Scan(&documentStatus, &parsedMarkdown, &parseError); err != nil {
+		t.Fatal(err)
+	}
+	if documentStatus != "parsed" || parsedMarkdown != parsedText || parseError != nil {
+		t.Fatalf("document parse state status=%q markdown=%q error=%v", documentStatus, parsedMarkdown, parseError)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM memories WHERE org_id=$1::uuid AND source=$2 AND content=$3`, orgA, "document:"+documentID, parsedText); got != 1 {
+		t.Fatalf("document parse wrote %d derived memory chunks, want one", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2`, orgA, orgA+":"+parseJobID); got != 1 {
+		t.Fatalf("document parse wrote %d action receipts, want one", got)
+	}
+
+}
+
+func TestCRMDealJobsClaimAndExecuteThroughSystemPath(t *testing.T) {
+	ownerURL := os.Getenv("DATABASE_URL")
+	if ownerURL == "" {
+		if os.Getenv("GO_RUNTIME_INTEGRATION_REQUIRED") == "1" {
+			t.Fatal("DATABASE_URL is required for the CRM deal jobs database proof")
+		}
+		t.Skip("DATABASE_URL is not configured")
+	}
+	appPassword := os.Getenv("CHASTE_APP_DB_PASSWORD")
+	if appPassword == "" {
+		appPassword = "chaste_app_dev_only"
+	}
+	workerPassword := os.Getenv("CHASTE_JOBS_WORKER_DB_PASSWORD")
+	if workerPassword == "" {
+		if os.Getenv("GO_RUNTIME_INTEGRATION_REQUIRED") == "1" {
+			t.Fatal("CHASTE_JOBS_WORKER_DB_PASSWORD is required for the CRM deal jobs database proof")
+		}
+		workerPassword = "chaste_jobs_worker_dev_only"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	owner, err := pgxpool.New(ctx, ownerURL)
+	if err != nil {
+		t.Fatalf("connect database owner: %v", err)
+	}
+	defer owner.Close()
+	appPool, err := pgxpool.New(ctx, workerRoleURL(t, ownerURL, "chaste_app", appPassword))
+	if err != nil {
+		t.Fatalf("connect app runtime: %v", err)
+	}
+	defer appPool.Close()
+	workerPool, err := pgxpool.New(ctx, workerRoleURL(t, ownerURL, "chaste_jobs_worker", workerPassword))
+	if err != nil {
+		t.Fatalf("connect jobs worker: %v", err)
+	}
+	defer workerPool.Close()
+	if err := dbx.VerifyAppRuntimeRole(ctx, appPool); err != nil {
+		t.Fatalf("verify app runtime role: %v", err)
+	}
+	if err := VerifyRole(ctx, workerPool); err != nil {
+		t.Fatalf("verify jobs worker role: %v", err)
+	}
+
+	tag := fmt.Sprintf("crm-deal-jobs-%d", time.Now().UnixNano())
+	orgID := insertJobsTestOrg(t, ctx, owner, tag)
+	defer cleanupJobsTestOrgs(t, owner, orgID)
+	executor := capability.NewExecutor(appPool, "", "", "")
+	worker, err := NewWorker(workerPool, workerPool, appPool, executor, Options{
+		WorkerID:      "crm-deal-jobs-integration-worker",
+		LeaseDuration: time.Second,
+		PollInterval:  10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for capabilityID, permission := range map[string]string{
+		"crm.createDeal":            "crm.write",
+		"crm.moveDealStage":         "crm.write",
+		"crm.convertLead":           "crm.write",
+		"crm.undoLeadConversion":    "crm.write",
+		"crm.reapplyLeadConversion": "crm.write",
+	} {
+		if GoCapabilityPermissions[capabilityID] != permission {
+			t.Fatalf("Go job permission for %s = %q, want %q", capabilityID, GoCapabilityPermissions[capabilityID], permission)
+		}
+	}
+
+	availableAt := time.Date(1904, 1, 1, 0, 0, 0, 0, time.UTC)
+	createID := insertJobsTestJob(t, ctx, owner, orgID, "crm.createDeal", json.RawMessage(`{"title":"Worker-created prospect","valueMinor":7300,"source":"worker"}`), 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("createDeal job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, createID, "done", 1)
+	var dealID string
+	if err := owner.QueryRow(ctx, `SELECT id::text FROM deals WHERE org_id=$1::uuid AND title='Worker-created prospect'`, orgID).Scan(&dealID); err != nil {
+		t.Fatal(err)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2`, orgID, orgID+":"+createID); got != 1 {
+		t.Fatalf("createDeal system receipts=%d, want one", got)
+	}
+
+	moveToProposalID := insertJobsTestJob(t, ctx, owner, orgID, "crm.moveDealStage", json.RawMessage(fmt.Sprintf(`{"dealId":%q,"stage":"proposal"}`, dealID)), 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("moveDealStage proposal job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, moveToProposalID, "done", 1)
+	assertCRMDealJobStage(t, ctx, owner, orgID, dealID, "proposal")
+
+	moveToLeadID := insertJobsTestJob(t, ctx, owner, orgID, "crm.moveDealStage", json.RawMessage(fmt.Sprintf(`{"dealId":%q,"stage":"lead"}`, dealID)), 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("moveDealStage lead job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, moveToLeadID, "done", 1)
+	assertCRMDealJobStage(t, ctx, owner, orgID, dealID, "lead")
+
+	convertID := insertJobsTestJob(t, ctx, owner, orgID, "crm.convertLead", json.RawMessage(fmt.Sprintf(`{"dealId":%q,"createCustomer":true,"customerName":"Worker-created prospect"}`, dealID)), 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("convertLead job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, convertID, "done", 1)
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2 AND capability_id='crm.convertLead' AND ok`, orgID, orgID+":"+convertID); got != 1 {
+		t.Fatalf("conversion system receipt for intent %s=%d, want one", convertID, got)
+	}
+	var stage, customerName string
+	if err := owner.QueryRow(ctx, `
+		SELECT d.stage,c.name FROM deals d JOIN customers c ON c.id=d.customer_id
+		WHERE d.id=$1::uuid AND d.org_id=$2::uuid`, dealID, orgID).Scan(&stage, &customerName); err != nil {
+		t.Fatal(err)
+	}
+	if stage != "qualified" || customerName != "Worker-created prospect" {
+		t.Fatalf("system conversion stage/customer=%q/%q, want qualified/title-derived customer", stage, customerName)
+	}
+	insertApprovedJob := func(capabilityID string, payload json.RawMessage, risk string) string {
+		t.Helper()
+		var approvalID string
+		if err := owner.QueryRow(ctx, `
+			INSERT INTO approvals (org_id, capability_id, risk_class, payload, rationale, status, expires_at)
+			VALUES ($1::uuid, $2, $3, $4::jsonb, 'worker CRM inverse approval proof', 'executing', clock_timestamp() + interval '1 hour')
+			RETURNING id::text`, orgID, capabilityID, risk, payload).Scan(&approvalID); err != nil {
+			t.Fatal(err)
+		}
+		return insertJobsTestJobWithLinks(t, ctx, owner, orgID, capabilityID, payload, 3, availableAt, "", 0, approvalID)
+	}
+
+	undoPayload := json.RawMessage(fmt.Sprintf(`{"conversionIntentId":%q}`, convertID))
+	undoID := insertApprovedJob("crm.undoLeadConversion", undoPayload, "destructive")
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("approved undoLeadConversion job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, undoID, "done", 1)
+	assertCRMDealJobStage(t, ctx, owner, orgID, dealID, "lead")
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM customers WHERE org_id=$1::uuid AND name='Worker-created prospect'`, orgID); got != 0 {
+		t.Fatalf("worker undo retained %d created customers, want deletion", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM approvals WHERE org_id=$1::uuid AND id=(SELECT approved_approval_id FROM jobs WHERE id=$2::uuid) AND status='executed'`, orgID, undoID); got != 1 {
+		t.Fatalf("worker destructive undo finalized approvals=%d, want one executed", got)
+	}
+
+	reapplyPayload := json.RawMessage(fmt.Sprintf(`{"undoIntentId":%q}`, undoID))
+	reapplyID := insertJobsTestJob(t, ctx, owner, orgID, "crm.reapplyLeadConversion", reapplyPayload, 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("reapplyLeadConversion job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, reapplyID, "done", 1)
+	assertCRMDealJobStage(t, ctx, owner, orgID, dealID, "qualified")
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM customers WHERE org_id=$1::uuid AND name='Worker-created prospect'`, orgID); got != 1 {
+		t.Fatalf("worker reapply restored %d created customers, want one", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `
+		SELECT count(*) FROM ledger_events
+		WHERE org_id=$1::uuid AND kind='capability.executed' AND actor_type='system' AND actor_id IS NULL AND session_id IS NULL
+		AND capability_id IN ('crm.createDeal','crm.moveDealStage','crm.convertLead','crm.undoLeadConversion','crm.reapplyLeadConversion')`, orgID); got != 6 {
+		t.Fatalf("system CRM deal audit events=%d, want six executions", got)
+	}
+}
+
+func assertCRMDealJobStage(t *testing.T, ctx context.Context, owner *pgxpool.Pool, orgID, dealID, wantStage string) {
+	t.Helper()
+	var got string
+	if err := owner.QueryRow(ctx, `SELECT stage FROM deals WHERE id=$1::uuid AND org_id=$2::uuid`, dealID, orgID).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != wantStage {
+		t.Fatalf("CRM deal stage=%q, want %q", got, wantStage)
+	}
+}
+
+func TestCRMTaskJobsClaimAndExecuteThroughSystemPath(t *testing.T) {
+	ownerURL := os.Getenv("DATABASE_URL")
+	if ownerURL == "" {
+		if os.Getenv("GO_RUNTIME_INTEGRATION_REQUIRED") == "1" {
+			t.Fatal("DATABASE_URL is required for the CRM task jobs database proof")
+		}
+		t.Skip("DATABASE_URL is not configured")
+	}
+	appPassword := os.Getenv("CHASTE_APP_DB_PASSWORD")
+	if appPassword == "" {
+		appPassword = "chaste_app_dev_only"
+	}
+	workerPassword := os.Getenv("CHASTE_JOBS_WORKER_DB_PASSWORD")
+	if workerPassword == "" {
+		if os.Getenv("GO_RUNTIME_INTEGRATION_REQUIRED") == "1" {
+			t.Fatal("CHASTE_JOBS_WORKER_DB_PASSWORD is required for the CRM task jobs database proof")
+		}
+		workerPassword = "chaste_jobs_worker_dev_only"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	owner, err := pgxpool.New(ctx, ownerURL)
+	if err != nil {
+		t.Fatalf("connect database owner: %v", err)
+	}
+	defer owner.Close()
+	appPool, err := pgxpool.New(ctx, workerRoleURL(t, ownerURL, "chaste_app", appPassword))
+	if err != nil {
+		t.Fatalf("connect app runtime: %v", err)
+	}
+	defer appPool.Close()
+	workerPool, err := pgxpool.New(ctx, workerRoleURL(t, ownerURL, "chaste_jobs_worker", workerPassword))
+	if err != nil {
+		t.Fatalf("connect jobs worker: %v", err)
+	}
+	defer workerPool.Close()
+	if err := dbx.VerifyAppRuntimeRole(ctx, appPool); err != nil {
+		t.Fatalf("verify app runtime role: %v", err)
+	}
+	if err := VerifyRole(ctx, workerPool); err != nil {
+		t.Fatalf("verify jobs worker role: %v", err)
+	}
+
+	tag := fmt.Sprintf("crm-task-jobs-%d", time.Now().UnixNano())
+	orgID := insertJobsTestOrg(t, ctx, owner, tag)
+	defer cleanupJobsTestOrgs(t, owner, orgID)
+	executor := capability.NewExecutor(appPool, "", "", "")
+	worker, err := NewWorker(workerPool, workerPool, appPool, executor, Options{
+		WorkerID:      "crm-task-jobs-integration-worker",
+		LeaseDuration: time.Second,
+		PollInterval:  10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for capabilityID, permission := range map[string]string{
+		"crm.createTask":         "crm.write",
+		"crm.completeTask":       "crm.write",
+		"crm.updateTaskDetails":  "crm.write",
+		"crm.restoreTaskDetails": "crm.write",
+	} {
+		if GoCapabilityPermissions[capabilityID] != permission {
+			t.Fatalf("Go job permission for %s = %q, want %q", capabilityID, GoCapabilityPermissions[capabilityID], permission)
+		}
+	}
+
+	availableAt := time.Date(1904, 1, 1, 0, 0, 0, 0, time.UTC)
+	createID := insertJobsTestJob(t, ctx, owner, orgID, "crm.createTask", json.RawMessage(`{"title":"Worker follow-up","dueAt":"2026-10-01T09:30:00.123Z","refType":"customer"}`), 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("createTask job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, createID, "done", 1)
+	var taskID string
+	if err := owner.QueryRow(ctx, `SELECT id::text FROM tasks WHERE org_id=$1::uuid AND title='Worker follow-up'`, orgID).Scan(&taskID); err != nil {
+		t.Fatal(err)
+	}
+	var refType *string
+	if err := owner.QueryRow(ctx, `SELECT ref_type FROM tasks WHERE id=$1::uuid`, taskID).Scan(&refType); err != nil {
+		t.Fatal(err)
+	}
+	if refType != nil {
+		t.Fatalf("system createTask ref_type=%q, want null without refId", *refType)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2`, orgID, orgID+":"+createID); got != 1 {
+		t.Fatalf("createTask system receipts=%d, want one", got)
+	}
+
+	dueUpdateID := insertJobsTestJob(t, ctx, owner, orgID, "crm.updateTaskDetails", json.RawMessage(fmt.Sprintf(`{"taskId":%q,"dueAt":"2026-11-15T08:00:00.000Z"}`, taskID)), 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("updateTaskDetails job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, dueUpdateID, "done", 1)
+	var updatedDueAt *string
+	if err := owner.QueryRow(ctx, `SELECT to_char(due_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') FROM tasks WHERE id=$1::uuid`, taskID).Scan(&updatedDueAt); err != nil {
+		t.Fatal(err)
+	}
+	if updatedDueAt == nil || *updatedDueAt != "2026-11-15T08:00:00.000Z" {
+		t.Fatalf("system updateTaskDetails due_at=%v, want 2026-11-15T08:00:00.000Z", updatedDueAt)
+	}
+
+	restoreID := insertJobsTestJob(t, ctx, owner, orgID, "crm.restoreTaskDetails", json.RawMessage(fmt.Sprintf(`{"taskId":%q,"dueAt":"2026-10-01T09:30:00.123Z"}`, taskID)), 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("restoreTaskDetails job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, restoreID, "done", 1)
+	if err := owner.QueryRow(ctx, `SELECT to_char(due_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') FROM tasks WHERE id=$1::uuid`, taskID).Scan(&updatedDueAt); err != nil {
+		t.Fatal(err)
+	}
+	if updatedDueAt == nil || *updatedDueAt != "2026-10-01T09:30:00.123Z" {
+		t.Fatalf("system restoreTaskDetails due_at=%v, want 2026-10-01T09:30:00.123Z", updatedDueAt)
+	}
+
+	completeID := insertJobsTestJob(t, ctx, owner, orgID, "crm.completeTask", json.RawMessage(fmt.Sprintf(`{"taskId":%q}`, taskID)), 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("completeTask job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, completeID, "done", 1)
+	var doneAt *time.Time
+	if err := owner.QueryRow(ctx, `SELECT done_at FROM tasks WHERE id=$1::uuid`, taskID).Scan(&doneAt); err != nil {
+		t.Fatal(err)
+	}
+	if doneAt == nil {
+		t.Fatal("system completeTask left done_at null")
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2`, orgID, orgID+":"+completeID); got != 1 {
+		t.Fatalf("completeTask system receipts=%d, want one", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `
+		SELECT count(*) FROM ledger_events
+		WHERE org_id=$1::uuid AND kind='capability.executed' AND actor_type='system' AND actor_id IS NULL AND session_id IS NULL
+		AND capability_id IN ('crm.createTask','crm.updateTaskDetails','crm.restoreTaskDetails','crm.completeTask')`, orgID); got != 4 {
+		t.Fatalf("system CRM task audit events=%d, want four executions", got)
+	}
+}
+
+func TestInventoryCycleCountWorkerClaimAndExecute(t *testing.T) {
+	ownerURL := os.Getenv("DATABASE_URL")
+	if ownerURL == "" {
+		if os.Getenv("GO_RUNTIME_INTEGRATION_REQUIRED") == "1" {
+			t.Fatal("DATABASE_URL is required for the cycle-count jobs database proof")
+		}
+		t.Skip("DATABASE_URL is not configured")
+	}
+	appPassword := os.Getenv("CHASTE_APP_DB_PASSWORD")
+	if appPassword == "" {
+		appPassword = "chaste_app_dev_only"
+	}
+	workerPassword := os.Getenv("CHASTE_JOBS_WORKER_DB_PASSWORD")
+	if workerPassword == "" {
+		if os.Getenv("GO_RUNTIME_INTEGRATION_REQUIRED") == "1" {
+			t.Fatal("CHASTE_JOBS_WORKER_DB_PASSWORD is required for the cycle-count jobs database proof")
+		}
+		workerPassword = "chaste_jobs_worker_dev_only"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	owner, err := pgxpool.New(ctx, ownerURL)
+	if err != nil {
+		t.Fatalf("connect database owner: %v", err)
+	}
+	defer owner.Close()
+	appPool, err := pgxpool.New(ctx, workerRoleURL(t, ownerURL, "chaste_app", appPassword))
+	if err != nil {
+		t.Fatalf("connect app runtime: %v", err)
+	}
+	defer appPool.Close()
+	workerPool, err := pgxpool.New(ctx, workerRoleURL(t, ownerURL, "chaste_jobs_worker", workerPassword))
+	if err != nil {
+		t.Fatalf("connect jobs worker: %v", err)
+	}
+	defer workerPool.Close()
+	if err := dbx.VerifyAppRuntimeRole(ctx, appPool); err != nil {
+		t.Fatalf("verify app runtime role: %v", err)
+	}
+	if err := VerifyRole(ctx, workerPool); err != nil {
+		t.Fatalf("verify jobs worker role: %v", err)
+	}
+	if GoCapabilityPermissions["inventory.createCycleCount"] != "inventory.write" ||
+		GoCapabilityPermissions["inventory.recordCycleCounts"] != "inventory.write" ||
+		GoCapabilityPermissions["inventory.postCycleCount"] != "inventory.write" ||
+		GoCapabilityPermissions["inventory.cancelCycleCount"] != "inventory.write" {
+		t.Fatal("cycle-count worker permissions are incomplete")
+	}
+	tag := fmt.Sprintf("inventory-cycle-count-jobs-%d", time.Now().UnixNano())
+	orgID := insertJobsTestOrg(t, ctx, owner, tag)
+	otherOrgID := insertJobsTestOrg(t, ctx, owner, tag+"-other")
+	defer cleanupJobsTestOrgs(t, owner, orgID, otherOrgID)
+	if _, err := owner.Exec(ctx, `INSERT INTO items (org_id, sku, name, kind) VALUES ($1::uuid, 'CYCLE-WORKER', 'Cycle count worker item', 'goods'), ($2::uuid, 'CYCLE-WORKER', 'Other organization cycle count worker item', 'goods')`, orgID, otherOrgID); err != nil {
+		t.Fatalf("insert cycle-count item: %v", err)
+	}
+	executor := capability.NewExecutor(appPool, "", "", "")
+	worker, err := NewWorker(workerPool, workerPool, appPool, executor, Options{
+		WorkerID: "inventory-cycle-count-integration-worker", LeaseDuration: time.Second,
+		PollInterval: 10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	availableAt := time.Date(1904, 1, 1, 0, 0, 0, 0, time.UTC)
+	jobID := insertJobsTestJob(t, ctx, owner, orgID, "inventory.createCycleCount", json.RawMessage(`{"skus":["CYCLE-WORKER"]}`), 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("cycle-count job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, jobID, "done", 1)
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM cycle_counts cc JOIN cycle_count_lines ccl ON ccl.count_id=cc.id WHERE cc.org_id=$1::uuid AND cc.status='open' AND ccl.item_id=(SELECT id FROM items WHERE org_id=$1::uuid AND sku='CYCLE-WORKER')`, orgID); got != 1 {
+		t.Fatalf("worker created %d open cycle-count snapshots, want one", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2 AND capability_id='inventory.createCycleCount'`, orgID, orgID+":"+jobID); got != 1 {
+		t.Fatalf("worker cycle-count action receipts=%d, want one", got)
+	}
+	var postedCountID string
+	if err := owner.QueryRow(ctx, `SELECT id::text FROM cycle_counts WHERE org_id=$1::uuid AND status='open'`, orgID).Scan(&postedCountID); err != nil {
+		t.Fatalf("load count created by worker: %v", err)
+	}
+	otherCreateJobID := insertJobsTestJob(t, ctx, owner, otherOrgID, "inventory.createCycleCount", json.RawMessage(`{"skus":["CYCLE-WORKER"]}`), 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("other organization cycle-count fixture worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, otherCreateJobID, "done", 1)
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2 AND capability_id='inventory.createCycleCount'`, otherOrgID, otherOrgID+":"+otherCreateJobID); got != 1 {
+		t.Fatalf("worker other-organization cycle-count action receipts=%d, want one", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed' AND actor_type='system' AND session_id IS NULL AND capability_id='inventory.createCycleCount'`, otherOrgID); got != 1 {
+		t.Fatalf("worker other-organization inventory.createCycleCount system audit events=%d, want one", got)
+	}
+	var otherCountID string
+	if err := owner.QueryRow(ctx, `SELECT id::text FROM cycle_counts WHERE org_id=$1::uuid AND status='open'`, otherOrgID).Scan(&otherCountID); err != nil {
+		t.Fatalf("load other organization count: %v", err)
+	}
+	crossTenantRecordJobID := insertJobsTestJob(t, ctx, owner, orgID, "inventory.recordCycleCounts", json.RawMessage(fmt.Sprintf(`{"countId":%q,"counts":[{"sku":"CYCLE-WORKER","countedThousandths":9000}]}`, otherCountID)), 1, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("cross-tenant record job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, crossTenantRecordJobID, "failed", 1)
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM cycle_count_lines WHERE org_id=$1::uuid AND count_id=$2::uuid AND counted_thousandths IS NULL`, otherOrgID, otherCountID); got != 1 {
+		t.Fatalf("cross-tenant cycle-count lines left unrecorded=%d, want one", got)
+	}
+	recordJobID := insertJobsTestJob(t, ctx, owner, orgID, "inventory.recordCycleCounts", json.RawMessage(fmt.Sprintf(`{"countId":%q,"counts":[{"sku":"CYCLE-WORKER","countedThousandths":5000}]}`, postedCountID)), 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("record cycle-count job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, recordJobID, "done", 1)
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM cycle_count_lines WHERE org_id=$1::uuid AND count_id=$2::uuid AND counted_thousandths=5000`, orgID, postedCountID); got != 1 {
+		t.Fatalf("worker recorded cycle-count lines=%d, want one", got)
+	}
+	postJobID := insertJobsTestJob(t, ctx, owner, orgID, "inventory.postCycleCount", json.RawMessage(fmt.Sprintf(`{"countId":%q}`, postedCountID)), 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("post cycle-count job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, postJobID, "done", 1)
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM cycle_counts WHERE org_id=$1::uuid AND id=$2::uuid AND status='posted'`, orgID, postedCountID); got != 1 {
+		t.Fatalf("worker posted cycle-count rows=%d, want one", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM stock_movements WHERE org_id=$1::uuid AND ref_type='cycle_count' AND ref_id=$2::uuid`, orgID, postedCountID); got != 1 {
+		t.Fatalf("worker posted cycle-count movements=%d, want one variance movement", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2 AND capability_id=$3`, orgID, orgID+":"+recordJobID, "inventory.recordCycleCounts"); got != 1 {
+		t.Fatalf("worker record cycle-count receipts=%d, want one", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2 AND capability_id=$3`, orgID, orgID+":"+postJobID, "inventory.postCycleCount"); got != 1 {
+		t.Fatalf("worker post cycle-count receipts=%d, want one", got)
+	}
+	for _, check := range []struct {
+		capabilityID string
+		want         int
+	}{
+		{capabilityID: "inventory.recordCycleCounts", want: 1},
+		{capabilityID: "inventory.postCycleCount", want: 1},
+	} {
+		if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed' AND actor_type='system' AND session_id IS NULL AND capability_id=$2`, orgID, check.capabilityID); got != check.want {
+			t.Fatalf("worker %s system audit events=%d, want %d", check.capabilityID, got, check.want)
+		}
+	}
+
+	cancelCreateJobID := insertJobsTestJob(t, ctx, owner, orgID, "inventory.createCycleCount", json.RawMessage(`{"skus":["CYCLE-WORKER"]}`), 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("cancel fixture cycle-count job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, cancelCreateJobID, "done", 1)
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2 AND capability_id='inventory.createCycleCount'`, orgID, orgID+":"+cancelCreateJobID); got != 1 {
+		t.Fatalf("worker cancel fixture cycle-count action receipts=%d, want one", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed' AND actor_type='system' AND session_id IS NULL AND capability_id='inventory.createCycleCount'`, orgID); got != 2 {
+		t.Fatalf("worker inventory.createCycleCount system audit events=%d, want two", got)
+	}
+	var cancelCountID string
+	if err := owner.QueryRow(ctx, `SELECT id::text FROM cycle_counts WHERE org_id=$1::uuid AND status='open' ORDER BY created_at DESC LIMIT 1`, orgID).Scan(&cancelCountID); err != nil {
+		t.Fatalf("load cancel fixture count: %v", err)
+	}
+	cancelJobID := insertJobsTestJob(t, ctx, owner, orgID, "inventory.cancelCycleCount", json.RawMessage(fmt.Sprintf(`{"countId":%q}`, cancelCountID)), 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("cancel cycle-count job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, cancelJobID, "done", 1)
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM cycle_counts WHERE org_id=$1::uuid AND id=$2::uuid AND status='cancelled'`, orgID, cancelCountID); got != 1 {
+		t.Fatalf("worker cancelled cycle-count rows=%d, want one", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM stock_movements WHERE org_id=$1::uuid AND ref_type='cycle_count' AND ref_id=$2::uuid`, orgID, cancelCountID); got != 0 {
+		t.Fatalf("worker cancellation posted %d stock movements, want none", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2 AND capability_id='inventory.cancelCycleCount'`, orgID, orgID+":"+cancelJobID); got != 1 {
+		t.Fatalf("worker cancel cycle-count receipts=%d, want one", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed' AND actor_type='system' AND session_id IS NULL AND capability_id='inventory.cancelCycleCount'`, orgID); got != 1 {
+		t.Fatalf("worker inventory.cancelCycleCount system audit events=%d, want one", got)
+	}
+}
+
+func TestAccountingDueInvoiceJobClaimAndExecute(t *testing.T) {
+	ownerURL := os.Getenv("DATABASE_URL")
+	if ownerURL == "" {
+		if os.Getenv("GO_RUNTIME_INTEGRATION_REQUIRED") == "1" {
+			t.Fatal("DATABASE_URL is required for the recurring invoice jobs database proof")
+		}
+		t.Skip("DATABASE_URL is not configured")
+	}
+	appPassword := envOr("CHASTE_APP_DB_PASSWORD", "chaste_app_dev_only")
+	workerPassword := envOr("CHASTE_JOBS_WORKER_DB_PASSWORD", "chaste_jobs_worker_dev_only")
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	owner, err := pgxpool.New(ctx, ownerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close()
+	appPool, err := pgxpool.New(ctx, workerRoleURL(t, ownerURL, "chaste_app", appPassword))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer appPool.Close()
+	workerPool, err := pgxpool.New(ctx, workerRoleURL(t, ownerURL, "chaste_jobs_worker", workerPassword))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer workerPool.Close()
+	if err := dbx.VerifyAppRuntimeRole(ctx, appPool); err != nil {
+		t.Fatalf("verify app runtime role: %v", err)
+	}
+	if err := VerifyRole(ctx, workerPool); err != nil {
+		t.Fatalf("verify jobs worker role: %v", err)
+	}
+	if GoCapabilityPermissions["accounting.generateDueInvoices"] != "accounting.write" {
+		t.Fatalf("Go due invoice permission = %q, want accounting.write", GoCapabilityPermissions["accounting.generateDueInvoices"])
+	}
+
+	tag := fmt.Sprintf("accounting-due-invoice-jobs-%d", time.Now().UnixNano())
+	orgID := insertJobsTestOrg(t, ctx, owner, tag)
+	defer cleanupJobsTestOrgs(t, owner, orgID)
+	defer func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cleanupCancel()
+		tx, err := owner.Begin(cleanupCtx)
+		if err != nil {
+			t.Errorf("begin recurring invoice fixture cleanup: %v", err)
+			return
+		}
+		defer func() { _ = tx.Rollback(context.Background()) }()
+		if _, err := tx.Exec(cleanupCtx, `SELECT set_config('app.ledger_maintenance', 'on', true)`); err != nil {
+			t.Errorf("enable recurring invoice fixture cleanup: %v", err)
+			return
+		}
+		for _, statement := range []string{
+			`DELETE FROM journal_lines WHERE entry_id IN (SELECT id FROM journal_entries WHERE org_id=$1::uuid)`,
+			`DELETE FROM journal_entries WHERE org_id=$1::uuid`,
+			`DELETE FROM recurring_invoice_runs WHERE org_id=$1::uuid`,
+			`DELETE FROM recurring_invoices WHERE org_id=$1::uuid`,
+			`DELETE FROM invoices WHERE org_id=$1::uuid`,
+			`DELETE FROM doc_counters WHERE org_id=$1::uuid`,
+			`DELETE FROM customers WHERE org_id=$1::uuid`,
+		} {
+			if _, err := tx.Exec(cleanupCtx, statement, orgID); err != nil {
+				t.Errorf("recurring invoice fixture cleanup failed: %v", err)
+				return
+			}
+		}
+		if err := tx.Commit(cleanupCtx); err != nil {
+			t.Errorf("commit recurring invoice fixture cleanup: %v", err)
+		}
+	}()
+	if _, err := owner.Exec(ctx, `
+		INSERT INTO accounts (org_id, code, name, type) VALUES
+		($1::uuid, '1100', 'Accounts Receivable', 'asset'),
+		($1::uuid, '2100', 'Sales Tax Payable', 'liability'),
+		($1::uuid, '4000', 'Sales Revenue', 'income')`, orgID); err != nil {
+		t.Fatalf("seed recurring invoice accounts: %v", err)
+	}
+	var customerID, templateID, secondTemplateID string
+	if err := owner.QueryRow(ctx, `
+		INSERT INTO customers (org_id, name, payment_term_days)
+		VALUES ($1::uuid, 'Go worker recurring invoice customer', NULL)
+		RETURNING id::text`, orgID).Scan(&customerID); err != nil {
+		t.Fatalf("seed recurring invoice customer: %v", err)
+	}
+	scheduledFor := time.Date(1900, time.January, 1, 0, 0, 0, 0, time.UTC)
+	if err := owner.QueryRow(ctx, `
+		INSERT INTO recurring_invoices (org_id, customer_id, frequency, lines, memo, active, next_run_at, created_by_actor_type)
+		VALUES ($1::uuid, $2::uuid, 'monthly', '[{"description":"Managed hosting","quantity":1000,"unitPriceMinor":500000,"taxMinor":50000}]'::jsonb, 'Go worker recurring invoice', true, $3, 'system')
+		RETURNING id::text`, orgID, customerID, scheduledFor).Scan(&templateID); err != nil {
+		t.Fatalf("seed recurring invoice template: %v", err)
+	}
+	secondScheduledFor := time.Date(1901, time.January, 1, 0, 0, 0, 0, time.UTC)
+	if err := owner.QueryRow(ctx, `
+		INSERT INTO recurring_invoices (org_id, customer_id, frequency, lines, memo, active, next_run_at, created_by_actor_type)
+		VALUES ($1::uuid, $2::uuid, 'monthly', '[{"description":"Managed hosting","quantity":1000,"unitPriceMinor":500000,"taxMinor":50000}]'::jsonb, 'Go worker recurring invoice contention', true, $3, 'system')
+		RETURNING id::text`, orgID, customerID, secondScheduledFor).Scan(&secondTemplateID); err != nil {
+		t.Fatalf("seed second recurring invoice template: %v", err)
+	}
+
+	executor := capability.NewExecutor(appPool, "", "", "")
+	worker, err := NewWorker(workerPool, workerPool, appPool, executor, Options{
+		WorkerID:                  "accounting-due-invoice-integration-worker",
+		LeaseDuration:             time.Second,
+		PollInterval:              10 * time.Millisecond,
+		RecurringInvoiceScheduler: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var encodedCandidates []byte
+	if err := workerPool.QueryRow(ctx, `
+		SELECT COALESCE(jsonb_agg(jsonb_build_object(
+			'recurringInvoiceId', recurring_invoice_id,
+			'orgId', org_id,
+			'scheduledFor', scheduled_for
+		) ORDER BY scheduled_for, recurring_invoice_id), '[]'::jsonb)
+		FROM jobs_worker.list_due_recurring_invoice_candidates(100, $1::uuid)`, orgID).Scan(&encodedCandidates); err != nil {
+		t.Fatalf("discover due recurring invoice candidate: %v", err)
+	}
+	var candidates []dueRecurringInvoiceCandidate
+	if err := json.Unmarshal(encodedCandidates, &candidates); err != nil {
+		t.Fatalf("decode due recurring invoice candidates: %v", err)
+	}
+	discoveredTemplates := make(map[string]bool, 2)
+	for i := range candidates {
+		if candidates[i].OrgID == orgID {
+			discoveredTemplates[candidates[i].RecurringInvoiceID] = true
+		}
+	}
+	if !discoveredTemplates[templateID] || !discoveredTemplates[secondTemplateID] {
+		t.Fatalf("due invoice discovery omitted seeded templates: first=%t second=%t", discoveredTemplates[templateID], discoveredTemplates[secondTemplateID])
+	}
+	worker.recurringInvoiceSchedulerOrgID = orgID
+	var scheduleWG sync.WaitGroup
+	var scheduleMu sync.Mutex
+	var scheduledCount int
+	var scheduleErr error
+	startSchedulers := make(chan struct{})
+	for range 2 {
+		scheduleWG.Add(1)
+		go func() {
+			defer scheduleWG.Done()
+			<-startSchedulers
+			count, err := worker.scheduleDueRecurringInvoices(ctx, time.Now().UTC())
+			scheduleMu.Lock()
+			defer scheduleMu.Unlock()
+			scheduledCount += count
+			if err != nil {
+				scheduleErr = errors.Join(scheduleErr, err)
+			}
+		}()
+	}
+	close(startSchedulers)
+	scheduleWG.Wait()
+	if scheduleErr != nil {
+		t.Fatalf("concurrent due invoice scheduling: %v", scheduleErr)
+	}
+	if scheduledCount != 2 {
+		t.Fatalf("concurrent schedulers enqueued %d jobs for two due occurrences, want exactly two", scheduledCount)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM recurring_invoice_runs WHERE org_id=$1::uuid AND recurring_invoice_id IN ($2::uuid, $3::uuid) AND status='queued' AND job_id IS NOT NULL AND scheduled_for IN ($4, $5)`, orgID, templateID, secondTemplateID, scheduledFor, secondScheduledFor); got != 2 {
+		t.Fatalf("queued recurring occurrence count=%d, want one linked occurrence per template", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(DISTINCT recurring_invoice_id) FROM recurring_invoice_runs WHERE org_id=$1::uuid AND recurring_invoice_id IN ($2::uuid, $3::uuid) AND status='queued' AND job_id IS NOT NULL`, orgID, templateID, secondTemplateID); got != 2 {
+		t.Fatalf("queued recurring templates=%d, want both templates represented exactly once", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM jobs job JOIN recurring_invoice_runs run ON run.job_id=job.id AND job.payload->>'occurrenceId'=run.id::text WHERE job.org_id=$1::uuid AND job.type='accounting.generateDueInvoices' AND run.recurring_invoice_id IN ($2::uuid, $3::uuid)`, orgID, templateID, secondTemplateID); got != 2 {
+		t.Fatalf("scheduled due invoice job count=%d, want one job per seeded occurrence", got)
+	}
+	var jobID string
+	if err := owner.QueryRow(ctx, `
+		SELECT job.id::text
+		FROM jobs AS job
+		JOIN recurring_invoice_runs AS run ON run.job_id = job.id
+		WHERE job.org_id = $1::uuid AND job.type = 'accounting.generateDueInvoices'
+		  AND run.recurring_invoice_id = $2::uuid`, orgID, templateID).Scan(&jobID); err != nil {
+		t.Fatalf("read scheduled due invoice job: %v", err)
+	}
+	if _, err := owner.Exec(ctx, `UPDATE jobs SET available_at=to_timestamp(0) WHERE id=$1::uuid`, jobID); err != nil {
+		t.Fatalf("prioritize scheduled due invoice job in test queue: %v", err)
+	}
+	worked, err := worker.ProcessOne(ctx)
+	if err != nil || !worked {
+		t.Fatalf("due invoice job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, jobID, "done", 1)
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM recurring_invoice_runs WHERE org_id=$1::uuid AND recurring_invoice_id=$2::uuid`, orgID, templateID); got != 1 {
+		t.Fatalf("recurring invoice occurrence count after claim=%d, want one", got)
+	}
+
+	var invoiceID, memo, status string
+	var invoiceNumber, totalMinor, taxMinor int64
+	if err := owner.QueryRow(ctx, `
+		SELECT id::text, number, total_minor, tax_minor, memo, status
+		FROM invoices WHERE org_id=$1::uuid AND customer_id=$2::uuid`, orgID, customerID).
+		Scan(&invoiceID, &invoiceNumber, &totalMinor, &taxMinor, &memo, &status); err != nil {
+		t.Fatalf("read generated recurring invoice: %v", err)
+	}
+	if invoiceNumber != 1 || totalMinor != 550000 || taxMinor != 50000 || memo != "Go worker recurring invoice" || status != "sent" {
+		t.Fatalf("generated invoice number=%d total=%d tax=%d memo=%q status=%q", invoiceNumber, totalMinor, taxMinor, memo, status)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM invoice_lines WHERE invoice_id=$1::uuid AND description='Managed hosting' AND quantity=1000 AND unit_price_minor=500000 AND tax_minor=50000`, invoiceID); got != 1 {
+		t.Fatalf("generated recurring invoice lines=%d, want one frozen line", got)
+	}
+	var runScheduledFor, nextRunAt, lastRunAt time.Time
+	var runInvoiceID *string
+	var runStatus string
+	if err := owner.QueryRow(ctx, `
+		SELECT r.scheduled_for, r.invoice_id::text, r.status, t.next_run_at, t.last_run_at
+		FROM recurring_invoice_runs r
+		JOIN recurring_invoices t ON t.id=r.recurring_invoice_id
+		WHERE r.org_id=$1::uuid AND r.recurring_invoice_id=$2::uuid`, orgID, templateID).
+		Scan(&runScheduledFor, &runInvoiceID, &runStatus, &nextRunAt, &lastRunAt); err != nil {
+		t.Fatalf("read recurring invoice occurrence: %v", err)
+	}
+	if !runScheduledFor.Equal(scheduledFor) || runInvoiceID == nil || *runInvoiceID != invoiceID || runStatus != "completed" || !nextRunAt.After(scheduledFor) || lastRunAt.IsZero() {
+		t.Fatalf("recurring occurrence scheduled=%s invoice=%v status=%q next=%s last=%s", runScheduledFor, runInvoiceID, runStatus, nextRunAt, lastRunAt)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2`, orgID, orgID+":"+jobID); got != 1 {
+		t.Fatalf("due invoice job receipts=%d, want one governed receipt", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed' AND capability_id='accounting.generateDueInvoices' AND actor_type='system' AND actor_id IS NULL AND session_id IS NULL`, orgID); got != 1 {
+		t.Fatalf("due invoice system audit events=%d, want one", got)
+	}
+}
+
+func TestPurchasingReturnGoodsWorkerClaimAndExecution(t *testing.T) {
+	ownerURL := os.Getenv("DATABASE_URL")
+	if ownerURL == "" {
+		if os.Getenv("GO_RUNTIME_INTEGRATION_REQUIRED") == "1" {
+			t.Fatal("DATABASE_URL is required for the commerce jobs database proof")
+		}
+		t.Skip("DATABASE_URL is not configured")
+	}
+	appPassword := os.Getenv("CHASTE_APP_DB_PASSWORD")
+	if appPassword == "" {
+		appPassword = "chaste_app_dev_only"
+	}
+	workerPassword := os.Getenv("CHASTE_JOBS_WORKER_DB_PASSWORD")
+	if workerPassword == "" {
+		if os.Getenv("GO_RUNTIME_INTEGRATION_REQUIRED") == "1" {
+			t.Fatal("CHASTE_JOBS_WORKER_DB_PASSWORD is required for the commerce jobs database proof")
+		}
+		workerPassword = "chaste_jobs_worker_dev_only"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	owner, err := pgxpool.New(ctx, ownerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close()
+	appPool, err := pgxpool.New(ctx, workerRoleURL(t, ownerURL, "chaste_app", appPassword))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer appPool.Close()
+	workerPool, err := pgxpool.New(ctx, workerRoleURL(t, ownerURL, "chaste_jobs_worker", workerPassword))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer workerPool.Close()
+	if err := dbx.VerifyAppRuntimeRole(ctx, appPool); err != nil {
+		t.Fatalf("verify app runtime role: %v", err)
+	}
+	if err := VerifyRole(ctx, workerPool); err != nil {
+		t.Fatalf("verify jobs worker role: %v", err)
+	}
+
+	tag := fmt.Sprintf("commerce-jobs-%d", time.Now().UnixNano())
+	orgID := insertJobsTestOrg(t, ctx, owner, tag)
+	defer cleanupJobsTestOrgs(t, owner, orgID)
+	worker, err := NewWorker(workerPool, workerPool, appPool, capability.NewExecutor(appPool, "", "", ""), Options{
+		WorkerID:      "commerce-jobs-integration-worker",
+		LeaseDuration: time.Second,
+		PollInterval:  10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobID := insertJobsTestJob(t, ctx, owner, orgID, "accounting.listExpenseClaims", json.RawMessage(`{}`), 3, time.Date(1904, 1, 1, 0, 0, 0, 0, time.UTC))
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("listExpenseClaims job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, jobID, "done", 1)
+	if got := countJobsTestRows(t, ctx, owner, `
+		SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed'
+		AND actor_type='system' AND actor_id IS NULL AND capability_id='accounting.listExpenseClaims'`, orgID); got != 1 {
+		t.Fatalf("system commerce audit events=%d, want one", got)
+	}
+	var vendorID string
+	if err := owner.QueryRow(ctx, `INSERT INTO vendors (org_id, name) VALUES ($1::uuid, 'Commerce jobs vendor') RETURNING id::text`, orgID).Scan(&vendorID); err != nil {
+		t.Fatal(err)
+	}
+	var itemID string
+	if err := owner.QueryRow(ctx, `INSERT INTO items (org_id,sku,name,sale_price_minor) VALUES ($1::uuid,'PILOT-CEM','Pilot cement',1500) RETURNING id::text`, orgID).Scan(&itemID); err != nil {
+		t.Fatal(err)
+	}
+	// A system purchase commitment now requires a verified human approval, so
+	// this worker proof seeds the order the way an approved run would leave it
+	// and exercises the ungated receipt step as the system actor.
+	var poID string
+	if err := owner.QueryRow(ctx, `
+		INSERT INTO purchase_orders (org_id, vendor_id, number, status, ordered_at)
+		VALUES ($1::uuid, $2::uuid, 1, 'ordered', now())
+		RETURNING id::text`, orgID, vendorID).Scan(&poID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.Exec(ctx, `
+		INSERT INTO po_lines (po_id, description, quantity, unit_price_minor, item_id, position)
+		VALUES ($1::uuid, 'Stock item', 2000, 1500, $2::uuid, 1)`, poID, itemID); err != nil {
+		t.Fatal(err)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `
+		SELECT count(*) FROM purchase_orders WHERE org_id=$1::uuid AND vendor_id=$2::uuid AND status='ordered'`, orgID, vendorID); got != 1 {
+		t.Fatalf("seeded purchase orders=%d, want one", got)
+	}
+	receiptPayload := json.RawMessage(`{"poNumber":1,"lines":[{"lineNumber":1,"quantity":2000}]}`)
+	receiptJobID := insertJobsTestJob(t, ctx, owner, orgID, "purchasing.receiveGoods", receiptPayload, 3, time.Date(1904, 1, 1, 0, 0, 0, 0, time.UTC))
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("receiveGoods job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, receiptJobID, "done", 1)
+	if worked, err := worker.ProcessOne(ctx); err != nil || worked {
+		t.Fatalf("completed receiveGoods job was claimed again: worked=%v err=%v", worked, err)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `
+		SELECT count(*) FROM goods_receipts r JOIN purchase_orders p ON p.id=r.po_id
+		WHERE r.org_id=$1::uuid AND p.number=1 AND r.number=1`, orgID); got != 1 {
+		t.Fatalf("system goods receipts=%d, want one", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `
+		SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed'
+		AND actor_type='system' AND actor_id IS NULL AND capability_id='purchasing.receiveGoods'`, orgID); got != 1 {
+		t.Fatalf("system receipt audit events=%d, want one", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2 AND capability_id=$3`, orgID, orgID+":"+receiptJobID, "purchasing.receiveGoods"); got != 1 {
+		t.Fatalf("goods receipt job action receipts=%d, want one", got)
+	}
+	returnPayload := json.RawMessage(`{"poNumber":1,"lines":[{"lineNumber":1,"quantity":500,"reason":"worker return"}]}`)
+	returnJobID := insertJobsTestJob(t, ctx, owner, orgID, "purchasing.returnGoods", returnPayload, 3, time.Date(1904, 1, 1, 0, 0, 0, 0, time.UTC))
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("returnGoods job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, returnJobID, "done", 1)
+	if worked, err := worker.ProcessOne(ctx); err != nil || worked {
+		t.Fatalf("completed returnGoods job was claimed again: worked=%v err=%v", worked, err)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `
+		SELECT count(*) FROM stock_movements sm JOIN items i ON i.id=sm.item_id
+		WHERE sm.org_id=$1::uuid AND sm.quantity_delta=-500 AND sm.ref_type='goods_receipt_line' AND sm.reason='purchase'
+		AND i.sku='PILOT-CEM'`, orgID); got != 1 {
+		t.Fatalf("system return stock movements=%d, want one", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `
+		SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed'
+		AND actor_type='system' AND actor_id IS NULL AND capability_id='purchasing.returnGoods'`, orgID); got != 1 {
+		t.Fatalf("system return audit events=%d, want one", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2 AND capability_id=$3`, orgID, orgID+":"+returnJobID, "purchasing.returnGoods"); got != 1 {
+		t.Fatalf("goods return job action receipts=%d, want one", got)
+	}
+}
+
+func workerRoleURL(t *testing.T, baseURL, role, password string) string {
+	t.Helper()
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		t.Fatalf("parse DATABASE_URL: %v", err)
+	}
+	parsed.User = url.UserPassword(role, password)
+	return parsed.String()
+}
+
+func insertJobsTestOrg(t *testing.T, ctx context.Context, owner *pgxpool.Pool, slug string) string {
+	t.Helper()
+	var orgID string
+	if err := owner.QueryRow(ctx, `INSERT INTO organizations (name, slug) VALUES ($1, $2) RETURNING id::text`, slug, slug).Scan(&orgID); err != nil {
+		t.Fatalf("insert jobs test organization: %v", err)
+	}
+	return orgID
+}
+
+func insertJobsTestJob(t *testing.T, ctx context.Context, owner *pgxpool.Pool, orgID, capabilityID string, payload json.RawMessage, maxAttempts int, availableAt time.Time) string {
+	return insertJobsTestJobWithLinks(t, ctx, owner, orgID, capabilityID, payload, maxAttempts, availableAt, "", 0, "")
+}
+
+func insertJobsTestJobWithLinks(t *testing.T, ctx context.Context, owner *pgxpool.Pool, orgID, capabilityID string, payload json.RawMessage, maxAttempts int, availableAt time.Time, runID string, runStepIndex int, approvalID string) string {
+	t.Helper()
+	var jobID string
+	err := owner.QueryRow(ctx, `
+		INSERT INTO jobs (org_id, type, payload, max_attempts, available_at, run_id, run_step_index, approved_approval_id)
+		VALUES ($1::uuid, $2, $3::jsonb, $4, $5, NULLIF($6::text, '')::uuid, NULLIF($7::integer, 0), NULLIF($8::text, '')::uuid)
+		RETURNING id::text`, orgID, capabilityID, payload, maxAttempts, availableAt, runID, runStepIndex, approvalID).Scan(&jobID)
+	if err != nil {
+		t.Fatalf("insert jobs test row: %v", err)
+	}
+	return jobID
+}
+
+func assertJobsTestState(t *testing.T, ctx context.Context, owner *pgxpool.Pool, jobID, wantStatus string, wantAttempts int) {
+	t.Helper()
+	var status string
+	var attempts int
+	if err := owner.QueryRow(ctx, `SELECT status, attempts FROM jobs WHERE id = $1::uuid`, jobID).Scan(&status, &attempts); err != nil {
+		t.Fatalf("read job state: %v", err)
+	}
+	if status != wantStatus || attempts != wantAttempts {
+		t.Fatalf("job %s state=%q attempts=%d, want %q/%d", jobID, status, attempts, wantStatus, wantAttempts)
+	}
+}
+
+func assertJobRowLocked(t *testing.T, ctx context.Context, owner *pgxpool.Pool, jobID string) {
+	t.Helper()
+	tx, err := owner.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin target job lock check: %v", err)
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	var foundID string
+	err = tx.QueryRow(ctx, `SELECT id::text FROM jobs WHERE id = $1::uuid FOR UPDATE SKIP LOCKED`, jobID).Scan(&foundID)
+	if !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("target job %s was not skipped while its live transaction held the row lock: id=%q err=%v", jobID, foundID, err)
+	}
+}
+
+func countJobsTestRows(t *testing.T, ctx context.Context, owner *pgxpool.Pool, query string, args ...any) int {
+	t.Helper()
+	var count int
+	if err := owner.QueryRow(ctx, query, args...).Scan(&count); err != nil {
+		t.Fatalf("count integration rows: %v", err)
+	}
+	return count
+}
+
+func assertDurableStepRefs(t *testing.T, ctx context.Context, owner *pgxpool.Pool, orgID, runID string, stepIndex int, wantStatus, wantReceiptID string, wantApproval bool) {
+	t.Helper()
+	var status string
+	var receiptID, approvalID *string
+	if err := owner.QueryRow(ctx, `
+		SELECT status, receipt_id::text, approval_id::text FROM agent_run_steps
+		WHERE org_id = $1::uuid AND run_id = $2::uuid AND step_index = $3`, orgID, runID, stepIndex).
+		Scan(&status, &receiptID, &approvalID); err != nil {
+		t.Fatal(err)
+	}
+	if status != wantStatus || receiptID == nil || *receiptID != wantReceiptID || (approvalID != nil) != wantApproval {
+		t.Fatalf("durable step refs status=%q receipt=%v approval=%v, want status=%q receipt=%q approval_present=%v", status, receiptID, approvalID, wantStatus, wantReceiptID, wantApproval)
+	}
+}
+
+func cleanupJobsTestOrgs(t *testing.T, owner *pgxpool.Pool, orgIDs ...string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	tx, err := owner.Begin(ctx)
+	if err != nil {
+		t.Errorf("begin jobs test cleanup: %v", err)
+		return
+	}
+	if _, err := tx.Exec(ctx, `SELECT set_config('app.ledger_maintenance', 'on', true)`); err != nil {
+		_ = tx.Rollback(ctx)
+		t.Errorf("enable ledger fixture cleanup: %v", err)
+		return
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM ledger_events WHERE org_id = ANY($1::uuid[])`, orgIDs); err != nil {
+		_ = tx.Rollback(ctx)
+		t.Errorf("delete jobs test ledger rows: %v", err)
+		return
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM organizations WHERE id = ANY($1::uuid[])`, orgIDs); err != nil {
+		_ = tx.Rollback(ctx)
+		t.Errorf("delete jobs test organizations: %v", err)
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Errorf("commit jobs test cleanup: %v", err)
+	}
+}
+
+func TestPurchasingPaymentRunDraftJobsClaimAndExecute(t *testing.T) {
+	ownerURL := os.Getenv("DATABASE_URL")
+	if ownerURL == "" {
+		if os.Getenv("GO_RUNTIME_INTEGRATION_REQUIRED") == "1" {
+			t.Fatal("DATABASE_URL is required for the payment run draft jobs proof")
+		}
+		t.Skip("DATABASE_URL is not configured")
+	}
+	appPassword := envOr("CHASTE_APP_DB_PASSWORD", "chaste_app_dev_only")
+	workerPassword := envOr("CHASTE_JOBS_WORKER_DB_PASSWORD", "chaste_jobs_worker_dev_only")
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	owner, err := pgxpool.New(ctx, ownerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close()
+	appPool, err := pgxpool.New(ctx, workerRoleURL(t, ownerURL, "chaste_app", appPassword))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer appPool.Close()
+	workerPool, err := pgxpool.New(ctx, workerRoleURL(t, ownerURL, "chaste_jobs_worker", workerPassword))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer workerPool.Close()
+	if err := dbx.VerifyAppRuntimeRole(ctx, appPool); err != nil {
+		t.Fatalf("verify app runtime role: %v", err)
+	}
+	if err := VerifyRole(ctx, workerPool); err != nil {
+		t.Fatalf("verify jobs worker role: %v", err)
+	}
+
+	tag := fmt.Sprintf("payment-run-draft-jobs-%d", time.Now().UnixNano())
+	orgID := insertJobsTestOrg(t, ctx, owner, tag+"-a")
+	foreignOrgID := insertJobsTestOrg(t, ctx, owner, tag+"-b")
+	defer cleanupJobsTestOrgs(t, owner, orgID, foreignOrgID)
+	executor := capability.NewExecutor(appPool, "", "", "")
+	worker, err := NewWorker(workerPool, workerPool, appPool, executor, Options{
+		WorkerID:      "payment-run-draft-integration-worker",
+		LeaseDuration: time.Second,
+		PollInterval:  10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for capabilityID, permission := range map[string]string{
+		"purchasing.createPaymentRun":       "purchasing.write",
+		"purchasing.cancelPaymentRunDraft":  "purchasing.write",
+		"purchasing.restorePaymentRunDraft": "purchasing.write",
+		"purchasing.listPaymentRuns":        "purchasing.read",
+	} {
+		if GoCapabilityPermissions[capabilityID] != permission {
+			t.Fatalf("Go job permission for %s = %q, want %q", capabilityID, GoCapabilityPermissions[capabilityID], permission)
+		}
+	}
+
+	var vendorID, billID string
+	if err := owner.QueryRow(ctx, `INSERT INTO vendors (org_id, name) VALUES ($1::uuid, 'Payment run worker vendor') RETURNING id::text`, orgID).Scan(&vendorID); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.QueryRow(ctx, `
+		INSERT INTO vendor_bills (org_id, vendor_id, number, status, currency, total_minor, paid_minor, bill_date)
+		VALUES ($1::uuid, $2::uuid, 1, 'open', 'USD', 2500, 0, current_date)
+		RETURNING id::text`, orgID, vendorID).Scan(&billID); err != nil {
+		t.Fatal(err)
+	}
+	var foreignRunID string
+	if err := owner.QueryRow(ctx, `
+		INSERT INTO payment_runs (org_id, reference, currency, total_minor, status, created_by_actor_type)
+		VALUES ($1::uuid, 'PR-FOREIGN-WORKER-PROOF', 'USD', 9900, 'draft', 'human')
+		RETURNING id::text`, foreignOrgID).Scan(&foreignRunID); err != nil {
+		t.Fatal(err)
+	}
+
+	availableAt := time.Date(1904, 1, 1, 0, 0, 0, 0, time.UTC)
+	createID := insertJobsTestJob(t, ctx, owner, orgID, "purchasing.createPaymentRun", json.RawMessage(fmt.Sprintf(
+		`{"memo":"Worker draft","lines":[{"billId":%q,"amountMinor":1500}]}`, billID)), 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("createPaymentRun job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, createID, "done", 1)
+	var paymentRunID string
+	if err := owner.QueryRow(ctx, `SELECT id::text FROM payment_runs WHERE org_id=$1::uuid AND reference='PR-000001'`, orgID).Scan(&paymentRunID); err != nil {
+		t.Fatal(err)
+	}
+
+	listID := insertJobsTestJob(t, ctx, owner, orgID, "purchasing.listPaymentRuns", json.RawMessage(`{}`), 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("listPaymentRuns job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, listID, "done", 1)
+	var listData []byte
+	if err := owner.QueryRow(ctx, `SELECT data FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2`, orgID, orgID+":"+listID).Scan(&listData); err != nil {
+		t.Fatal(err)
+	}
+	var listResult struct {
+		Runs []struct {
+			ID string `json:"id"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal(listData, &listResult); err != nil {
+		t.Fatalf("decode payment run list receipt data %s: %v", listData, err)
+	}
+	foundOwnRun, foundForeignRun := false, false
+	for _, run := range listResult.Runs {
+		foundOwnRun = foundOwnRun || run.ID == paymentRunID
+		foundForeignRun = foundForeignRun || run.ID == foreignRunID
+	}
+	if !foundOwnRun || foundForeignRun {
+		t.Fatalf("organization payment run list = %+v, want own run %s and no foreign run %s", listResult.Runs, paymentRunID, foreignRunID)
+	}
+
+	cancelID := insertJobsTestJob(t, ctx, owner, orgID, "purchasing.cancelPaymentRunDraft", json.RawMessage(fmt.Sprintf(`{"paymentRunId":%q}`, paymentRunID)), 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("cancelPaymentRunDraft job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, cancelID, "done", 1)
+	var status string
+	if err := owner.QueryRow(ctx, `SELECT status FROM payment_runs WHERE id=$1::uuid AND org_id=$2::uuid`, paymentRunID, orgID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "cancelled" {
+		t.Fatalf("payment run status after cancel=%q, want cancelled", status)
+	}
+
+	restoreID := insertJobsTestJob(t, ctx, owner, orgID, "purchasing.restorePaymentRunDraft", json.RawMessage(fmt.Sprintf(`{"paymentRunId":%q}`, paymentRunID)), 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("restorePaymentRunDraft job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, restoreID, "done", 1)
+	if err := owner.QueryRow(ctx, `SELECT status FROM payment_runs WHERE id=$1::uuid AND org_id=$2::uuid`, paymentRunID, orgID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "draft" {
+		t.Fatalf("final payment run status=%q, want draft", status)
+	}
+
+	for _, action := range []struct {
+		id           string
+		capabilityID string
+	}{
+		{id: createID, capabilityID: "purchasing.createPaymentRun"},
+		{id: listID, capabilityID: "purchasing.listPaymentRuns"},
+		{id: cancelID, capabilityID: "purchasing.cancelPaymentRunDraft"},
+		{id: restoreID, capabilityID: "purchasing.restorePaymentRunDraft"},
+	} {
+		if got := countJobsTestRows(t, ctx, owner, `
+			SELECT count(*) FROM action_receipts
+			WHERE org_id=$1::uuid AND intent_key=$2 AND capability_id=$3`, orgID, orgID+":"+action.id, action.capabilityID); got != 1 {
+			t.Errorf("%s job action receipts=%d, want one", action.capabilityID, got)
+		}
+		if got := countJobsTestRows(t, ctx, owner, `
+			SELECT count(*) FROM ledger_events
+			WHERE org_id=$1::uuid AND kind='capability.executed' AND actor_type='system'
+			AND actor_id IS NULL AND capability_id=$2`, orgID, action.capabilityID); got != 1 {
+			t.Errorf("%s system capability audit events=%d, want one", action.capabilityID, got)
+		}
+	}
+}
+
+func TestPurchasingPaymentRunApprovalJobsClaimAndExecute(t *testing.T) {
+	ownerURL := os.Getenv("DATABASE_URL")
+	if ownerURL == "" {
+		if os.Getenv("GO_RUNTIME_INTEGRATION_REQUIRED") == "1" {
+			t.Fatal("DATABASE_URL is required for the payment run approval jobs proof")
+		}
+		t.Skip("DATABASE_URL is not configured")
+	}
+	appPassword := envOr("CHASTE_APP_DB_PASSWORD", "chaste_app_dev_only")
+	workerPassword := envOr("CHASTE_JOBS_WORKER_DB_PASSWORD", "chaste_jobs_worker_dev_only")
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	owner, err := pgxpool.New(ctx, ownerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close()
+	appPool, err := pgxpool.New(ctx, workerRoleURL(t, ownerURL, "chaste_app", appPassword))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer appPool.Close()
+	workerPool, err := pgxpool.New(ctx, workerRoleURL(t, ownerURL, "chaste_jobs_worker", workerPassword))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer workerPool.Close()
+	if err := dbx.VerifyAppRuntimeRole(ctx, appPool); err != nil {
+		t.Fatalf("verify app runtime role: %v", err)
+	}
+	if err := VerifyRole(ctx, workerPool); err != nil {
+		t.Fatalf("verify jobs worker role: %v", err)
+	}
+
+	tag := fmt.Sprintf("payment-run-approval-jobs-%d", time.Now().UnixNano())
+	orgID := insertJobsTestOrg(t, ctx, owner, tag)
+	foreignOrgID := insertJobsTestOrg(t, ctx, owner, tag+"-foreign")
+	defer func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cleanupCancel()
+		tx, err := owner.Begin(cleanupCtx)
+		if err != nil {
+			t.Errorf("begin payment run approval fixture cleanup: %v", err)
+			return
+		}
+		defer func() { _ = tx.Rollback(context.Background()) }()
+		if _, err := tx.Exec(cleanupCtx, `SELECT set_config('app.ledger_maintenance', 'on', true)`); err != nil {
+			t.Errorf("enable payment run approval fixture cleanup: %v", err)
+			return
+		}
+		for _, statement := range []string{
+			`DELETE FROM vendor_payments WHERE org_id IN ($1::uuid, $2::uuid)`,
+			`DELETE FROM payment_run_lines WHERE org_id IN ($1::uuid, $2::uuid)`,
+			`DELETE FROM payment_runs WHERE org_id IN ($1::uuid, $2::uuid)`,
+			`DELETE FROM journal_lines WHERE entry_id IN (SELECT id FROM journal_entries WHERE org_id IN ($1::uuid, $2::uuid))`,
+			`DELETE FROM journal_entries WHERE org_id IN ($1::uuid, $2::uuid)`,
+			`DELETE FROM vendor_bill_lines WHERE bill_id IN (SELECT id FROM vendor_bills WHERE org_id IN ($1::uuid, $2::uuid))`,
+			`DELETE FROM vendor_bills WHERE org_id IN ($1::uuid, $2::uuid)`,
+			`DELETE FROM doc_counters WHERE org_id IN ($1::uuid, $2::uuid)`,
+			`DELETE FROM vendors WHERE org_id IN ($1::uuid, $2::uuid)`,
+			`DELETE FROM accounts WHERE org_id IN ($1::uuid, $2::uuid)`,
+		} {
+			if _, err := tx.Exec(cleanupCtx, statement, orgID, foreignOrgID); err != nil {
+				t.Errorf("payment run approval fixture cleanup failed: %v", err)
+				return
+			}
+		}
+		if err := tx.Commit(cleanupCtx); err != nil {
+			t.Errorf("commit payment run approval fixture cleanup: %v", err)
+			return
+		}
+		cleanupJobsTestOrgs(t, owner, orgID, foreignOrgID)
+	}()
+	executor := capability.NewExecutor(appPool, "", "", "")
+	worker, err := NewWorker(workerPool, workerPool, appPool, executor, Options{
+		WorkerID:      "payment-run-approval-integration-worker",
+		LeaseDuration: time.Second,
+		PollInterval:  10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for capabilityID, permission := range map[string]string{
+		"purchasing.createPaymentRun":   "purchasing.write",
+		"purchasing.instructPaymentRun": "purchasing.post",
+		"purchasing.reversePaymentRun":  "purchasing.post",
+	} {
+		if GoCapabilityPermissions[capabilityID] != permission {
+			t.Fatalf("Go job permission for %s = %q, want %q", capabilityID, GoCapabilityPermissions[capabilityID], permission)
+		}
+	}
+	if _, err := owner.Exec(ctx, `
+		INSERT INTO accounts (org_id, code, name, type) VALUES
+		($1::uuid, '1000', 'Cash', 'asset'),
+		($1::uuid, '2000', 'Accounts Payable', 'liability')`, orgID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.Exec(ctx, `
+		INSERT INTO policies (org_id, capability_pattern, max_risk_autonomous, requires_approval_for)
+		VALUES
+		($1::uuid, 'purchasing.instructPaymentRun', 'read', '["money"]'::jsonb),
+		($1::uuid, 'purchasing.reversePaymentRun', 'read', '["money"]'::jsonb)`, orgID); err != nil {
+		t.Fatal(err)
+	}
+	var vendorID, billID string
+	if err := owner.QueryRow(ctx, `INSERT INTO vendors (org_id, name) VALUES ($1::uuid, 'Approval worker vendor') RETURNING id::text`, orgID).Scan(&vendorID); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.QueryRow(ctx, `
+		INSERT INTO vendor_bills (org_id, vendor_id, number, status, currency, total_minor, paid_minor, bill_date)
+		VALUES ($1::uuid, $2::uuid, 1, 'open', 'USD', 2500, 0, current_date)
+		RETURNING id::text`, orgID, vendorID).Scan(&billID); err != nil {
+		t.Fatal(err)
+	}
+	availableAt := time.Date(1904, 1, 1, 0, 0, 0, 0, time.UTC)
+	createID := insertJobsTestJob(t, ctx, owner, orgID, "purchasing.createPaymentRun", json.RawMessage(fmt.Sprintf(
+		`{"memo":"Approved worker run","lines":[{"billId":%q,"amountMinor":2500}]}`, billID)), 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("createPaymentRun job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, createID, "done", 1)
+	var paymentRunID string
+	if err := owner.QueryRow(ctx, `SELECT id::text FROM payment_runs WHERE org_id=$1::uuid AND reference='PR-000001'`, orgID).Scan(&paymentRunID); err != nil {
+		t.Fatal(err)
+	}
+
+	insertApprovalForOrg := func(approvalOrgID, capabilityID string, payload json.RawMessage) string {
+		t.Helper()
+		var approvalID string
+		if err := owner.QueryRow(ctx, `
+			INSERT INTO approvals (org_id, capability_id, risk_class, payload, rationale, status, expires_at)
+			VALUES ($1::uuid, $2, 'money', $3::jsonb, 'payment run worker approval proof', 'executing', clock_timestamp() + interval '1 hour')
+			RETURNING id::text`, approvalOrgID, capabilityID, payload).Scan(&approvalID); err != nil {
+			t.Fatal(err)
+		}
+		return approvalID
+	}
+	insertApproval := func(capabilityID string, payload json.RawMessage) string {
+		return insertApprovalForOrg(orgID, capabilityID, payload)
+	}
+	wrongInput := json.RawMessage(fmt.Sprintf(`{"paymentRunId":%q}`, "00000000-0000-4000-8000-000000000001"))
+	wrongApprovalID := insertApproval("purchasing.instructPaymentRun", wrongInput)
+	instructInput := json.RawMessage(fmt.Sprintf(`{"paymentRunId":%q}`, paymentRunID))
+	mismatchID := insertJobsTestJobWithLinks(t, ctx, owner, orgID, "purchasing.instructPaymentRun", instructInput, 3, availableAt, "", 0, wrongApprovalID)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("mismatched instruction job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, mismatchID, "pending", 1)
+	var status string
+	if err := owner.QueryRow(ctx, `SELECT status FROM payment_runs WHERE org_id=$1::uuid AND id=$2::uuid`, orgID, paymentRunID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "draft" {
+		t.Fatalf("payment run status after mismatch=%q, want draft", status)
+	}
+	assertDeniedWithoutEffect := func(jobID, approvalOrgID, approvalID string) {
+		t.Helper()
+		tag, err := owner.Exec(ctx, `UPDATE jobs SET available_at=clock_timestamp() + interval '1 hour' WHERE id=$1::uuid AND org_id=$2::uuid AND status='pending' AND attempts=1`, jobID, orgID)
+		if err != nil {
+			t.Errorf("postpone denied job retry: %v", err)
+		} else if tag.RowsAffected() != 1 {
+			t.Errorf("postponed denied jobs=%d, want one pending first-attempt job", tag.RowsAffected())
+		}
+		var runStatus string
+		if err := owner.QueryRow(ctx, `SELECT status FROM payment_runs WHERE org_id=$1::uuid AND id=$2::uuid`, orgID, paymentRunID).Scan(&runStatus); err != nil {
+			t.Errorf("read payment run state after denied job: %v", err)
+		} else if runStatus != "draft" {
+			t.Errorf("payment run state after denied job=%q, want draft", runStatus)
+		}
+		if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM journal_entries WHERE org_id=$1::uuid AND source_type='supplier_payment_run'`, orgID); got != 0 {
+			t.Errorf("mismatched approval created %d payment run journal entries, want zero", got)
+		}
+		if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM vendor_payments WHERE org_id=$1::uuid AND payment_run_id=$2::uuid`, orgID, paymentRunID); got != 0 {
+			t.Errorf("mismatched approval created %d vendor payments, want zero", got)
+		}
+		if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2`, orgID, orgID+":"+jobID); got != 0 {
+			t.Errorf("mismatched approval created %d action receipts, want zero", got)
+		}
+		if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM approvals WHERE org_id=$1::uuid AND id=$2::uuid AND status='executing'`, approvalOrgID, approvalID); got != 1 {
+			t.Errorf("mismatched approval rows still executing=%d, want one", got)
+		}
+	}
+	assertDeniedWithoutEffect(mismatchID, orgID, wrongApprovalID)
+
+	foreignApprovalID := insertApprovalForOrg(foreignOrgID, "purchasing.instructPaymentRun", instructInput)
+	wrongOrgID := insertJobsTestJobWithLinks(t, ctx, owner, orgID, "purchasing.instructPaymentRun", instructInput, 3, availableAt, "", 0, foreignApprovalID)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("wrong-organization approval job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, wrongOrgID, "pending", 1)
+	assertDeniedWithoutEffect(wrongOrgID, foreignOrgID, foreignApprovalID)
+
+	wrongCapabilityApprovalID := insertApproval("purchasing.reversePaymentRun", instructInput)
+	wrongCapabilityID := insertJobsTestJobWithLinks(t, ctx, owner, orgID, "purchasing.instructPaymentRun", instructInput, 3, availableAt, "", 0, wrongCapabilityApprovalID)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("wrong-capability approval job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, wrongCapabilityID, "pending", 1)
+	assertDeniedWithoutEffect(wrongCapabilityID, orgID, wrongCapabilityApprovalID)
+
+	instructApprovalID := insertApproval("purchasing.instructPaymentRun", instructInput)
+	instructID := insertJobsTestJobWithLinks(t, ctx, owner, orgID, "purchasing.instructPaymentRun", instructInput, 3, availableAt, "", 0, instructApprovalID)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("approved instruction job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, instructID, "done", 1)
+	if err := owner.QueryRow(ctx, `SELECT status FROM payment_runs WHERE org_id=$1::uuid AND id=$2::uuid`, orgID, paymentRunID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "instructed" {
+		t.Fatalf("payment run status after instruction=%q, want instructed", status)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM vendor_payments WHERE org_id=$1::uuid AND payment_run_id=$2::uuid AND status='instructed'`, orgID, paymentRunID); got != 1 {
+		t.Fatalf("instructed vendor payments=%d, want one", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM vendor_bills WHERE org_id=$1::uuid AND id=$2::uuid AND status='paid' AND paid_minor=2500`, orgID, billID); got != 1 {
+		t.Fatalf("instructed bill rows=%d, want one fully paid bill", got)
+	}
+	var journalEntryID string
+	if err := owner.QueryRow(ctx, `SELECT journal_entry_id::text FROM payment_runs WHERE org_id=$1::uuid AND id=$2::uuid`, orgID, paymentRunID).Scan(&journalEntryID); err != nil {
+		t.Fatal(err)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM journal_entries WHERE org_id=$1::uuid AND id=$2::uuid AND posted_at IS NOT NULL`, orgID, journalEntryID); got != 1 {
+		t.Fatalf("posted source journal entries=%d, want one", got)
+	}
+	if _, err := owner.Exec(ctx, `UPDATE jobs SET status='pending', available_at=clock_timestamp() WHERE id=$1::uuid AND org_id=$2::uuid`, instructID, orgID); err != nil {
+		t.Fatal(err)
+	}
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("instruction receipt replay worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, instructID, "done", 2)
+
+	reverseInput := json.RawMessage(fmt.Sprintf(`{"paymentRunId":%q,"reason":"bank instruction cancelled"}`, paymentRunID))
+	reverseApprovalID := insertApproval("purchasing.reversePaymentRun", reverseInput)
+	reverseID := insertJobsTestJobWithLinks(t, ctx, owner, orgID, "purchasing.reversePaymentRun", reverseInput, 3, availableAt, "", 0, reverseApprovalID)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("approved reversal job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, reverseID, "done", 1)
+	if err := owner.QueryRow(ctx, `SELECT status FROM payment_runs WHERE org_id=$1::uuid AND id=$2::uuid`, orgID, paymentRunID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "reversed" {
+		t.Fatalf("payment run status after reversal=%q, want reversed", status)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM vendor_payments WHERE org_id=$1::uuid AND payment_run_id=$2::uuid AND status='reversed'`, orgID, paymentRunID); got != 1 {
+		t.Fatalf("reversed vendor payments=%d, want one", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM vendor_bills WHERE org_id=$1::uuid AND id=$2::uuid AND status='open' AND paid_minor=0`, orgID, billID); got != 1 {
+		t.Fatalf("reversed bill rows=%d, want one restored open bill", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM journal_entries WHERE org_id=$1::uuid AND source_type='supplier_payment_run_reversal' AND source_id=$2::uuid AND posted_at IS NOT NULL`, orgID, paymentRunID); got != 1 {
+		t.Fatalf("posted reversal journal entries=%d, want one", got)
+	}
+	if _, err := owner.Exec(ctx, `UPDATE jobs SET status='pending', available_at=clock_timestamp() WHERE id=$1::uuid AND org_id=$2::uuid`, reverseID, orgID); err != nil {
+		t.Fatal(err)
+	}
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("reversal receipt replay worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, reverseID, "done", 2)
+
+	for _, action := range []struct {
+		id           string
+		capabilityID string
+		approvalID   string
+	}{
+		{id: instructID, capabilityID: "purchasing.instructPaymentRun", approvalID: instructApprovalID},
+		{id: reverseID, capabilityID: "purchasing.reversePaymentRun", approvalID: reverseApprovalID},
+	} {
+		if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2 AND capability_id=$3`, orgID, orgID+":"+action.id, action.capabilityID); got != 1 {
+			t.Errorf("%s job receipts=%d, want one", action.capabilityID, got)
+		}
+		if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed' AND actor_type='system' AND actor_id IS NULL AND session_id IS NULL AND capability_id=$2`, orgID, action.capabilityID); got != 1 {
+			t.Errorf("%s system audit events=%d, want one", action.capabilityID, got)
+		}
+		if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM approvals WHERE org_id=$1::uuid AND id=$2::uuid AND capability_id=$3 AND payload=$4::jsonb AND status='executed'`, orgID, action.approvalID, action.capabilityID, map[string]json.RawMessage{
+			"purchasing.instructPaymentRun": instructInput,
+			"purchasing.reversePaymentRun":  reverseInput,
+		}[action.capabilityID]); got != 1 {
+			t.Errorf("%s exact approval executed rows=%d, want one", action.capabilityID, got)
+		}
+	}
+}

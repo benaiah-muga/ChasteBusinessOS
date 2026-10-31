@@ -14,8 +14,7 @@ import {
   users,
   vendorBills,
 } from "@chaste/db";
-import { buildExecutor, buildRegistry } from "../apps/web/src/server/kernel";
-import { runOnboarding } from "../apps/web/src/server/onboarding";
+import { buildExecutor, buildRegistry, runOnboarding } from "./lib/go-driver";
 
 let passed = 0;
 function ok(label: string, condition?: boolean) {
@@ -32,6 +31,7 @@ function data(run: any) {
 }
 
 async function seedOrg(db: ReturnType<typeof getDb>["db"], orgName: string) {
+  const runName = `${orgName} ${Date.now()} ${Math.random().toString(36).slice(2, 6)}`;
   const [owner] = await db
     .insert(users)
     .values({ email: `own-${Date.now()}-${Math.random().toString(36).slice(2, 6)}@demo.test`, name: "Owner" })
@@ -40,7 +40,7 @@ async function seedOrg(db: ReturnType<typeof getDb>["db"], orgName: string) {
   const { orgId } = await runOnboarding(db, {
     userId: owner.id,
     userEmail: `own-${Date.now()}-${Math.random().toString(36).slice(2, 6)}@demo.test`,
-    orgName,
+    orgName: runName,
     businessDescription: "Trading company that trusts its money statements and remembers its suppliers.",
   });
   return {
@@ -52,7 +52,7 @@ async function seedOrg(db: ReturnType<typeof getDb>["db"], orgName: string) {
       services: {},
     },
     agentCtx: {
-      actor: { type: "agent" as const, id: null, orgId, permissions: new Set(["*"]) },
+      actor: { type: "agent" as const, id: owner.id, orgId, permissions: new Set(["*"]) },
       now: new Date(),
       services: {},
     },
@@ -145,9 +145,10 @@ async function statementsScenario(): Promise<string> {
   data(await approve(db, orgId, ex, ownerCtx, "accounting.creditNote"));
 
   const stmt = data(await ex.execute("accounting.customerStatement", ownerCtx, { customerId: cust.customerId }));
-  const kinds = stmt.rows.map((r: { kind: string }) => r.kind);
+  const usdStatement = stmt.currencies.find((statement: { currency: string }) => statement.currency === "USD");
+  const kinds = usdStatement?.rows.map((r: { kind: string }) => r.kind) ?? [];
   ok(`customer statement rows: ${kinds.join(" → ")}`, kinds.join(",") === "invoice,payment,credit_note");
-  ok(`closing balance ${stmt.closingBalanceMinor} = 50000 − 10000 − 5000`, stmt.closingBalanceMinor === 350_00);
+  ok(`closing balance ${usdStatement?.closingBalanceMinor} = 50000 − 10000 − 5000`, usdStatement?.closingBalanceMinor === 350_00);
 
   const vendor = data(await ex.execute("purchasing.createVendor", ownerCtx, { name: "Statement Vendor" }));
   await ex.execute("purchasing.createBill", ownerCtx, {

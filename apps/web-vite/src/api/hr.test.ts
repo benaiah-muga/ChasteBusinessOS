@@ -1,0 +1,882 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { fetchGoHrReport, fetchHrEnabled, fetchHrPendingEntries, fetchHrReport, fetchHrTime, readPendingHrEmployeeAction, readPendingHrHiringAction, readPendingHrLeaveAction, readPendingHrPayrollAction, readPendingHrTimeAction, submitHrEmployeeAction, submitHrHiringAction, submitHrLeaveAction, submitHrPayrollAction, submitHrTimeAction } from "./hr";
+import type { HrApiError } from "./hr";
+
+const switchboard = { catalog: [{ id: "hr" }], enabledModules: ["hr"] };
+const organizationId = "33333333-3333-4333-8333-333333333333";
+const report = {
+  employees: [],
+  leave: [],
+  runs: [],
+  openings: [],
+  applicants: [],
+  attendance: [],
+};
+
+function stubHrWriteLocks(): void {
+  const tails = new Map<string, Promise<void>>();
+  const locks = {
+    request: async <T>(name: string, _options: LockOptions, callback: () => Promise<T>): Promise<T> => {
+      const previous = tails.get(name) ?? Promise.resolve();
+      let release = (): void => {};
+      const current = new Promise<void>((resolve) => { release = resolve; });
+      tails.set(name, current);
+      await previous;
+      try { return await callback(); }
+      finally {
+        release();
+        if (tails.get(name) === current) tails.delete(name);
+      }
+    },
+  };
+  vi.stubGlobal("navigator", Object.assign(Object.create(navigator) as Navigator, { locks }));
+}
+
+afterEach(() => {
+  window.localStorage.clear();
+  vi.unstubAllGlobals();
+});
+
+describe("Vite People API", () => {
+  it("keeps an exact actor/org employee hire intent through approval and recovery", async () => {
+    stubHrWriteLocks();
+    vi.stubGlobal("__GO_HR_EMPLOYEE_WRITES__", true);
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
+    const action = { action: "hireEmployee" as const, name: "Mira Patel", email: "mira@example.com", title: "Field technician", monthlySalaryMinor: 125_000 };
+    const calls: Array<{ path: string; capabilityId: string; input: Record<string, unknown>; intentId: string }> = [];
+    const fetchMock = vi.fn(async (path: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
+      calls.push({ path: String(path), capabilityId: body.capabilityId, input: body.input, intentId: body.intentId });
+      return calls.length === 1
+        ? Response.json({ pendingApproval: true, reason: "HR approval required." }, { status: 202 })
+        : Response.json({ ok: true, data: { employeeId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitHrEmployeeAction(action, scope)).resolves.toMatchObject({ kind: "pending" });
+    await expect(readPendingHrEmployeeAction(scope)).resolves.toEqual(action);
+    await expect(submitHrEmployeeAction(action, scope)).resolves.toMatchObject({ kind: "success", data: { employeeId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } });
+    await expect(readPendingHrEmployeeAction(scope)).resolves.toBeNull();
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toMatchObject({ path: "/api/capabilities/execute", capabilityId: "hr.hireEmployee", input: { name: "Mira Patel", email: "mira@example.com", title: "Field technician", monthlySalaryMinor: 125_000 } });
+    expect(calls[1]?.intentId).toBe(calls[0]?.intentId);
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({ "X-Organization-ID": scope.organizationId });
+    expect(fetchMock.mock.calls.every(([path]) => path === "/api/capabilities/execute")).toBe(true);
+  });
+
+  it("deactivates an employee through Go and retries the exact scoped action after approval", async () => {
+    stubHrWriteLocks();
+    vi.stubGlobal("__GO_HR_EMPLOYEE_WRITES__", true);
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId };
+    const action = { action: "deactivateEmployee" as const, employeeId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" };
+    const requests: Array<{ path: string; capabilityId: string; input: Record<string, unknown>; intentId: string }> = [];
+    const fetchMock = vi.fn(async (path: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
+      requests.push({ path: String(path), ...body });
+      return requests.length === 1
+        ? Response.json({ pendingApproval: true, reason: "HR approval required." }, { status: 202 })
+        : Response.json({ ok: true, data: { deactivated: true } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitHrEmployeeAction(action, scope)).resolves.toMatchObject({ kind: "pending" });
+    await expect(readPendingHrEmployeeAction(scope)).resolves.toEqual(action);
+    await expect(submitHrEmployeeAction(action, scope)).resolves.toMatchObject({ kind: "success", data: { deactivated: true } });
+    await expect(readPendingHrEmployeeAction(scope)).resolves.toBeNull();
+    expect(requests).toHaveLength(2);
+    expect(requests[0]).toMatchObject({ path: "/api/capabilities/execute", capabilityId: "hr.deactivateEmployee", input: { employeeId: action.employeeId }, intentId: expect.any(String) });
+    expect(requests[1]).toEqual(requests[0]);
+  });
+
+  it("updates employee structure through Go with actor/org-scoped exact retry and validates failures", async () => {
+    stubHrWriteLocks();
+    vi.stubGlobal("__GO_HR_EMPLOYEE_WRITES__", true);
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId };
+    const otherScope = { ...scope, organizationId: "44444444-4444-4444-8444-444444444444" };
+    const action = { action: "updateStructure" as const, employeeId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", department: "Field Ops", position: "Lead Technician" };
+    const calls: Array<{ capabilityId: string; input: Record<string, unknown>; intentId: string; organizationId: string }> = [];
+    const fetchMock = vi.fn(async (_path: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
+      calls.push({ ...body, organizationId: new Headers(init?.headers).get("X-Organization-ID") ?? "" });
+      return calls.length === 1
+        ? Response.json({ pendingApproval: true, reason: "HR approval required." }, { status: 202 })
+        : Response.json({ ok: true, data: { updated: true } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitHrEmployeeAction(action, scope)).resolves.toMatchObject({ kind: "pending" });
+    await expect(readPendingHrEmployeeAction(scope)).resolves.toEqual(action);
+    await expect(readPendingHrEmployeeAction(otherScope)).resolves.toBeNull();
+    await expect(submitHrEmployeeAction(action, scope)).resolves.toMatchObject({ kind: "success", data: { updated: true } });
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toMatchObject({ capabilityId: "hr.updateEmployeeStructure", input: { employeeId: action.employeeId, department: action.department, position: action.position }, organizationId });
+    expect(calls[1]).toEqual(calls[0]);
+    expect(fetchMock.mock.calls.every(([path]) => path === "/api/capabilities/execute")).toBe(true);
+  });
+
+  it("fails closed on invalid employee profile actions and retains uncertain Go results", async () => {
+    stubHrWriteLocks();
+    vi.stubGlobal("__GO_HR_EMPLOYEE_WRITES__", true);
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId };
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { updated: "yes" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitHrEmployeeAction({ action: "updateStructure", employeeId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }, scope)).rejects.toMatchObject({ status: 400, requestMayHaveReachedServer: false });
+    await expect(submitHrEmployeeAction({ action: "updateStructure", employeeId: "not-a-uuid", department: "Ops" }, scope)).rejects.toMatchObject({ status: 400, requestMayHaveReachedServer: false });
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    const action = { action: "updateStructure" as const, employeeId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", department: "Ops" };
+    await expect(submitHrEmployeeAction(action, scope)).rejects.toMatchObject({ status: 200, requestMayHaveReachedServer: true });
+    await expect(readPendingHrEmployeeAction(scope)).resolves.toEqual(action);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps deactivation retryable when Go returns an invalid action result", async () => {
+    stubHrWriteLocks();
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId };
+    const action = { action: "deactivateEmployee" as const, employeeId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" };
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { deactivated: "true" } })));
+
+    await expect(submitHrEmployeeAction(action, scope)).rejects.toMatchObject({ status: 200, requestMayHaveReachedServer: true });
+    await expect(readPendingHrEmployeeAction(scope)).resolves.toEqual(action);
+  });
+
+  it("supports opaque Better Auth actors for Go HR writes and fails closed for invalid retry scopes", async () => {
+    stubHrWriteLocks();
+    vi.stubGlobal("__GO_HR_EMPLOYEE_WRITES__", true);
+    const organizationId = "33333333-3333-4333-8333-333333333333";
+    const action = { action: "hireEmployee" as const, name: "Mira Patel", monthlySalaryMinor: 125_000 };
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { employeeId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitHrEmployeeAction(action, { actorId: " user_01J8Y8KQ4G4P8W6T2Z9M3N5R7A ", organizationId }))
+      .resolves.toMatchObject({ kind: "success" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    for (const actorId of [null, "u".repeat(256)]) {
+      await expect(submitHrEmployeeAction(action, { actorId, organizationId }))
+        .rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: false });
+    }
+    await expect(submitHrEmployeeAction(action, { actorId: "user_01J8Y8KQ4G4P8W6T2Z9M3N5R7A", organizationId: "not-a-uuid" }))
+      .rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: false });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a pending employee hire on Go even when the old selector is disabled", async () => {
+    stubHrWriteLocks();
+    vi.stubGlobal("__GO_HR_EMPLOYEE_WRITES__", true);
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
+    const action = { action: "hireEmployee" as const, name: "Amina", monthlySalaryMinor: 100_000 };
+    const fetchMock = vi.fn(async () => Response.json({ pendingApproval: true }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitHrEmployeeAction(action, scope)).resolves.toMatchObject({ kind: "pending" });
+    vi.stubGlobal("__GO_HR_EMPLOYEE_WRITES__", false);
+    await expect(submitHrEmployeeAction(action, scope)).resolves.toMatchObject({ kind: "pending" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await expect(readPendingHrEmployeeAction(scope)).resolves.toEqual(action);
+  });
+
+  it("retains the exact marker after Go 404 and rejects output that violates the UUID contract", async () => {
+    stubHrWriteLocks();
+    vi.stubGlobal("__GO_HR_EMPLOYEE_WRITES__", true);
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
+    const action = { action: "hireEmployee" as const, name: "Amina", monthlySalaryMinor: 100_000 };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ error: "capability not found" }, { status: 404 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { employeeId: "employee-1" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitHrEmployeeAction(action, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    await expect(readPendingHrEmployeeAction(scope)).resolves.toEqual(action);
+    await expect(submitHrEmployeeAction(action, scope)).rejects.toMatchObject({ status: 200, requestMayHaveReachedServer: true });
+    await expect(readPendingHrEmployeeAction(scope)).resolves.toEqual(action);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.every(([path]) => path === "/api/capabilities/execute")).toBe(true);
+  });
+
+  it("reuses one employee hire intent for concurrent identical submissions", async () => {
+    stubHrWriteLocks();
+    vi.stubGlobal("__GO_HR_EMPLOYEE_WRITES__", true);
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
+    const action = { action: "hireEmployee" as const, name: "Mira Patel", monthlySalaryMinor: 125_000 };
+    const calls: Array<{ intentId: string }> = [];
+    let finishFirst!: (response: Response) => void;
+    const firstResponse = new Promise<Response>((resolve) => { finishFirst = resolve; });
+    const fetchMock = vi.fn(async (_path: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { intentId: string };
+      calls.push({ intentId: body.intentId });
+      return calls.length === 1
+        ? firstResponse
+        : Response.json({ ok: true, data: { employeeId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = submitHrEmployeeAction(action, scope);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const duplicate = submitHrEmployeeAction(action, scope);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    finishFirst(Response.json({ pendingApproval: true }, { status: 202 }));
+
+    await expect(first).resolves.toMatchObject({ kind: "pending" });
+    await expect(duplicate).resolves.toMatchObject({ kind: "success" });
+    expect(calls).toHaveLength(2);
+    expect(calls[1]?.intentId).toBe(calls[0]?.intentId);
+    await expect(readPendingHrEmployeeAction(scope)).resolves.toBeNull();
+  });
+
+  it("does not let a delayed response clear a newer employee hire marker", async () => {
+    stubHrWriteLocks();
+    vi.stubGlobal("__GO_HR_EMPLOYEE_WRITES__", true);
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
+    const action = { action: "hireEmployee" as const, name: "Mira Patel", monthlySalaryMinor: 125_000 };
+    let finishResponse!: (response: Response) => void;
+    const pendingResponse = new Promise<Response>((resolve) => { finishResponse = resolve; });
+    const fetchMock = vi.fn(async () => pendingResponse);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const request = submitHrEmployeeAction(action, scope);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const storageKey = window.localStorage.key(0);
+    expect(storageKey).not.toBeNull();
+    const marker = JSON.parse(window.localStorage.getItem(storageKey!) ?? "null") as { intentId: string; fingerprint: string; action: typeof action };
+    const newerIntentId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    window.localStorage.setItem(storageKey!, JSON.stringify({ ...marker, intentId: newerIntentId }));
+    finishResponse(Response.json({ error: "hire rejected" }, { status: 400 }));
+
+    await expect(request).rejects.toMatchObject({ status: 400, requestMayHaveReachedServer: false });
+    const retained = JSON.parse(window.localStorage.getItem(storageKey!) ?? "null") as { intentId: string };
+    expect(retained.intentId).toBe(newerIntentId);
+  });
+
+  it("fails closed before Go when Web Locks are unavailable", async () => {
+    const testNavigator = Object.create(navigator) as Navigator;
+    Object.defineProperty(testNavigator, "locks", { configurable: true, value: undefined });
+    vi.stubGlobal("navigator", testNavigator);
+    vi.stubGlobal("__GO_HR_EMPLOYEE_WRITES__", true);
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitHrEmployeeAction({ action: "hireEmployee", name: "Mira Patel", monthlySalaryMinor: 125_000 }, scope)).rejects.toMatchObject({
+      status: 0,
+      requestMayHaveReachedServer: false,
+      message: expect.stringContaining("Web Locks enabled"),
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(window.localStorage.length).toBe(0);
+  });
+
+  it("validates the module switchboard and employee report responses", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => input === "/api/modules"
+      ? Response.json(switchboard)
+      : Response.json({ ok: true, data: report }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchHrEnabled(organizationId)).resolves.toBe(true);
+    await expect(fetchHrReport(organizationId)).resolves.toEqual(report);
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/modules", expect.objectContaining({ credentials: "same-origin", cache: "no-store", headers: expect.objectContaining({ "X-Organization-ID": organizationId }) }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/capabilities/execute", expect.objectContaining({ method: "POST", credentials: "same-origin", cache: "no-store", headers: expect.objectContaining({ "X-Organization-ID": organizationId }) }));
+    expect(fetchMock.mock.calls.some(([path]) => path === "/api/hr")).toBe(false);
+  });
+
+  it("rejects malformed HR data instead of rendering partial records", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { ...report, employees: [{ id: "incomplete" }] } })));
+    await expect(fetchHrReport(organizationId)).rejects.toMatchObject({
+      name: "HrApiError",
+      message: "The Go People service returned data in an unexpected format.",
+    });
+  });
+
+  it("surfaces permission failures as actionable API errors", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "forbidden: hr.read" }, { status: 403 })));
+    await expect(fetchHrReport(organizationId)).rejects.toEqual(expect.objectContaining({
+      status: 403,
+      message: "forbidden: hr.read",
+    } satisfies Partial<HrApiError>));
+  });
+
+  it("loads the Go HR report through the session capability route", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      expect(init?.method).toBe("POST");
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      expect(body).toMatchObject({ capabilityId: "hr.report", input: {}, intentId: expect.any(String) });
+      return Response.json({ ok: true, data: report });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchGoHrReport(organizationId)).resolves.toEqual(report);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ credentials: "same-origin", cache: "no-store", headers: expect.objectContaining({ "X-Organization-ID": organizationId }) }));
+  });
+
+  it("rejects an invalid organization before requesting HR data", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchHrReport("invalid-org-id")).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: false });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("retries payroll draft creation with its exact actor/org intent after pending approval and Go 404", async () => {
+    vi.stubGlobal("__GO_HR_PAYROLL__", true);
+    stubHrWriteLocks();
+    const action = { action: "createPayrollRun" as const, year: 2026, month: 9 };
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
+    const intentIds: string[] = [];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { capabilityId?: string; input?: Record<string, unknown>; intentId: string };
+      intentIds.push(body.intentId);
+      expect(body).toMatchObject({ capabilityId: "hr.createPayrollRun", input: { year: 2026, month: 9 }, intentId: expect.any(String) });
+      if (intentIds.length === 1) return Response.json({ pendingApproval: true, reason: "Payroll approval required." }, { status: 202 });
+      if (intentIds.length === 2) return Response.json({ error: "capability not found" }, { status: 404 });
+      return Response.json({ ok: true, data: { runId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", headcount: 4, totalGrossMinor: 400_000, totalTaxMinor: 40_000, totalNetMinor: 360_000 } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitHrPayrollAction(action, scope)).resolves.toMatchObject({ kind: "pending" });
+    await expect(submitHrPayrollAction(action, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    await expect(readPendingHrPayrollAction(scope)).resolves.toEqual(action);
+    await expect(submitHrPayrollAction(action, scope)).resolves.toMatchObject({ kind: "success", data: { runId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } });
+
+    expect(intentIds).toHaveLength(3);
+    expect(intentIds[1]).toBe(intentIds[0]);
+    expect(intentIds[2]).toBe(intentIds[0]);
+    expect(fetchMock.mock.calls.every(([path]) => path === "/api/capabilities/execute")).toBe(true);
+  });
+
+  it("executes, voids, and reverses payroll through validated Go capabilities with exact pending recovery", async () => {
+    vi.stubGlobal("__GO_HR_PAYROLL__", true);
+    stubHrWriteLocks();
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId };
+    const actions = [
+      { action: "executePayrollRun" as const, runId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", expectedTotalNetMinor: 360_000 },
+      { action: "voidPayrollRun" as const, runId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" },
+      { action: "reversePayrollPosting" as const, runId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", reason: "Corrected payroll calculation" },
+    ];
+    const expected = [
+      { capabilityId: "hr.executePayrollRun", input: { runId: actions[0]!.runId, expectedTotalNetMinor: 360_000 } },
+      { capabilityId: "hr.voidPayrollRun", input: { runId: actions[1]!.runId } },
+      { capabilityId: "hr.reversePayrollPosting", input: { runId: actions[2]!.runId, reason: "Corrected payroll calculation" } },
+    ];
+    const outputs = [
+      { entryId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", totalGrossMinor: 400_000, totalNetMinor: 360_000 },
+      { voided: true },
+      { reversalEntryId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", reversedNetMinor: 360_000 },
+    ];
+
+    for (const [index, action] of actions.entries()) {
+      const requests: Array<{ capabilityId: string; input: Record<string, unknown>; intentId: string }> = [];
+      const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
+        requests.push(body);
+        return requests.length === 1
+          ? Response.json({ pendingApproval: true, reason: "Approval required." }, { status: 202 })
+          : Response.json({ ok: true, data: outputs[index] });
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(submitHrPayrollAction(action, scope)).resolves.toMatchObject({ kind: "pending" });
+      await expect(readPendingHrPayrollAction(scope)).resolves.toEqual(action);
+      await expect(submitHrPayrollAction(action, scope)).resolves.toMatchObject({ kind: "success", data: outputs[index] });
+      expect(requests).toHaveLength(2);
+      expect(requests[0]).toMatchObject({ ...expected[index], intentId: expect.any(String) });
+      expect(requests[1]).toEqual(requests[0]);
+      await expect(readPendingHrPayrollAction(scope)).resolves.toBeNull();
+    }
+  });
+
+  it("keeps a malformed Go payroll action output unresolved for safe recovery", async () => {
+    vi.stubGlobal("__GO_HR_PAYROLL__", true);
+    stubHrWriteLocks();
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId };
+    const action = { action: "executePayrollRun" as const, runId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", expectedTotalNetMinor: 360_000 };
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { entryId: "not-a-uuid", totalGrossMinor: -1, totalNetMinor: 360_000 } })));
+
+    await expect(submitHrPayrollAction(action, scope)).rejects.toMatchObject({ requestMayHaveReachedServer: true });
+    await expect(readPendingHrPayrollAction(scope)).resolves.toEqual(action);
+  });
+
+  it("serializes cross-tab Go payroll draft reservations for one actor and organization", async () => {
+    vi.stubGlobal("__GO_HR_PAYROLL__", true);
+    stubHrWriteLocks();
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
+    const action = { action: "createPayrollRun" as const, year: 2026, month: 9 };
+    const alternateAction = { ...action, month: 10 };
+    const fetchMock = vi.fn(async () => Response.json({ pendingApproval: true }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const outcomes = await Promise.allSettled([
+      submitHrPayrollAction(action, scope),
+      submitHrPayrollAction(alternateAction, scope),
+    ]);
+
+    expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
+    expect(outcomes.filter((outcome) => outcome.status === "rejected")).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect([action, alternateAction]).toContainEqual(await readPendingHrPayrollAction(scope));
+  });
+
+  it("does not let a delayed payroll success clear a newer Go draft intent", async () => {
+    vi.stubGlobal("__GO_HR_PAYROLL__", true);
+    stubHrWriteLocks();
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
+    const action = { action: "createPayrollRun" as const, year: 2026, month: 9 };
+    const nextAction = { ...action, month: 10 };
+    const respond: Array<(response: Response) => void> = [];
+    const intentIds: string[] = [];
+    const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      intentIds.push((JSON.parse(String(init?.body)) as { intentId: string }).intentId);
+      return new Promise<Response>((resolve) => { respond.push(resolve); });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = submitHrPayrollAction(action, scope);
+    const duplicate = submitHrPayrollAction(action, scope);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(intentIds[1]).toBe(intentIds[0]);
+    respond[0]?.(Response.json({ ok: true, data: { runId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", headcount: 4, totalGrossMinor: 400_000, totalTaxMinor: 40_000, totalNetMinor: 360_000 } }));
+    await expect(first).resolves.toMatchObject({ kind: "success" });
+
+    const next = submitHrPayrollAction(nextAction, scope);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(intentIds[2]).not.toBe(intentIds[0]);
+    const attemptKey = Object.keys(window.localStorage).find((key) => key.startsWith("chaste:hr:payroll:go:attempt:v1:"));
+    if (!attemptKey) throw new Error("Payroll retry marker was not persisted");
+    const newerAttempt = JSON.parse(window.localStorage.getItem(attemptKey) ?? "null") as { intentId: string };
+    newerAttempt.intentId = intentIds[0]!;
+    window.localStorage.setItem(attemptKey, JSON.stringify(newerAttempt));
+    respond[1]?.(Response.json({ ok: true, data: { runId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", headcount: 4, totalGrossMinor: 400_000, totalTaxMinor: 40_000, totalNetMinor: 360_000 } }));
+    await expect(duplicate).resolves.toMatchObject({ kind: "success" });
+    await expect(readPendingHrPayrollAction(scope)).resolves.toEqual(nextAction);
+
+    respond[2]?.(Response.json({ pendingApproval: true }, { status: 202 }));
+    await expect(next).resolves.toMatchObject({ kind: "pending" });
+  }, 60_000);
+
+  it("fails closed when browser-wide Go payroll locks are unavailable", async () => {
+    vi.stubGlobal("__GO_HR_PAYROLL__", true);
+    vi.stubGlobal("navigator", {} as Navigator);
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { runId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", headcount: 4, totalGrossMinor: 400_000, totalTaxMinor: 40_000, totalNetMinor: 360_000 } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitHrPayrollAction({ action: "createPayrollRun", year: 2026, month: 9 }, scope)).rejects.toMatchObject({
+      status: 0,
+      message: expect.stringContaining("cannot safely reserve a payroll action"),
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(window.localStorage.length).toBe(0);
+  });
+
+  it("keeps an exact Hiring action on Go after pending approval and Go 404", async () => {
+    vi.stubGlobal("__GO_HR_HIRING__", true);
+    stubHrWriteLocks();
+    const action = { action: "createOpening" as const, title: "Field Technician", department: "Field Operations", note: "On-call rotation required" };
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
+    const intentIds: string[] = [];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { capabilityId?: string; input?: Record<string, unknown>; intentId: string };
+      intentIds.push(body.intentId);
+      expect(body).toMatchObject({ capabilityId: "hr.createOpening", input: { title: action.title, department: action.department, note: action.note }, intentId: expect.any(String) });
+      if (intentIds.length === 1) return Response.json({ pendingApproval: true, reason: "Hiring approval required." }, { status: 202 });
+      if (intentIds.length === 2) return Response.json({ error: "capability not found" }, { status: 404 });
+      return Response.json({ ok: true, data: { openingId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitHrHiringAction(action, scope)).resolves.toMatchObject({ kind: "pending" });
+    await expect(submitHrHiringAction(action, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    await expect(readPendingHrHiringAction(scope)).resolves.toEqual(action);
+    await expect(submitHrHiringAction(action, scope)).resolves.toMatchObject({ kind: "success", data: { openingId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } });
+
+    expect(intentIds).toHaveLength(3);
+    expect(intentIds[1]).toBe(intentIds[0]);
+    expect(intentIds[2]).toBe(intentIds[0]);
+    expect(fetchMock.mock.calls.every(([path]) => path === "/api/capabilities/execute")).toBe(true);
+  });
+
+  it("maps Hiring applicant add and stage changes to their Go contracts", async () => {
+    vi.stubGlobal("__GO_HR_HIRING__", true);
+    stubHrWriteLocks();
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
+    const seen: Array<{ capabilityId: string; input: Record<string, unknown> }> = [];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown> };
+      seen.push({ capabilityId: body.capabilityId, input: body.input });
+      return body.capabilityId === "hr.addApplicant"
+        ? Response.json({ ok: true, data: { applicantId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" } })
+        : Response.json({ ok: true, data: { moved: true, stage: "interview" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const openingId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const applicantId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+
+    await expect(submitHrHiringAction({ action: "addApplicant", openingId, name: "Mira Patel", email: "mira@example.com" }, scope)).resolves.toMatchObject({ kind: "success", data: { applicantId } });
+    await expect(submitHrHiringAction({ action: "moveApplicant", applicantId, stage: "interview" }, scope)).resolves.toMatchObject({ kind: "success", data: { moved: true, stage: "interview" } });
+    expect(seen).toEqual([
+      { capabilityId: "hr.addApplicant", input: { openingId, name: "Mira Patel", email: "mira@example.com" } },
+      { capabilityId: "hr.moveApplicant", input: { applicantId, stage: "interview" } },
+    ]);
+  });
+
+  it("converts an offer applicant into an employee through Go with exact approval recovery", async () => {
+    vi.stubGlobal("__GO_HR_HIRING__", true);
+    stubHrWriteLocks();
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId };
+    const action = { action: "hireApplicant" as const, applicantId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", monthlySalaryMinor: 125_000 };
+    const calls: Array<{ capabilityId: string; input: Record<string, unknown>; intentId: string }> = [];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
+      calls.push(body);
+      return calls.length === 1
+        ? Response.json({ pendingApproval: true, reason: "Hiring approval required." }, { status: 202 })
+        : Response.json({ ok: true, data: { employeeId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", applicantId: action.applicantId } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitHrHiringAction(action, scope)).resolves.toMatchObject({ kind: "pending" });
+    await expect(readPendingHrHiringAction(scope)).resolves.toEqual(action);
+    await expect(submitHrHiringAction(action, scope)).resolves.toMatchObject({ kind: "success", data: { employeeId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", applicantId: action.applicantId } });
+    await expect(readPendingHrHiringAction(scope)).resolves.toBeNull();
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toMatchObject({ capabilityId: "hr.hireApplicant", input: { applicantId: action.applicantId, monthlySalaryMinor: 125_000 }, intentId: expect.any(String) });
+    expect(calls[1]).toEqual(calls[0]);
+    await expect(submitHrHiringAction({ ...action, monthlySalaryMinor: 0 }, scope)).rejects.toMatchObject({ status: 400 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("closes an opening through Go with an actor and organization scoped exact retry", async () => {
+    vi.stubGlobal("__GO_HR_HIRING__", true);
+    stubHrWriteLocks();
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId };
+    const action = { action: "closeOpening" as const, openingId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" };
+    const requests: Array<{ capabilityId: string; input: Record<string, unknown>; intentId: string }> = [];
+    const fetchMock = vi.fn(async (_path: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
+      requests.push(body);
+      return requests.length === 1
+        ? Response.json({ pendingApproval: true, reason: "Hiring approval required." }, { status: 202 })
+        : Response.json({ ok: true, data: { closed: true } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitHrHiringAction(action, scope)).resolves.toMatchObject({ kind: "pending" });
+    await expect(readPendingHrHiringAction(scope)).resolves.toEqual(action);
+    await expect(submitHrHiringAction(action, scope)).resolves.toMatchObject({ kind: "success", data: { closed: true } });
+    await expect(readPendingHrHiringAction(scope)).resolves.toBeNull();
+    expect(requests).toHaveLength(2);
+    expect(requests[0]).toMatchObject({ capabilityId: "hr.closeOpening", input: { openingId: action.openingId } });
+    expect(requests[1]).toEqual(requests[0]);
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({ "X-Organization-ID": scope.organizationId });
+  });
+
+  it("retains a close-opening intent when Go returns malformed output", async () => {
+    stubHrWriteLocks();
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId };
+    const action = { action: "closeOpening" as const, openingId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" };
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { closed: "true" } })));
+
+    await expect(submitHrHiringAction(action, scope)).rejects.toMatchObject({ status: 200, requestMayHaveReachedServer: true });
+    await expect(readPendingHrHiringAction(scope)).resolves.toEqual(action);
+  });
+
+  it("serializes cross-tab Go Hiring reservations for one actor and organization", async () => {
+    vi.stubGlobal("__GO_HR_HIRING__", true);
+    stubHrWriteLocks();
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
+    const action = { action: "createOpening" as const, title: "Field Technician", department: "Field Operations", note: "On-call rotation required" };
+    const alternateAction = { action: "createOpening" as const, title: "Finance Analyst", department: "Finance", note: "Quarterly close owner" };
+    const fetchMock = vi.fn(async () => Response.json({ pendingApproval: true }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const outcomes = await Promise.allSettled([
+      submitHrHiringAction(action, scope),
+      submitHrHiringAction(alternateAction, scope),
+    ]);
+
+    expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
+    expect(outcomes.filter((outcome) => outcome.status === "rejected")).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect([action, alternateAction]).toContainEqual(await readPendingHrHiringAction(scope));
+  });
+
+  it("does not let a delayed Hiring success clear a newer Go action intent", async () => {
+    vi.stubGlobal("__GO_HR_HIRING__", true);
+    stubHrWriteLocks();
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
+    const action = { action: "createOpening" as const, title: "Field Technician", department: "Field Operations", note: "On-call rotation required" };
+    const nextAction = { action: "createOpening" as const, title: "Finance Analyst", department: "Finance", note: "Quarterly close owner" };
+    const respond: Array<(response: Response) => void> = [];
+    const intentIds: string[] = [];
+    const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      intentIds.push((JSON.parse(String(init?.body)) as { intentId: string }).intentId);
+      return new Promise<Response>((resolve) => { respond.push(resolve); });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = submitHrHiringAction(action, scope);
+    const duplicate = submitHrHiringAction(action, scope);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(intentIds[1]).toBe(intentIds[0]);
+    respond[0]?.(Response.json({ ok: true, data: { openingId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } }));
+    await expect(first).resolves.toMatchObject({ kind: "success" });
+
+    const next = submitHrHiringAction(nextAction, scope);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(intentIds[2]).not.toBe(intentIds[0]);
+    respond[1]?.(Response.json({ ok: true, data: { openingId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } }));
+    await expect(duplicate).resolves.toMatchObject({ kind: "success" });
+    await expect(readPendingHrHiringAction(scope)).resolves.toEqual(nextAction);
+
+    respond[2]?.(Response.json({ pendingApproval: true }, { status: 202 }));
+    await expect(next).resolves.toMatchObject({ kind: "pending" });
+  }, 10_000);
+
+  it("fails closed when browser-wide Go Hiring locks are unavailable", async () => {
+    vi.stubGlobal("__GO_HR_HIRING__", true);
+    vi.stubGlobal("navigator", {} as Navigator);
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { openingId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitHrHiringAction({ action: "createOpening", title: "Field Technician" }, scope)).rejects.toMatchObject({
+      status: 0,
+      message: expect.stringContaining("cannot safely reserve a Hiring action"),
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(window.localStorage.length).toBe(0);
+  });
+
+  it("keeps actor and organization scoped exact leave attempts through approval and Go 404", async () => {
+    const action = {
+      action: "requestLeave" as const,
+      employeeId: "11111111-1111-4111-8111-111111111111",
+      kind: "annual",
+      startDate: "2026-10-12",
+      endDate: "2026-10-14",
+    };
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
+    const intents: string[] = [];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      intents.push(String(body.intentId));
+      expect(body).toMatchObject({ capabilityId: "hr.requestLeave", input: { employeeId: action.employeeId, kind: action.kind }, intentId: expect.any(String) });
+      return intents.length === 1
+        ? Response.json({ pendingApproval: true, reason: "Manager approval required." }, { status: 202 })
+        : Response.json({ error: "capability not found" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitHrLeaveAction(action, scope)).resolves.toMatchObject({ kind: "pending" });
+    await expect(submitHrLeaveAction(action, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    await expect(readPendingHrLeaveAction(scope)).resolves.toEqual(action);
+    await expect(submitHrLeaveAction(action, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    expect(intents).toHaveLength(3);
+    expect(intents[1]).toBe(intents[0]);
+    expect(intents[2]).toBe(intents[0]);
+    expect(fetchMock.mock.calls.every(([path]) => path === "/api/capabilities/execute")).toBe(true);
+  });
+
+  it("keeps a Go leave retry when a successful response has unexpected fields", async () => {
+    const action = {
+      action: "requestLeave" as const,
+      employeeId: "11111111-1111-4111-8111-111111111111",
+      kind: "annual",
+      startDate: "2026-10-12",
+      endDate: "2026-10-14",
+    };
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
+    const intents: string[] = [];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { intentId: string };
+      intents.push(body.intentId);
+      return intents.length === 1
+        ? Response.json({ ok: true, data: { requestId: "44444444-4444-4444-8444-444444444444", calendarDays: 3, extra: true } })
+        : Response.json({ ok: true, data: { requestId: "44444444-4444-4444-8444-444444444444", calendarDays: 3 } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitHrLeaveAction(action, scope)).rejects.toMatchObject({ status: 200, requestMayHaveReachedServer: true });
+    await expect(readPendingHrLeaveAction(scope)).resolves.toEqual(action);
+    await expect(submitHrLeaveAction(action, scope)).resolves.toMatchObject({ kind: "success", data: { requestId: "44444444-4444-4444-8444-444444444444", calendarDays: 3 } });
+    expect(intents).toHaveLength(2);
+    expect(intents[1]).toBe(intents[0]);
+    await expect(readPendingHrLeaveAction(scope)).resolves.toBeNull();
+  });
+
+  it("maps leave decisions and cancellation to their Go capability contracts", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown> };
+      if (body.capabilityId === "hr.decideLeave") return Response.json({ ok: true, data: { status: "approved" } });
+      return Response.json({ ok: true, data: { cancelled: true } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
+
+    await expect(submitHrLeaveAction({ action: "decideLeave", requestId: "44444444-4444-4444-8444-444444444444", approve: true }, scope)).resolves.toMatchObject({ kind: "success", data: { status: "approved" } });
+    await expect(submitHrLeaveAction({ action: "cancelLeave", requestId: "55555555-5555-4555-8555-555555555555" }, scope)).resolves.toMatchObject({ kind: "success", data: { cancelled: true } });
+    expect(fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)))).toEqual([
+      expect.objectContaining({ capabilityId: "hr.decideLeave", input: { requestId: "44444444-4444-4444-8444-444444444444", approve: true } }),
+      expect.objectContaining({ capabilityId: "hr.cancelLeave", input: { requestId: "55555555-5555-4555-8555-555555555555" } }),
+    ]);
+  });
+
+  it("loads the Go time report and approval queue through their read capabilities", async () => {
+    const pendingEntry = {
+      id: "11111111-1111-4111-8111-111111111111",
+      employeeId: "22222222-2222-4222-8222-222222222222",
+      employeeName: "Amina",
+      workDate: "2026-10-01T00:00:00.000Z",
+      minutes: 60,
+      note: null,
+      late: false,
+    };
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { capabilityId: string; input: unknown; intentId: string };
+      expect(init?.method).toBe("POST");
+      expect(body.intentId).toEqual(expect.any(String));
+      if (body.capabilityId === "hr.timeReport") {
+        expect(body.input).toEqual({ from: "2026-10-01", to: "2026-10-31" });
+        return Response.json({ ok: true, data: { rows: [{ employeeId: pendingEntry.employeeId, approvedMinutes: 60, pendingMinutes: 60 }] } });
+      }
+      expect(body).toMatchObject({ capabilityId: "hr.pendingTimeEntries", input: {} });
+      return Response.json({ ok: true, data: { entries: [pendingEntry] } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchHrTime("2026-10-01", "2026-10-31", organizationId)).resolves.toEqual({ rows: [{ employeeId: pendingEntry.employeeId, approvedMinutes: 60, pendingMinutes: 60 }] });
+    await expect(fetchHrPendingEntries(organizationId)).resolves.toEqual([pendingEntry]);
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
+  });
+
+  it("persists exact Go time actions through approval, 404, and reload recovery", async () => {
+    stubHrWriteLocks();
+    const scope = { actorId: "33333333-3333-4333-8333-333333333333", organizationId: "44444444-4444-4444-8444-444444444444" };
+    const action = { action: "log" as const, employeeId: "11111111-1111-4111-8111-111111111111", workDate: "2026-10-04", minutes: 75, note: "Client visit" };
+    const intents: string[] = [];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
+      intents.push(body.intentId);
+      expect(body).toMatchObject({ capabilityId: "hr.logTime", input: { employeeId: action.employeeId, workDate: action.workDate, minutes: 75, note: action.note } });
+      return intents.length === 1
+        ? Response.json({ pendingApproval: true, reason: "Manager approval required." }, { status: 202 })
+        : Response.json({ error: "capability not found" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitHrTimeAction(action, scope)).resolves.toMatchObject({ kind: "pending" });
+    await expect(submitHrTimeAction(action, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    await expect(readPendingHrTimeAction(scope)).resolves.toEqual(action);
+    await expect(submitHrTimeAction(action, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    expect(intents).toHaveLength(3);
+    expect(intents[1]).toBe(intents[0]);
+    expect(intents[2]).toBe(intents[0]);
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
+      "/api/capabilities/execute", "/api/capabilities/execute", "/api/capabilities/execute",
+    ]);
+  });
+
+  it("maps Go time decisions and keeps malformed successful responses retryable", async () => {
+    stubHrWriteLocks();
+    const scope = { actorId: "33333333-3333-4333-8333-333333333333", organizationId: "44444444-4444-4444-8444-444444444444" };
+    const intents: string[] = [];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
+      intents.push(body.intentId);
+      expect(body).toMatchObject({ capabilityId: "hr.decideTimeEntry", input: { entryId: "55555555-5555-4555-8555-555555555555", decision: "approved" } });
+      return intents.length === 1
+        ? Response.json({ ok: true, data: { entryId: "not-a-uuid", status: "approved" } })
+        : Response.json({ ok: true, data: { entryId: "55555555-5555-4555-8555-555555555555", status: "approved" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const action = { action: "decide" as const, entryId: "55555555-5555-4555-8555-555555555555", decision: "approve" as const };
+
+    await expect(submitHrTimeAction(action, scope)).rejects.toMatchObject({ status: 200, requestMayHaveReachedServer: true });
+    await expect(readPendingHrTimeAction(scope)).resolves.toEqual(action);
+    await expect(submitHrTimeAction(action, scope)).resolves.toMatchObject({ kind: "success" });
+    expect(intents[1]).toBe(intents[0]);
+  });
+
+  it("routes attendance clock actions to the existing Go HR capabilities", async () => {
+    stubHrWriteLocks();
+    const scope = { actorId: "33333333-3333-4333-8333-333333333333", organizationId: "44444444-4444-4444-8444-444444444444" };
+    const employeeId = "11111111-1111-4111-8111-111111111111";
+    const calls: Array<{ capabilityId: string; input: Record<string, unknown>; intentId: string }> = [];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
+      calls.push(body);
+      return body.capabilityId === "hr.clockIn"
+        ? Response.json({ ok: true, data: { entryId: "55555555-5555-4555-8555-555555555555", late: false } })
+        : Response.json({ ok: true, data: { entryId: "55555555-5555-4555-8555-555555555555", minutes: 480 } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitHrTimeAction({ action: "clockIn", employeeId }, scope)).resolves.toMatchObject({ kind: "success" });
+    await expect(submitHrTimeAction({ action: "clockOut", employeeId }, scope)).resolves.toMatchObject({ kind: "success" });
+    expect(calls.map(({ capabilityId, input }) => ({ capabilityId, input }))).toEqual([
+      { capabilityId: "hr.clockIn", input: { employeeId } },
+      { capabilityId: "hr.clockOut", input: { employeeId } },
+    ]);
+    expect(calls[0]?.intentId).not.toBe(calls[1]?.intentId);
+  });
+
+  it("serializes cross-tab Go time reservations for one actor and organization", async () => {
+    stubHrWriteLocks();
+    const scope = { actorId: "33333333-3333-4333-8333-333333333333", organizationId: "44444444-4444-4444-8444-444444444444" };
+    const action = { action: "log" as const, employeeId: "11111111-1111-4111-8111-111111111111", workDate: "2026-10-04", minutes: 75, note: "Client visit" };
+    const alternateAction = { ...action, minutes: 60 };
+    const fetchMock = vi.fn(async () => Response.json({ pendingApproval: true }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const outcomes = await Promise.allSettled([
+      submitHrTimeAction(action, scope),
+      submitHrTimeAction(alternateAction, scope),
+    ]);
+
+    expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
+    expect(outcomes.filter((outcome) => outcome.status === "rejected")).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const pending = await readPendingHrTimeAction(scope);
+    expect([action, alternateAction]).toContainEqual(pending);
+  });
+
+  it("does not let a delayed success clear a newer Go time intent", async () => {
+    stubHrWriteLocks();
+    const scope = { actorId: "33333333-3333-4333-8333-333333333333", organizationId: "44444444-4444-4444-8444-444444444444" };
+    const action = { action: "log" as const, employeeId: "11111111-1111-4111-8111-111111111111", workDate: "2026-10-04", minutes: 75, note: "Client visit" };
+    const nextAction = { ...action, minutes: 60, note: "Follow-up visit" };
+    const respond: Array<(response: Response) => void> = [];
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => { respond.push(resolve); }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = submitHrTimeAction(action, scope);
+    const duplicate = submitHrTimeAction(action, scope);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    respond[0]?.(Response.json({ ok: true, data: { entryId: "55555555-5555-4555-8555-555555555555", status: "submitted" } }));
+    await expect(first).resolves.toMatchObject({ kind: "success" });
+
+    const next = submitHrTimeAction(nextAction, scope);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    respond[1]?.(Response.json({ ok: true, data: { entryId: "55555555-5555-4555-8555-555555555555", status: "submitted" } }));
+    await expect(duplicate).resolves.toMatchObject({ kind: "success" });
+    await expect(readPendingHrTimeAction(scope)).resolves.toEqual(nextAction);
+
+    respond[2]?.(Response.json({ pendingApproval: true }, { status: 202 }));
+    await expect(next).resolves.toMatchObject({ kind: "pending" });
+  });
+
+  it("fails closed when browser-wide Go time locks are unavailable", async () => {
+    vi.stubGlobal("navigator", {} as Navigator);
+    const scope = { actorId: "33333333-3333-4333-8333-333333333333", organizationId: "44444444-4444-4444-8444-444444444444" };
+    const action = { action: "log" as const, employeeId: "11111111-1111-4111-8111-111111111111", workDate: "2026-10-04", minutes: 75 };
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: {} }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitHrTimeAction(action, scope)).rejects.toMatchObject({
+      status: 0,
+      message: expect.stringContaining("cannot safely reserve a People time action"),
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(window.localStorage.length).toBe(0);
+  });
+});

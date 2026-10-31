@@ -7,12 +7,12 @@
  * asserts the run produced a replayable session, a notification, and an
  * ok last-status on the routine row.
  *
- * Usage: pnpm exec tsx scripts/gates/routines-e2e.ts  (dev server on :3000)
+ * Usage: pnpm routines:e2e (dev server on :3000)
  */
 import "./env";
 import { spawn } from "node:child_process";
 import { and, desc, eq, isNull } from "drizzle-orm";
-import { agentSessions, getDb, jobs, notifications } from "@chaste/db";
+import { agentSessions, authUser, getDb, jobs, notifications } from "@chaste/db";
 
 const BASE = process.env.GATE_BASE_URL ?? "http://localhost:3000";
 
@@ -27,8 +27,55 @@ function cookieFrom(res: Response): string {
     .join("; ");
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
+const interrupted = new AbortController();
+let workerChild: ReturnType<typeof spawn> | null = null;
+
+function stopWorkerGroup(signal: NodeJS.Signals): void {
+  if (!workerChild?.pid) return;
+  try {
+    process.kill(-workerChild.pid, signal);
+  } catch {
+    // The process group may already have exited.
+  }
+}
+
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.on(signal, () => {
+    process.exitCode = signal === "SIGINT" ? 130 : 143;
+    interrupted.abort();
+    stopWorkerGroup("SIGTERM");
+  });
+}
+
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) return resolve();
+    const timer = setTimeout(done, ms);
+    function done() {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", done);
+      resolve();
+    }
+    signal.addEventListener("abort", done, { once: true });
+  });
+}
+
+function waitForWorkerExit(child: ReturnType<typeof spawn>): Promise<void> {
+  return new Promise((resolve) => {
+    if (child.exitCode !== null || child.signalCode !== null) return resolve();
+    child.once("exit", () => resolve());
+    child.once("error", () => resolve());
+  });
+}
+
+async function stopAndWaitForWorker(child: ReturnType<typeof spawn>): Promise<void> {
+  const exited = waitForWorkerExit(child);
+  const timeout = new AbortController();
+  stopWorkerGroup("SIGTERM");
+  await Promise.race([exited, sleep(10_000, timeout.signal)]);
+  timeout.abort();
+  if (child.exitCode === null && child.signalCode === null) stopWorkerGroup("SIGKILL");
+  await exited;
 }
 
 async function main(): Promise<void> {
@@ -39,7 +86,20 @@ async function main(): Promise<void> {
     body: JSON.stringify({ email, password: "gate-password-1A", name: "Gate Eleven" }),
   });
   if (!signup.ok) throw new Error(`sign-up failed: ${signup.status} ${await signup.text()}`);
-  const cookie = cookieFrom(signup);
+  const db = getDb().db;
+  // This proof targets routine execution. Promote only its newly created test
+  // identity so it does not depend on delivery timing or read a transient
+  // verification link from the auth outbox. The Go HTTP auth integration test
+  // separately proves the delivered verification link through /verify-email.
+  await db.update(authUser).set({ emailVerified: true }).where(eq(authUser.email, email));
+  const signIn = await fetch(`${BASE}/api/auth/sign-in/email`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...ORIGIN_HEADERS },
+    body: JSON.stringify({ email, password: "gate-password-1A" }),
+  });
+  if (!signIn.ok) throw new Error(`sign-in failed: ${signIn.status} ${await signIn.text()}`);
+  const cookie = cookieFrom(signIn);
+  if (!cookie) throw new Error("Go auth sign-in did not issue a session cookie");
 
   const onboarding = await fetch(`${BASE}/api/onboarding`, {
     method: "POST",
@@ -73,7 +133,7 @@ async function main(): Promise<void> {
     webhookUrl: string | null;
   };
   if (!createdJson.routineId || !createdJson.webhookUrl) {
-    throw new Error(`create response incomplete: ${JSON.stringify(createdJson)}`);
+    throw new Error("routine create response is missing its ID or webhook URL");
   }
   if (createdJson.scheduleLabel !== "Every 5 minutes") {
     throw new Error(`schedule not parsed as expected: ${createdJson.scheduleLabel}`);
@@ -84,14 +144,35 @@ async function main(): Promise<void> {
   const trigger = await fetch(createdJson.webhookUrl, { method: "POST" });
   if (trigger.status !== 202) throw new Error(`webhook trigger failed: ${trigger.status}`);
 
-  // Real worker path: spawn `pnpm worker`, poll the queue state, then stop.
-  const db = getDb().db;
-  const child = spawn("pnpm", ["worker"], { cwd: process.cwd(), stdio: "ignore", detached: true });
+  // Real worker path: spawn both Go workers through `pnpm worker`, poll the queue state, then stop.
+  const child = spawn("pnpm", ["worker"], {
+    cwd: process.cwd(),
+    stdio: "ignore",
+    detached: true,
+    env: {
+      ...process.env,
+      GO_ROUTINE_SCHEDULER: "1",
+      GO_ROUTINE_AGENT_RUNNER: "1",
+    },
+  });
+  workerChild = child;
+  const childExited = waitForWorkerExit(child);
   try {
     const deadline = Date.now() + 420_000;
     let done = false;
-    while (Date.now() < deadline) {
-      await sleep(3000);
+    while (!interrupted.signal.aborted && Date.now() < deadline) {
+      const pollWait = new AbortController();
+      try {
+        await Promise.race([
+          sleep(3000, pollWait.signal),
+          childExited.then(() => {
+            throw new Error("Go worker exited before the routine job completed");
+          }),
+        ]);
+      } finally {
+        pollWait.abort();
+      }
+      if (interrupted.signal.aborted) break;
       const [job] = await db
         .select({ status: jobs.status, lastError: jobs.lastError })
         .from(jobs)
@@ -104,6 +185,7 @@ async function main(): Promise<void> {
       }
       if (job?.status === "failed") throw new Error(`routine job failed: ${job.lastError}`);
     }
+    if (interrupted.signal.aborted) throw new Error("routine E2E interrupted");
     if (!done) throw new Error("routine job never completed in time");
 
     const [session] = await db
@@ -130,11 +212,9 @@ async function main(): Promise<void> {
 
     console.log(`[G11] ROUTINES E2E OK: session "${session.title}", notification "${note[0]!.title}"`);
   } finally {
-    try {
-      if (child.pid) process.kill(-child.pid, "SIGTERM");
-    } catch {
-      // already gone
-    }
+    await stopAndWaitForWorker(child);
+    await childExited;
+    workerChild = null;
   }
 
   async function currentOrg(c: string): Promise<{ orgId: string }> {
@@ -146,6 +226,7 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
+  if (interrupted.signal.aborted) return;
   console.error(err instanceof Error ? err.message : err);
-  process.exit(1);
+  process.exitCode = 1;
 });

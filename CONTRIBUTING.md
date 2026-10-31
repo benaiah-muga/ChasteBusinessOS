@@ -13,39 +13,37 @@ modularity, and trust.
 
 Requirements:
 
-- Node.js 22+ (LTS preferred; CI targets current LTS)
-- pnpm 9+
-- Docker (PostgreSQL + Redis)
+- Node.js 24+ (matches CI)
+- pnpm 11+
+- Docker (PostgreSQL with pgvector)
 
 ```bash
 pnpm install
 cp .env.example .env
-docker compose up -d
-pnpm db:migrate
-pnpm dev
+# fill BETTER_AUTH_SECRET and GO_INTERNAL_AUTH_SECRET (openssl rand -hex 32)
+docker start chaste-pgvector    # or provision via docker compose
+pnpm --filter @chaste/db db:migrate
+pnpm dev                        # Vite on :3000; run pnpm dev:api in another terminal
 ```
 
-- API: `http://localhost:3001`
-- Web: `http://localhost:3000` (talks to the API over HTTP only)
+- Web: `http://localhost:3000` (Vite; talks to the Go API over HTTP only)
+- API: `http://localhost:8080` (or `GO_API_ADDR` from your `.env`, commonly `127.0.0.1:18083` in dev)
 
 ## Project layout
 
 | Path | Role |
 |---|---|
-| `apps/api` | HTTP API gateway (only process that loads kernel + modules for requests) |
-| `apps/web` | Next.js UI -- **consumes REST APIs only** (no kernel/db imports) |
-| `apps/worker` | Outbox, jobs, async AI workflows |
-| `packages/*` | Shared libraries (kernel, db, ai-core, schemas, api-client) |
-| `modules/*` | Installable business modules |
+| `apps/api` | Go API gateway, capability kernel and registry, and workers |
+| `apps/web-vite` | React UI built by Vite -- **consumes REST APIs only** |
+| `packages/db` | Drizzle schema, migrations, runtime role provisioning |
+| `packages/erp-core` | Pure domain logic (money, posting rules, tax, inventory math) |
 | `docs/` | Architecture, ADRs, module rules |
-| `skills/` | Agent skills for contributors |
 
 ## Coupling rules (enforced by review)
 
-- **`apps/web` must not import** `@chaste/kernel`, `@chaste/db`, `@chaste/ai-core`, or module packages.
-- Web may import **`@chaste/api-client`** and **`@chaste/ui-schema`** (HTTP types + generative UI schemas only).
-- Business mutations live in **commands**; AI tools wrap commands -- never raw SQL.
-- Modules do not reach into other modules’ private tables.
+- **`apps/web-vite` must not import** `@chaste/db`; web may import `@chaste/erp-core` for pure formatting and domain constants.
+- Business mutations live in **capabilities** executed by the Go kernel; AI tools call capabilities -- never raw SQL.
+- Capability domains do not reach into other domains' private tables; use the declared seams.
 
 ## Pull requests
 

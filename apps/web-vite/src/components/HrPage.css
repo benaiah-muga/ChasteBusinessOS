@@ -1,0 +1,3 @@
+
+.hr-empty-action { display: grid; justify-items: start; gap: 8px; }
+.hr-empty-action .hr-primary-button { min-height: 30px; font-size: 10px; }

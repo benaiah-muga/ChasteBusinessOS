@@ -1,0 +1,389 @@
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { confirmInventoryTransfer, createInventoryTransfer, hasUnroutedInventoryTransferAttempt, InventoryTransferApiError } from "../api/inventory-transfers";
+import type { InventoryItem, InventoryLocation, InventoryTransfer } from "../api/inventory";
+import { InventoryTransfersPanel } from "./InventoryTransfersPanel";
+
+const items: InventoryItem[] = [{
+  sku: "BAG-50", name: "Cement 50kg", kind: "goods", unitLabel: "bag", onHandThousandths: 12000,
+  reservedThousandths: 2000, availableThousandths: 10000, totalValueMinor: 28000, reorderPointThousandths: 0, reorderNeeded: false,
+}];
+const locations: InventoryLocation[] = [
+  { id: "loc-main", code: "MAIN", name: "Main warehouse" },
+  { id: "loc-shop", code: "SHOP", name: "Shop" },
+];
+const retryScope = { actorId: "actor-1", organizationId: "org-1" };
+const transferResponseId = "60000000-0000-4000-8000-000000000006";
+const transfer: InventoryTransfer = {
+  id: "transfer-1", number: 7, status: "pending", note: "Counter stock", from: "MAIN", to: "SHOP",
+  lines: [{ lineId: "line-1", sku: "BAG-50", quantityThousandths: 5000, confirmedThousandths: 0 }],
+};
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return Response.json(body, { status });
+}
+
+async function digest(value: string): Promise<string> {
+  const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function waitForTransferScopeReady() {
+  await waitFor(() => {
+    const button = screen.getByRole("button", { name: "Confirm remaining" }) as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+  });
+}
+
+afterEach(() => {
+  cleanup();
+  localStorage.clear();
+  vi.unstubAllGlobals();
+});
+
+beforeEach(() => {
+  vi.stubGlobal("__GO_INVENTORY_TRANSFER_WRITES__", true);
+});
+
+describe("inventory transfer API", () => {
+  it("posts a governed transfer draft in thousandths through the Go capability", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: true, data: { transferId: transferResponseId, number: 7, status: "pending" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(createInventoryTransfer({ fromLocationCode: "MAIN", toLocationCode: "SHOP", sku: "BAG-50", quantityThousandths: 1250, note: "Shelf stock" }, retryScope)).resolves.toEqual({ kind: "completed" });
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST", credentials: "same-origin", cache: "no-store", signal: expect.any(AbortSignal) }));
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
+    expect(body).toMatchObject({
+      capabilityId: "inventory.createTransfer", input: { fromLocationCode: "MAIN", toLocationCode: "SHOP", lines: [{ sku: "BAG-50", quantityThousandths: 1250 }], note: "Shelf stock" },
+    });
+    expect(body.intentId).toEqual(expect.any(String));
+  });
+
+  it("submits line-scoped partial confirmations and distinguishes pending approval", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: false, pendingApproval: true, reason: "manager review" }, 202));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(confirmInventoryTransfer("transfer-1", retryScope, [{ lineId: "line-1", quantityThousandths: 1250 }])).resolves.toEqual({ kind: "pending", reason: "manager review" });
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
+    expect(body).toMatchObject({ capabilityId: "inventory.confirmTransfer", input: { transferId: "transfer-1", lines: [{ lineId: "line-1", quantityThousandths: 1250 }] } });
+    expect(body.intentId).toEqual(expect.any(String));
+  });
+
+  it("surfaces capability refusals and rejects malformed 2xx responses", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ ok: false, error: "insufficient stock at source" }, 422)));
+    await expect(confirmInventoryTransfer("transfer-1", retryScope)).rejects.toMatchObject({ status: 422, message: "insufficient stock at source" });
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ ok: true })));
+    await expect(confirmInventoryTransfer("transfer-1", retryScope)).rejects.toBeInstanceOf(InventoryTransferApiError);
+  });
+
+  it("warns about unknown outcomes when a transfer request times out", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new DOMException("Timed out", "TimeoutError"); }));
+    await expect(confirmInventoryTransfer("transfer-1", retryScope))
+      .rejects.toThrow("Check transfer history before retrying");
+  });
+
+  it("requires explicit confirmation before cancelling a pending transfer draft", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: true, data: { cancelled: true } }));
+    const onChanged = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    render(<InventoryTransfersPanel items={items} locations={locations} transfers={[transfer]} onChanged={onChanged} retryScope={retryScope} />);
+    await waitFor(() => expect((screen.getByRole("button", { name: "Cancel draft" }) as HTMLButtonElement).disabled).toBe(false), { timeout: 5000 });
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel draft" }));
+    expect(screen.getByText("Cancel draft #7? No stock has moved yet.")).toBeTruthy();
+    expect(fetchMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Keep draft" }));
+    expect(screen.queryByText("Cancel draft #7? No stock has moved yet.")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel draft" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm cancel draft #7" }));
+    expect((await screen.findByRole("status")).textContent).toContain("Transfer draft #7 cancelled.");
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ capabilityId: "inventory.cancelTransfer", input: { transferId: transfer.id } });
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+  });
+});
+
+describe("Vite inventory transfers panel", () => {
+  it("drafts a transfer through the existing action and refreshes after completion", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: true, data: { transferId: transferResponseId, number: 8, status: "pending" } }));
+    const onChanged = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    render(<InventoryTransfersPanel items={items} locations={locations} transfers={[]} onChanged={onChanged} retryScope={retryScope} />);
+
+    fireEvent.change(screen.getByLabelText("From location"), { target: { value: "MAIN" } });
+    fireEvent.change(screen.getByLabelText("To location"), { target: { value: "SHOP" } });
+    fireEvent.change(screen.getByLabelText("Item to transfer"), { target: { value: "BAG-50" } });
+    fireEvent.change(screen.getByLabelText("Quantity in units"), { target: { value: "1.25" } });
+    fireEvent.change(screen.getByLabelText("Transfer note"), { target: { value: "Shelf stock" } });
+    await waitFor(() => expect((screen.getByRole("button", { name: "Draft transfer" }) as HTMLButtonElement).disabled).toBe(false), { timeout: 5000 });
+    fireEvent.click(screen.getByRole("button", { name: "Draft transfer" }));
+
+    expect((await screen.findByRole("status")).textContent).toContain("Transfer draft created.");
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ capabilityId: "inventory.createTransfer", input: { lines: [{ sku: "BAG-50", quantityThousandths: 1250 }] } });
+  });
+
+  it("keeps approval-pending transfers visible without refreshing as completed", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: false, pendingApproval: true, reason: "owner approval required" }, 202));
+    const onChanged = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    render(<InventoryTransfersPanel items={items} locations={locations} transfers={[transfer]} onChanged={onChanged} retryScope={retryScope} />);
+    await waitForTransferScopeReady();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm remaining" }));
+
+    expect((await screen.findByRole("status")).textContent).toContain("requires approval");
+    expect(screen.getByRole("status").textContent).toContain("owner approval required");
+    expect(onChanged).not.toHaveBeenCalled();
+  });
+
+  it("invalidates cancellation confirmation and suppresses old-scope completion effects", async () => {
+    const nextScope = { actorId: "actor-2", organizationId: "org-2" };
+    let resolveRequest!: (response: Response) => void;
+    const pendingRequest = new Promise<Response>((resolve) => { resolveRequest = resolve; });
+    const fetchMock = vi.fn(() => pendingRequest);
+    const onChanged = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const panel = render(<InventoryTransfersPanel items={items} locations={locations} transfers={[transfer]} onChanged={onChanged} retryScope={retryScope} />);
+    await waitFor(() => expect((screen.getByRole("button", { name: "Cancel draft" }) as HTMLButtonElement).disabled).toBe(false), { timeout: 5000 });
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel draft" }));
+    expect(screen.getByRole("group", { name: "Confirm cancellation of transfer 7" })).toBeTruthy();
+    panel.rerender(<InventoryTransfersPanel items={items} locations={locations} transfers={[transfer]} onChanged={onChanged} retryScope={nextScope} />);
+    panel.rerender(<InventoryTransfersPanel items={items} locations={locations} transfers={[transfer]} onChanged={onChanged} retryScope={retryScope} />);
+    expect(screen.queryByRole("group", { name: "Confirm cancellation of transfer 7" })).toBeNull();
+    await waitFor(() => expect((screen.getByRole("button", { name: "Cancel draft" }) as HTMLButtonElement).disabled).toBe(false), { timeout: 5000 });
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel draft" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm cancel draft #7" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    panel.rerender(<InventoryTransfersPanel items={items} locations={locations} transfers={[transfer]} onChanged={onChanged} retryScope={nextScope} />);
+    await act(async () => {
+      resolveRequest(jsonResponse({ ok: true, data: { cancelled: true } }));
+      await pendingRequest;
+    });
+
+    expect(onChanged).not.toHaveBeenCalled();
+    expect(screen.queryByText("Transfer draft #7 cancelled.")).toBeNull();
+  });
+
+  it("requires history review before resolving an ambiguous pre-route marker", async () => {
+    vi.stubGlobal("__GO_INVENTORY_TRANSFER_WRITES__", true);
+    const scopeDigest = await digest(JSON.stringify(retryScope));
+    const storageKey = `chaste:inventory-transfer-attempt:${scopeDigest}`;
+    localStorage.setItem(storageKey, JSON.stringify({ fingerprint: "a".repeat(64), intentId: transferResponseId }));
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    render(<InventoryTransfersPanel items={items} locations={locations} transfers={[transfer]} onChanged={vi.fn()} retryScope={retryScope} />);
+
+    const warning = await screen.findByRole("alert");
+    expect(warning.textContent).toContain("Review the transfer history above");
+    expect(screen.getByText("#7", { selector: "strong" })).not.toBeNull();
+    fireEvent.change(screen.getByLabelText("From location"), { target: { value: "MAIN" } });
+    fireEvent.change(screen.getByLabelText("To location"), { target: { value: "SHOP" } });
+    fireEvent.change(screen.getByLabelText("Item to transfer"), { target: { value: "BAG-50" } });
+    fireEvent.change(screen.getByLabelText("Quantity in units"), { target: { value: "1.25" } });
+    const draftButton = screen.getByRole("button", { name: "Draft transfer" }) as HTMLButtonElement;
+    expect(draftButton.disabled).toBe(true);
+    const clearButton = within(warning).getByRole("button", { name: "Clear old retry marker" }) as HTMLButtonElement;
+    expect(clearButton.disabled).toBe(true);
+    fireEvent.click(within(warning).getByRole("checkbox"));
+    expect(clearButton.disabled).toBe(false);
+    fireEvent.click(clearButton);
+
+    expect((await screen.findByRole("status")).textContent).toContain("The old retry marker was cleared after your history review.");
+    await expect(hasUnroutedInventoryTransferAttempt(retryScope)).resolves.toBe(false);
+    expect(draftButton.disabled).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps the new organization marker visible when old-scope cleanup finishes late", async () => {
+    const oldScope = retryScope;
+    const newScope = { actorId: "actor-2", organizationId: "org-2" };
+    const markerKey = async (scope: typeof retryScope) => `chaste:inventory-transfer-attempt:${await digest(JSON.stringify(scope))}`;
+    localStorage.setItem(await markerKey(oldScope), JSON.stringify({ fingerprint: "a".repeat(64), intentId: transferResponseId }));
+    localStorage.setItem(await markerKey(newScope), JSON.stringify({ fingerprint: "b".repeat(64), intentId: transferResponseId }));
+
+    const originalDigest = crypto.subtle.digest.bind(crypto.subtle);
+    let finishOldCleanup!: (hash: ArrayBuffer) => void;
+    const oldCleanupDigest = new Promise<ArrayBuffer>((resolve) => { finishOldCleanup = resolve; });
+    let finishNewScopeLookup!: (hash: ArrayBuffer) => void;
+    const newScopeLookup = new Promise<ArrayBuffer>((resolve) => { finishNewScopeLookup = resolve; });
+    let oldScopeDigestCalls = 0;
+    let newScopeDigestCalls = 0;
+    vi.spyOn(crypto.subtle, "digest").mockImplementation((algorithm, data) => {
+      const value = new TextDecoder().decode(data);
+      if (value === JSON.stringify(oldScope)) {
+        oldScopeDigestCalls += 1;
+        if (oldScopeDigestCalls === 2) return oldCleanupDigest;
+      }
+      if (value === JSON.stringify(newScope)) {
+        newScopeDigestCalls += 1;
+        if (newScopeDigestCalls === 1) return newScopeLookup;
+      }
+      return originalDigest(algorithm, data);
+    });
+    vi.stubGlobal("fetch", vi.fn());
+    const panel = render(<InventoryTransfersPanel items={items} locations={locations} transfers={[transfer]} onChanged={vi.fn()} retryScope={oldScope} />);
+
+    const warning = await screen.findByRole("alert");
+    fireEvent.click(within(warning).getByRole("checkbox"));
+    fireEvent.click(within(warning).getByRole("button", { name: "Clear old retry marker" }));
+    await waitFor(() => expect(oldScopeDigestCalls).toBe(2));
+
+    panel.rerender(<InventoryTransfersPanel items={items} locations={locations} transfers={[transfer]} onChanged={vi.fn()} retryScope={newScope} />);
+    await waitFor(() => expect(newScopeDigestCalls).toBe(1));
+    expect((screen.getByRole("button", { name: "Draft transfer" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Confirm remaining" }) as HTMLButtonElement).disabled).toBe(true);
+    finishNewScopeLookup(await originalDigest("SHA-256", new TextEncoder().encode(JSON.stringify(newScope))));
+    await waitFor(async () => expect(await hasUnroutedInventoryTransferAttempt(newScope)).toBe(true));
+    const newScopeWarning = await screen.findByRole("alert");
+    expect((within(newScopeWarning).getByRole("checkbox") as HTMLInputElement).checked).toBe(false);
+    finishOldCleanup(await originalDigest("SHA-256", new TextEncoder().encode(JSON.stringify(oldScope))));
+
+    await waitFor(async () => expect(await hasUnroutedInventoryTransferAttempt(oldScope)).toBe(false));
+    await expect(hasUnroutedInventoryTransferAttempt(newScope)).resolves.toBe(true);
+    expect(screen.getByRole("alert").textContent).toContain("Review the transfer history above");
+    expect(screen.queryByText(/old retry marker was cleared/)).toBeNull();
+  });
+
+  it("keeps a draft transfer form intact through approval pending and retries the same intent", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: false, pendingApproval: true, reason: "owner approval required" }, 202))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: { transferId: transferResponseId, number: 9, status: "pending" } }));
+    const onChanged = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_INVENTORY_TRANSFER_WRITES__", true);
+    render(<InventoryTransfersPanel items={items} locations={locations} transfers={[]} onChanged={onChanged} retryScope={retryScope} />);
+
+    fireEvent.change(screen.getByLabelText("From location"), { target: { value: "MAIN" } });
+    fireEvent.change(screen.getByLabelText("To location"), { target: { value: "SHOP" } });
+    fireEvent.change(screen.getByLabelText("Item to transfer"), { target: { value: "BAG-50" } });
+    fireEvent.change(screen.getByLabelText("Quantity in units"), { target: { value: "1.25" } });
+    fireEvent.change(screen.getByLabelText("Transfer note"), { target: { value: "Shelf stock" } });
+    await waitFor(() => expect((screen.getByRole("button", { name: "Draft transfer" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Draft transfer" }));
+
+    expect((await screen.findByRole("status")).textContent).toContain("owner approval required");
+    expect((screen.getByLabelText("Item to transfer") as HTMLSelectElement).value).toBe("BAG-50");
+    expect((screen.getByLabelText("Quantity in units") as HTMLInputElement).value).toBe("1.25");
+    expect((screen.getByLabelText("Transfer note") as HTMLInputElement).value).toBe("Shelf stock");
+    fireEvent.click(screen.getByRole("button", { name: "Draft transfer" }));
+
+    expect((await screen.findByRole("status")).textContent).toContain("Transfer draft created.");
+    const bodies = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)) as { intentId: string });
+    expect(bodies[1]?.intentId).toBe(bodies[0]?.intentId);
+    expect(onChanged).toHaveBeenCalledTimes(1);
+    expect((screen.getByLabelText("Item to transfer") as HTMLSelectElement).value).toBe("");
+    expect((screen.getByLabelText("Quantity in units") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("Transfer note") as HTMLInputElement).value).toBe("");
+  });
+
+  it("allows partial confirmation when transfer lines include IDs, and displays API errors", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: false, error: "insufficient stock at source" }, 422));
+    vi.stubGlobal("fetch", fetchMock);
+    const withLineId = { ...transfer, lines: [{ ...transfer.lines[0]!, lineId: "line-1" }] };
+    render(<InventoryTransfersPanel items={items} locations={locations} transfers={[withLineId]} onChanged={vi.fn()} retryScope={retryScope} />);
+    await waitForTransferScopeReady();
+    fireEvent.change(screen.getByLabelText("Partial quantity for BAG-50"), { target: { value: "1.25" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm entered quantities" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain("insufficient stock at source");
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
+    expect(body).toMatchObject({ capabilityId: "inventory.confirmTransfer", input: { transferId: "transfer-1", lines: [{ lineId: "line-1", quantityThousandths: 1250 }] } });
+    expect(body.intentId).toEqual(expect.any(String));
+  });
+
+  it("blocks repeat partial confirmation until refreshed props show transfer progress", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: { transferId: transferResponseId, status: "partial", confirmedNowThousandths: 1250 } }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: { transferId: transferResponseId, status: "partial", confirmedNowThousandths: 500 } }));
+    const onChanged = vi.fn(async () => undefined);
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_INVENTORY_TRANSFER_WRITES__", true);
+    const staleTransfer = { ...transfer, lines: [{ ...transfer.lines[0]!, lineId: "line-1" }] };
+    const rendered = render(<InventoryTransfersPanel items={items} locations={locations} transfers={[staleTransfer]} onChanged={onChanged} retryScope={retryScope} />);
+
+    await waitForTransferScopeReady();
+    fireEvent.change(screen.getByLabelText("Partial quantity for BAG-50"), { target: { value: "1.25" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm entered quantities" }));
+    expect((await screen.findByRole("status")).textContent).toContain("Partial confirmation saved");
+    expect(onChanged).toHaveBeenCalledTimes(1);
+
+    const partialButton = screen.getByRole("button", { name: "Confirm entered quantities" }) as HTMLButtonElement;
+    const remainingButton = screen.getByRole("button", { name: "Confirm remaining" }) as HTMLButtonElement;
+    expect(partialButton.disabled).toBe(true);
+    expect(remainingButton.disabled).toBe(true);
+    fireEvent.click(partialButton);
+    fireEvent.click(remainingButton);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const refreshedTransfer = {
+      ...staleTransfer,
+      status: "partial",
+      lines: [{ ...staleTransfer.lines[0]!, confirmedThousandths: 1250 }],
+    };
+    rendered.rerender(<InventoryTransfersPanel items={items} locations={locations} transfers={[refreshedTransfer]} onChanged={onChanged} retryScope={retryScope} />);
+    await waitFor(() => expect((screen.getByRole("button", { name: "Confirm entered quantities" }) as HTMLButtonElement).disabled).toBe(false));
+    expect((screen.getByLabelText("Partial quantity for BAG-50") as HTMLInputElement).value).toBe("");
+
+    fireEvent.change(screen.getByLabelText("Partial quantity for BAG-50"), { target: { value: "0.5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm entered quantities" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({
+      capabilityId: "inventory.confirmTransfer",
+      input: { transferId: "transfer-1", lines: [{ lineId: "line-1", quantityThousandths: 500 }] },
+    });
+  });
+
+  it("keeps the partial confirmation guard when refreshed transfer lines are reordered", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ ok: true, data: { transferId: transferResponseId, status: "partial", confirmedNowThousandths: 1000 } }));
+    const onChanged = vi.fn(async () => undefined);
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_INVENTORY_TRANSFER_WRITES__", true);
+    const orderedTransfer = {
+      ...transfer,
+      lines: [
+        { ...transfer.lines[0]!, lineId: "line-1" },
+        { lineId: "line-2", sku: "PAPER", quantityThousandths: 3000, confirmedThousandths: 0 },
+      ],
+    };
+    const rendered = render(<InventoryTransfersPanel items={items} locations={locations} transfers={[orderedTransfer]} onChanged={onChanged} retryScope={retryScope} />);
+
+    await waitForTransferScopeReady();
+    fireEvent.change(screen.getByLabelText("Partial quantity for BAG-50"), { target: { value: "0.5" } });
+    fireEvent.change(screen.getByLabelText("Partial quantity for PAPER"), { target: { value: "0.5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm entered quantities" }));
+    expect((await screen.findByRole("status")).textContent).toContain("Partial confirmation saved");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    rendered.rerender(<InventoryTransfersPanel items={items} locations={locations} transfers={[{ ...orderedTransfer, lines: [...orderedTransfer.lines].reverse() }]} onChanged={onChanged} retryScope={retryScope} />);
+    expect((screen.getByRole("button", { name: "Confirm entered quantities" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Confirm remaining" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Confirm entered quantities" }));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("requires every remaining line quantity so omitted lines are not confirmed in full by accident", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: true, data: { transferId: transferResponseId, status: "partial", confirmedNowThousandths: 3250 } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const withTwoLines = {
+      ...transfer,
+      lines: [
+        { ...transfer.lines[0]!, lineId: "line-1" },
+        { sku: "BAG-25", quantityThousandths: 4000, confirmedThousandths: 0, lineId: "line-2" },
+      ],
+    };
+    render(<InventoryTransfersPanel items={items} locations={locations} transfers={[withTwoLines]} onChanged={vi.fn()} retryScope={retryScope} />);
+    await waitForTransferScopeReady();
+    fireEvent.change(screen.getByLabelText("Partial quantity for BAG-50"), { target: { value: "1.25" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm entered quantities" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain("every remaining line");
+    expect(fetchMock).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText("Partial quantity for BAG-25"), { target: { value: "2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm entered quantities" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
+      capabilityId: "inventory.confirmTransfer",
+      input: { lines: [{ lineId: "line-1", quantityThousandths: 1250 }, { lineId: "line-2", quantityThousandths: 2000 }] },
+    });
+  });
+});

@@ -4,12 +4,79 @@
  *
  * Run: pnpm demo:m7 [reconciliation|transfers|products|all]
  */
-import { and, eq } from "drizzle-orm";
-import { approvals, getDb, items, stockLocations, stockMovements, stockTransferLines, users } from "@chaste/db";
-import { glAccountBalanceMinor, inventoryLedgerValueMinor } from "../modules/inventory/src/valuation";
-import { buildExecutor, buildRegistry } from "../apps/web/src/server/kernel";
-import { runOnboarding } from "../apps/web/src/server/onboarding";
+import { and, eq, sql } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+import {
+  accounts,
+  approvals,
+  getDb,
+  items,
+  journalEntries,
+  journalLines,
+  organizations,
+  stockBalances,
+  stockLocations,
+  stockMovements,
+  stockTransferLines,
+  users,
+} from "@chaste/db";
+import { buildExecutor, buildRegistry, runOnboarding } from "./lib/go-driver";
 
+const runId = randomUUID().slice(0, 8);
+const INVENTORY_ACCOUNT_CODE = "1200";
+
+type DemoDb = ReturnType<typeof getDb>["db"];
+
+/** Debits minus credits posted to one account code in this org's chart. */
+async function glAccountBalanceMinor(db: DemoDb, orgId: string, code: string = INVENTORY_ACCOUNT_CODE): Promise<number> {
+  const [row] = await db
+    .select({ balance: sql<number>`coalesce(sum(${journalLines.debitMinor} - ${journalLines.creditMinor}), 0)` })
+    .from(journalLines)
+    .innerJoin(accounts, eq(journalLines.accountId, accounts.id))
+    .where(and(eq(accounts.orgId, orgId), eq(accounts.code, code)));
+  return Number(row?.balance ?? 0);
+}
+
+/** Quantity on hand for one item at one location, straight from the balance table. */
+async function stockOnHand(db: DemoDb, orgId: string, itemId: string, locationId: string): Promise<number> {
+  const [row] = await db
+    .select({ total: sql<number>`coalesce(sum(${stockBalances.quantity}), 0)` })
+    .from(stockBalances)
+    .where(and(eq(stockBalances.orgId, orgId), eq(stockBalances.itemId, itemId), eq(stockBalances.locationId, locationId)));
+  return Number(row?.total ?? 0);
+}
+
+/** Raw manual posting, as a human with database access could make it. */
+async function injectManualGlEntry(db: DemoDb, orgId: string, ownerId: string): Promise<void> {
+  const chartRows = await db
+    .select({ id: accounts.id, code: accounts.code })
+    .from(accounts)
+    .where(eq(accounts.orgId, orgId));
+  const accountIdOf = new Map(chartRows.map((row) => [row.code, row.id]));
+  const [org] = await db
+    .select({ baseCurrency: organizations.baseCurrency })
+    .from(organizations)
+    .where(eq(organizations.id, orgId));
+  await db.transaction(async (tx) => {
+    const [entry] = await tx
+      .insert(journalEntries)
+      .values({
+        orgId,
+        memo: "wrong manual inventory entry",
+        sourceType: "manual",
+        entryKind: "operational",
+        currency: org?.baseCurrency ?? "USD",
+        postedAt: new Date(),
+        postedByActorType: "human",
+        postedByActorId: ownerId,
+      })
+      .returning({ id: journalEntries.id });
+    await tx.insert(journalLines).values([
+      { entryId: entry!.id, accountId: accountIdOf.get("1200")!, debitMinor: 2_000_000, creditMinor: 0 },
+      { entryId: entry!.id, accountId: accountIdOf.get("6000")!, debitMinor: 0, creditMinor: 2_000_000 },
+    ]);
+  });
+}
 let passed = 0;
 function ok(label: string, condition?: boolean) {
   if (condition === false) throw new Error(`FAILED: ${label}`);
@@ -30,7 +97,7 @@ async function reconciliationScenario(): Promise<string> {
   const { orgId } = await runOnboarding(db, {
     userId: owner.id,
     userEmail: owner.email,
-    orgName: "M7 Warehouse Co",
+    orgName: `M7 Warehouse Co ${runId}`,
     businessDescription:
       "Hardware store tracking cement and steel stock across two locations, selling over the counter and on account.",
   });
@@ -91,33 +158,19 @@ async function reconciliationScenario(): Promise<string> {
   ok(`trial balance still balances (${tb.data?.lines.length} accounts)`, tb.data?.balanced === true);
 
   // Human GL drift does not survive the next summary.
-  const { postEntry } = await import("../modules/accounting/src/posting");
-  await db.transaction(async (tx) => {
-    await postEntry(tx, orgId, { type: "human", id: owner.id }, {
-      memo: "wrong manual inventory entry",
-      sourceType: "manual",
-      postedAt: new Date(),
-      lines: [
-        { accountCode: "1200", debitMinor: 2_000_000, creditMinor: 0 },
-        { accountCode: "6000", debitMinor: 0, creditMinor: 2_000_000 },
-      ],
-    });
-  });
-  const cap = registry.get("inventory.postValuationSummary");
-  if (!cap) throw new Error("missing capability");
-  const corrected = (await cap.execute(ownerCtx, { memo: "drift correction" })) as {
-    posted: boolean;
-    varianceMinor: number;
-  };
-  if (!corrected.posted || corrected.varianceMinor !== -2_000_000) {
-    throw new Error(`drift not corrected: ${JSON.stringify(corrected)}`);
+  await injectManualGlEntry(db, orgId, owner.id);
+  const correctedResult = await executor.execute("inventory.postValuationSummary", ownerCtx, { memo: "drift correction" });
+  const corrected = correctedResult.data as { posted: boolean; varianceMinor: number };
+  if (!correctedResult.ok || !corrected.posted || corrected.varianceMinor !== -2_000_000) {
+    throw new Error(`drift not corrected: ${JSON.stringify(correctedResult)}`);
   }
   ok("injected GL drift corrected back to the ledger value");
   const after = await glAccountBalanceMinor(db, orgId);
   if (after !== ledgerValue) throw new Error(`GL ${after} != ledger ${ledgerValue} after correction`);
 
-  const noop = (await cap.execute(ownerCtx, { memo: "repeat summary" })) as { posted: boolean };
-  if (noop.posted !== false) throw new Error("second summary was not an honest no-op");
+  const noopResult = await executor.execute("inventory.postValuationSummary", ownerCtx, { memo: "repeat summary" });
+  const noop = noopResult.data as { posted: boolean };
+  if (!noopResult.ok || noop.posted !== false) throw new Error("second summary was not an honest no-op");
   ok("second summary is an explicit no-op");
 
   return "M7 RECONCILED";
@@ -135,7 +188,7 @@ async function transfersScenario(): Promise<string> {
   const { orgId } = await runOnboarding(db, {
     userId: owner.id,
     userEmail: owner.email,
-    orgName: "M7 Transfer Co",
+    orgName: `M7 Transfer Co ${runId}`,
     businessDescription: "Distributor moving stock between a main warehouse and a shop counter every week.",
   });
   const ownerCtx = {
@@ -148,7 +201,6 @@ async function transfersScenario(): Promise<string> {
       .select()
       .from(stockLocations)
       .where(and(eq(stockLocations.orgId, orgId), eq(stockLocations.code, code)));
-    const { stockOnHand } = await import("../modules/inventory/src/shared");
     return stockOnHand(db, orgId, itemId, loc!.id);
   };
 
@@ -170,7 +222,7 @@ async function transfersScenario(): Promise<string> {
     actorType: "system",
     actorId: null,
   });
-  const valueBefore = await inventoryLedgerValueMinor(db, orgId);
+  const valueBefore = (await executor.execute("inventory.stockReport", ownerCtx, {})).data!.totalValueMinor;
 
   const draft = await executor.execute(
     "inventory.createTransfer",
@@ -201,13 +253,13 @@ async function transfersScenario(): Promise<string> {
     { fromLocationCode: "SHOP", toLocationCode: "MAIN", lines: [{ sku: "BAG-50", quantityThousandths: 999_000 }] },
   );
   const refused = await executor.execute("inventory.confirmTransfer", ownerCtx, { transferId: oversell.data!.transferId });
-  if (refused.ok || !(refused.error ?? "").includes("insufficient stock at source")) {
-    throw new Error(`oversell at source was not refused: ${JSON.stringify(refused)}`);
+  if (refused.ok || !(refused.error ?? "").includes("insufficient stock at source location")) {
+    throw new Error(`oversell at source was not refused with the stock-shortfall error: ${JSON.stringify(refused)}`);
   }
-  ok("oversell at the source location correctly refused");
+  ok(`oversell at the source location correctly refused ("${refused.error!.slice(0, 60)}…")`);
   await executor.execute("inventory.cancelTransfer", ownerCtx, { transferId: oversell.data!.transferId });
 
-  const valueAfterMoves = await inventoryLedgerValueMinor(db, orgId);
+  const valueAfterMoves = (await executor.execute("inventory.stockReport", ownerCtx, {})).data!.totalValueMinor;
   if (valueAfterMoves !== valueBefore) throw new Error("transfers moved valuation value");
   ok("valuation value untouched by transfer legs (ADR 0033)");
 
@@ -241,7 +293,7 @@ async function productsScenario(): Promise<string> {
   const { orgId } = await runOnboarding(db, {
     userId: owner.id,
     userEmail: owner.email,
-    orgName: "M7 Catalog Co",
+    orgName: `M7 Catalog Co ${runId}`,
     businessDescription: "Retail shop scanning barcodes at the counter and tracking tags for promotions.",
   });
   const ownerCtx = {
@@ -324,4 +376,3 @@ main()
     console.error(e);
     process.exit(1);
   });
-

@@ -1,0 +1,812 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  DEFAULT_PAGE_SETTINGS,
+  DocumentsEditorApiError,
+  allocateAuthoredDocumentNumber,
+  buildDocxBytes,
+  createAuthoredDocumentDraft,
+  createDocumentTemplate,
+  documentHtmlToJson,
+  documentJsonToHtml,
+  documentsEditorIdFromPath,
+  fetchArchivedVersion,
+  fetchDocumentVersionHistoryFromGo,
+  fetchEditorDocument,
+  postEditorWorkspace,
+  publishDocumentVersion,
+  refineDocumentHtml,
+  releaseEditorWorkspace,
+  requestAssist,
+  restoreDocumentVersion,
+  sanitizeDocumentHtml,
+  updateDocumentMetadata,
+} from "./documents-editor";
+
+const authoredDocument = {
+  id: "doc-1",
+  title: "Service quote",
+  status: "published",
+  content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Hello" }] }] },
+  html: "<p>Hello</p>",
+  templateId: null,
+  folder: "Sales",
+  documentType: "quote",
+  linkedRecordType: "deal",
+  linkedRecordId: "1f0b0a52-6b0a-4f3d-9a1a-2f6f0a2f1c33",
+  linkedRecordLabel: "Deal: Ada",
+  pageSettings: { size: "A4", orientation: "portrait", margin: "normal" },
+  versions: 2,
+  updatedAt: "2026-09-28T10:00:00.000Z",
+};
+
+const versionRows = [
+  { version: 1, note: "First draft", createdBy: "ada", createdAt: "2026-09-20T08:00:00.000Z" },
+  { version: 2, note: null, createdBy: "workmate", createdAt: "2026-09-28T09:30:00.000Z" },
+];
+
+const goAuthoredDocument = {
+  id: "6f1b2c3d-0000-4000-8000-000000000001",
+  title: "Go service quote",
+  status: "published",
+  content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Go body" }] }] },
+  html: "<p>Go body</p>",
+  templateId: null,
+  folder: "Sales",
+  documentType: "quote",
+  linkedRecordType: null,
+  linkedRecordId: null,
+  linkedRecordLabel: null,
+  pageSettings: { size: "A4", orientation: "portrait", margin: "normal" },
+  versions: 2,
+  updatedAt: "2026-09-28T10:00:00.000Z",
+};
+
+interface RecordedCall {
+  url: string;
+  init: RequestInit;
+}
+
+function recorder(responses: (call: RecordedCall) => Response) {
+  const calls: RecordedCall[] = [];
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+    const call = { url: String(input), init };
+    calls.push(call);
+    return responses(call);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return { calls, fetchMock };
+}
+
+function bodyOf(call: RecordedCall): Record<string, unknown> {
+  return JSON.parse(String(call.init.body ?? "{}")) as Record<string, unknown>;
+}
+
+function organizationHeaderOf(call: RecordedCall): string | null {
+  return new Headers(call.init.headers).get("X-Organization-ID");
+}
+
+afterEach(() => {
+  window.localStorage.clear();
+  vi.unstubAllGlobals();
+});
+
+const templateScope = { actorId: "actor-1", organizationId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" };
+
+function stubWebLocks() {
+  const queues = new Map<string, Promise<void>>();
+  vi.stubGlobal("navigator", { ...navigator, locks: { request: async (name: string, _options: { mode: "exclusive" }, callback: () => Promise<unknown>) => {
+    const previous = queues.get(name) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => { release = resolve; });
+    queues.set(name, previous.then(() => current));
+    await previous;
+    try { return await callback(); }
+    finally { release(); }
+  } } });
+}
+
+describe("editor route matching", () => {
+  it("reads the document id out of the dynamic path and refuses everything else", () => {
+    expect(documentsEditorIdFromPath("/documents/editor/6f1b2c3d-0000-4000-8000-000000000001")).toBe("6f1b2c3d-0000-4000-8000-000000000001");
+    expect(documentsEditorIdFromPath("/documents/editor/6f1b%2F2c3d/")).toBe("6f1b/2c3d");
+    expect(documentsEditorIdFromPath("/documents/editor")).toBeNull();
+    expect(documentsEditorIdFromPath("/documents")).toBeNull();
+    expect(documentsEditorIdFromPath("/documents/editor/one/two")).toBeNull();
+    expect(documentsEditorIdFromPath("/documents/editor/%E0%A4%A")).toBeNull();
+  });
+});
+
+describe("authored document reads", () => {
+  it("loads document content and version history through Go regardless of old selectors", async () => {
+    const { calls } = recorder((call) => {
+      const body = bodyOf(call);
+      if (body.capabilityId === "documents.getDoc") return Response.json({ ok: true, data: { document: goAuthoredDocument } });
+      if (body.capabilityId === "documents.listDocVersions") return Response.json({ ok: true, data: { versions: versionRows } });
+      return Response.json({ error: "unexpected" }, { status: 404 });
+    });
+
+    await expect(fetchEditorDocument(goAuthoredDocument.id)).resolves.toEqual({ document: goAuthoredDocument, versions: versionRows });
+    expect(calls.map((call) => call.url)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
+    expect(bodyOf(calls[0]!)).toMatchObject({ capabilityId: "documents.getDoc", input: { documentId: goAuthoredDocument.id }, intentId: expect.any(String) });
+    expect(bodyOf(calls[1]!)).toMatchObject({ capabilityId: "documents.listDocVersions", input: { documentId: goAuthoredDocument.id }, intentId: expect.any(String) });
+  });
+
+  it("loads editor detail and version rows from Go", async () => {
+    const { calls } = recorder((call) => {
+      const body = bodyOf(call);
+      if (body.capabilityId === "documents.getDoc") return Response.json({ ok: true, data: { document: goAuthoredDocument } });
+      if (body.capabilityId === "documents.listDocVersions") return Response.json({ ok: true, data: { versions: versionRows } });
+      return Response.json({ error: "unexpected" }, { status: 404 });
+    });
+
+    await expect(fetchEditorDocument(goAuthoredDocument.id)).resolves.toEqual({ document: goAuthoredDocument, versions: versionRows });
+    expect(calls.map((call) => call.url)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
+    expect(bodyOf(calls[0]!)).toMatchObject({ capabilityId: "documents.getDoc", input: { documentId: goAuthoredDocument.id }, intentId: expect.any(String) });
+    expect(bodyOf(calls[1]!)).toMatchObject({ capabilityId: "documents.listDocVersions", input: { documentId: goAuthoredDocument.id }, intentId: expect.any(String) });
+  });
+
+  it("uses Go exclusively and rejects getDoc failures or malformed output", async () => {
+    const documentId = goAuthoredDocument.id;
+    for (const response of [
+      () => Response.json({ error: "not found" }, { status: 404 }),
+      () => Response.json({ ok: true, data: { document: { ...goAuthoredDocument, unknown: true } } }),
+    ]) {
+      const { calls } = recorder(() => response());
+      await expect(fetchEditorDocument(documentId)).rejects.toBeInstanceOf(DocumentsEditorApiError);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.url).toBe("/api/capabilities/execute");
+    }
+  });
+
+  it("rejects malformed document IDs before making the Go request", async () => {
+    const { calls } = recorder(() => Response.json({ ok: true, data: {} }));
+
+    await expect(fetchEditorDocument("doc-1")).rejects.toMatchObject({ status: 400 });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("keeps permission and shape failures understandable", async () => {
+    const documentId = goAuthoredDocument.id;
+    recorder(() => Response.json({ error: "unauthorized" }, { status: 401 }));
+    await expect(fetchEditorDocument(documentId)).rejects.toEqual(new DocumentsEditorApiError(401, "Sign in again to edit this document."));
+
+    recorder(() => Response.json({ error: "document not found" }, { status: 404 }));
+    await expect(fetchEditorDocument(documentId)).rejects.toThrow("That document no longer exists.");
+
+    recorder(() => Response.json({ ok: true, data: { document: { ...goAuthoredDocument, status: 7 } } }));
+    await expect(fetchEditorDocument(documentId)).rejects.toThrow("The document service returned data in an unexpected format.");
+
+    recorder(() => Response.json("nope", { status: 500 }));
+    await expect(fetchEditorDocument(documentId)).rejects.toThrow("The document service is unavailable. Try again in a moment.");
+  });
+
+  it("reads archived versions through Go even when old selectors are false", async () => {
+    const documentId = "6f1b2c3d-0000-4000-8000-000000000001";
+    const { calls } = recorder(() => Response.json({ ok: true, data: {
+      version: 2,
+      content: { type: "doc", content: [] },
+      html: "<p>Newer</p>",
+      note: null,
+      createdAt: "2026-09-28T09:30:00.000Z",
+    } }));
+
+    await expect(fetchArchivedVersion(documentId, 2)).resolves.toEqual({ version: 2, html: "<p>Newer</p>", note: null, createdAt: "2026-09-28T09:30:00.000Z" });
+    expect(calls[0]?.url).toBe("/api/capabilities/execute");
+    expect(bodyOf(calls[0]!)).toMatchObject({ capabilityId: "documents.getDocVersion", input: { documentId, version: 2 }, intentId: expect.any(String) });
+  });
+
+  it("lists authored versions through Go with the full strict summary shape", async () => {
+    const documentId = "6f1b2c3d-0000-4000-8000-000000000001";
+    const { calls } = recorder(() => Response.json({ ok: true, data: { versions: versionRows } }));
+
+    await expect(fetchDocumentVersionHistoryFromGo(documentId)).resolves.toEqual(versionRows);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe("/api/capabilities/execute");
+    expect(calls[0]?.init).toMatchObject({ method: "POST", credentials: "same-origin", cache: "no-store" });
+    expect(bodyOf(calls[0]!)).toMatchObject({
+      capabilityId: "documents.listDocVersions",
+      input: { documentId },
+      intentId: expect.any(String),
+    });
+  });
+
+  it("uses Go for archived previews, validates full content, and returns only the legacy preview projection", async () => {
+    const documentId = "6f1b2c3d-0000-4000-8000-000000000001";
+    const { calls } = recorder(() => Response.json({ ok: true, data: {
+      version: 2,
+      content: { type: "doc", content: [] },
+      html: "<p>Newer</p>",
+      note: null,
+      createdAt: "2026-09-28T09:30:00.000Z",
+    } }));
+
+    await expect(fetchArchivedVersion(documentId, 2)).resolves.toEqual({
+      version: 2, html: "<p>Newer</p>", note: null, createdAt: "2026-09-28T09:30:00.000Z",
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe("/api/capabilities/execute");
+    expect(bodyOf(calls[0]!)).toMatchObject({
+      capabilityId: "documents.getDocVersion",
+      input: { documentId, version: 2 },
+      intentId: expect.any(String),
+    });
+  });
+
+  it("rejects invalid Go version inputs before dispatch", async () => {
+    const { calls } = recorder(() => Response.json({ ok: true, data: {} }));
+
+    await expect(fetchDocumentVersionHistoryFromGo("doc-1")).rejects.toMatchObject({ status: 400 });
+    await expect(fetchArchivedVersion("6f1b2c3d-0000-4000-8000-000000000001", 0)).rejects.toMatchObject({ status: 400 });
+    expect(calls).toHaveLength(0);
+  });
+
+  it.each([
+    { label: "unavailable", response: () => Response.json({ error: "not found" }, { status: 404 }) },
+    { label: "malformed archived content", response: () => Response.json({ ok: true, data: { version: 2, content: "not-json-object", html: "<p>Bad</p>", note: null, createdAt: "2026-09-28T09:30:00.000Z" } }) },
+    { label: "mismatched archived version", response: () => Response.json({ ok: true, data: { version: 3, content: { type: "doc" }, html: "<p>Wrong</p>", note: null, createdAt: "2026-09-28T09:30:00.000Z" } }) },
+  ])("fails closed on $label Go version responses without legacy retry", async ({ response }) => {
+    const { calls } = recorder(() => response());
+
+    await expect(fetchArchivedVersion("6f1b2c3d-0000-4000-8000-000000000001", 2)).rejects.toBeInstanceOf(DocumentsEditorApiError);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe("/api/capabilities/execute");
+  });
+
+  it("fails closed on unavailable or malformed Go history without legacy retry", async () => {
+    const documentId = "6f1b2c3d-0000-4000-8000-000000000001";
+    for (const response of [
+      () => Response.json({ error: "not found" }, { status: 404 }),
+      () => Response.json({ ok: true, data: { versions: [{ version: 0, note: null, createdBy: null, createdAt: "bad" }] } }),
+    ]) {
+      const { calls } = recorder(() => response());
+      await expect(fetchDocumentVersionHistoryFromGo(documentId)).rejects.toBeInstanceOf(DocumentsEditorApiError);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.url).toBe("/api/capabilities/execute");
+    }
+  });
+
+});
+
+describe("authored document creation", () => {
+  it("creates a minimal draft through Go and validates its UUID response", async () => {
+    stubWebLocks();
+    const { calls } = recorder(() => Response.json({ ok: true, data: { documentId: goAuthoredDocument.id } }));
+    await expect(createAuthoredDocumentDraft(templateScope)).resolves.toEqual({ kind: "completed", data: { documentId: goAuthoredDocument.id } });
+    expect(calls).toHaveLength(1);
+    const sent = bodyOf(calls[0]!);
+    expect(sent).toMatchObject({
+      capabilityId: "documents.createDoc",
+      input: {
+        title: "Untitled document",
+        content: { type: "doc", content: [{ type: "paragraph" }] },
+        html: "<p></p>",
+        pageSettings: DEFAULT_PAGE_SETTINGS,
+      },
+      intentId: expect.any(String),
+    });
+    expect(calls[0]?.url).toBe("/api/capabilities/execute");
+    expect(calls[0]?.init.credentials).toBe("same-origin");
+    expect(organizationHeaderOf(calls[0]!)).toBe(templateScope.organizationId);
+    expect(window.localStorage.length).toBe(0);
+  });
+
+  it("creates a template-based draft with the template bound into the exact retry payload", async () => {
+    stubWebLocks();
+    const templateId = "6f1b2c3d-0000-4000-8000-000000000004";
+    const draft = {
+      title: "Service quote",
+      content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "{{customer.name}}" }] }] },
+      html: "<p>{{customer.name}}</p>",
+      templateId,
+    };
+    const { calls } = recorder(() => { throw new Error("connection lost"); });
+    await expect(createAuthoredDocumentDraft(templateScope, draft)).rejects.toMatchObject({ status: 0 });
+    const first = bodyOf(calls[0]!);
+    expect(first.input).toMatchObject({ ...draft, pageSettings: DEFAULT_PAGE_SETTINGS });
+    expect(first.intentId).toEqual(expect.any(String));
+
+    const { calls: retryCalls } = recorder(() => Response.json({ ok: true, data: { documentId: goAuthoredDocument.id } }));
+    await expect(createAuthoredDocumentDraft(templateScope, draft)).resolves.toMatchObject({ kind: "completed" });
+    expect(bodyOf(retryCalls[0]!)).toEqual(first);
+    expect(organizationHeaderOf(retryCalls[0]!)).toBe(templateScope.organizationId);
+  });
+
+  it("keeps template creation retries isolated by organization", async () => {
+    stubWebLocks();
+    const draft = {
+      title: "Service quote",
+      content: { type: "doc", content: [{ type: "paragraph" }] },
+      html: "<p></p>",
+      templateId: "6f1b2c3d-0000-4000-8000-000000000004",
+    };
+    const { calls } = recorder(() => { throw new Error("connection lost"); });
+    await expect(createAuthoredDocumentDraft(templateScope, draft)).rejects.toMatchObject({ status: 0 });
+    const firstIntent = bodyOf(calls[0]!).intentId;
+    const switchedScope = { ...templateScope, organizationId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" };
+    const { calls: switchedCalls } = recorder(() => Response.json({ ok: true, data: { documentId: goAuthoredDocument.id } }));
+    await expect(createAuthoredDocumentDraft(switchedScope, draft)).resolves.toMatchObject({ kind: "completed" });
+    expect(bodyOf(switchedCalls[0]!).intentId).not.toBe(firstIntent);
+    expect(organizationHeaderOf(switchedCalls[0]!)).toBe(switchedScope.organizationId);
+  });
+
+  it("reuses the same scoped intent after an uncertain response and blocks malformed UUID output", async () => {
+    stubWebLocks();
+    const { calls } = recorder(() => { throw new Error("connection lost"); });
+    await expect(createAuthoredDocumentDraft(templateScope)).rejects.toMatchObject({ status: 0 });
+    const first = bodyOf(calls[0]!);
+    const otherScope = { actorId: "actor-2", organizationId: templateScope.organizationId };
+    const { calls: otherCalls } = recorder(() => Response.json({ ok: true, data: { documentId: "not-a-uuid" } }));
+    await expect(createAuthoredDocumentDraft(otherScope)).rejects.toMatchObject({ status: 200 });
+    expect(bodyOf(otherCalls[0]!).intentId).not.toBe(first.intentId);
+    const { calls: retryCalls } = recorder(() => Response.json({ ok: true, data: { documentId: goAuthoredDocument.id } }));
+    await expect(createAuthoredDocumentDraft(templateScope)).resolves.toMatchObject({ kind: "completed" });
+    expect(bodyOf(retryCalls[0]!).intentId).toBe(first.intentId);
+  });
+
+  it("fails closed when scope or retry locking is unavailable", async () => {
+    await expect(createAuthoredDocumentDraft({ actorId: null, organizationId: "org-1" })).rejects.toMatchObject({ status: 0 });
+    const { calls } = recorder(() => Response.json({ ok: true, data: { documentId: goAuthoredDocument.id } }));
+    await expect(createAuthoredDocumentDraft({ actorId: "actor-1", organizationId: "org-1" })).rejects.toMatchObject({ status: 0 });
+    expect(calls).toHaveLength(0);
+    vi.stubGlobal("navigator", { ...navigator, locks: undefined });
+    await expect(createAuthoredDocumentDraft(templateScope)).rejects.toMatchObject({ status: 0 });
+  });
+});
+
+describe("authored document number allocation", () => {
+  it("allocates through the Go capability and validates the returned number", async () => {
+    stubWebLocks();
+    const { calls } = recorder(() => Response.json({ ok: true, data: { number: "PO-2026-0001" } }));
+    await expect(allocateAuthoredDocumentNumber("purchase_order", templateScope)).resolves.toEqual({
+      kind: "completed",
+      data: { number: "PO-2026-0001" },
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe("/api/capabilities/execute");
+    expect(bodyOf(calls[0]!)).toMatchObject({
+      capabilityId: "documents.allocateNumber",
+      input: { kind: "purchase_order" },
+      intentId: expect.any(String),
+    });
+    expect(organizationHeaderOf(calls[0]!)).toBe(templateScope.organizationId);
+    expect(window.localStorage.length).toBe(0);
+  });
+
+  it("reuses the same intent after an uncertain response and rejects malformed outputs", async () => {
+    stubWebLocks();
+    const { calls } = recorder(() => { throw new Error("connection lost"); });
+    await expect(allocateAuthoredDocumentNumber("receipt", templateScope)).rejects.toMatchObject({ status: 0 });
+    const intentId = bodyOf(calls[0]!).intentId;
+    const { calls: retryCalls } = recorder(() => Response.json({ ok: true, data: { number: "RCT-2026-0001", extra: true } }));
+    await expect(allocateAuthoredDocumentNumber("receipt", templateScope)).rejects.toMatchObject({ status: 200 });
+    expect(bodyOf(retryCalls[0]!).intentId).toBe(intentId);
+  });
+});
+
+describe("draft workspace ticks", () => {
+  const workspaceDocumentId = goAuthoredDocument.id;
+
+  it("stamps an intent id and sends the draft with its known revision", async () => {
+    const { calls } = recorder(() => Response.json({ lock: { heldBy: "Ada", mine: true }, savedRev: 4, draft: null, others: [] }));
+
+    const tick = await postEditorWorkspace(workspaceDocumentId, {
+      content: { type: "doc", content: [] },
+      pageSettings: DEFAULT_PAGE_SETTINGS,
+      rev: 3,
+    });
+
+    expect(tick).toEqual({ conflict: false, savedRev: 4, lock: { heldBy: "Ada", mine: true }, others: [], draft: null });
+    expect(calls[0]?.url).toBe(`/api/docs/${workspaceDocumentId}/workspace`);
+    expect(calls[0]?.init.method).toBe("POST");
+    const sent = bodyOf(calls[0]!);
+    expect(typeof sent.intentId).toBe("string");
+    expect((sent.intentId as string).length).toBeGreaterThan(0);
+    expect(sent.rev).toBe(3);
+    expect(sent.pageSettings).toEqual(DEFAULT_PAGE_SETTINGS);
+  });
+
+  it("keeps a caller supplied intent id so a retried save reconciles", async () => {
+    const { calls } = recorder(() => Response.json({ lock: { heldBy: "Ada", mine: true }, others: [] }));
+    await postEditorWorkspace(workspaceDocumentId, { content: { type: "doc", content: [] }, intentId: undefined } as never);
+    expect(typeof bodyOf(calls[0]!).intentId).toBe("string");
+
+    const again = recorder(() => Response.json({ lock: { heldBy: "Ada", mine: true }, others: [] }));
+    await postEditorWorkspace(workspaceDocumentId, { content: { type: "doc", content: [] }, rev: 2 });
+    expect(bodyOf(again.calls[0]!).rev).toBe(2);
+  });
+
+  it("reports a 409 as a conflict state rather than a failed request", async () => {
+    recorder(() => Response.json({
+      conflict: true,
+      draft: { content: { type: "doc", content: [] }, rev: 9, pageSettings: DEFAULT_PAGE_SETTINGS },
+      lock: { heldBy: "Ada", mine: true },
+      others: [{ userId: "u-2", name: "Grace" }],
+    }, { status: 409 }));
+
+    const tick = await postEditorWorkspace(workspaceDocumentId, { content: { type: "doc", content: [] }, rev: 4 });
+    expect(tick.conflict).toBe(true);
+    expect(tick.draft?.rev).toBe(9);
+    expect(tick.others).toEqual([{ userId: "u-2", name: "Grace" }]);
+  });
+
+  it("surfaces a real failure as an error", async () => {
+    recorder(() => Response.json({ error: "invalid body" }, { status: 400 }));
+    await expect(postEditorWorkspace(workspaceDocumentId, {})).rejects.toThrow("Some details were missing or malformed.");
+  });
+
+  it("rejects invalid workspace IDs before making a request", async () => {
+    const { calls } = recorder(() => Response.json({ lock: { heldBy: "Ada", mine: true }, others: [] }));
+    await expect(postEditorWorkspace("not-a-uuid", {})).rejects.toMatchObject({ status: 400 });
+    releaseEditorWorkspace("not-a-uuid");
+    expect(calls).toHaveLength(0);
+  });
+
+  it("releases presence and the lock without waiting for an answer", () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    releaseEditorWorkspace(workspaceDocumentId);
+
+    expect(fetchMock).toHaveBeenCalledWith(`/api/docs/${workspaceDocumentId}/workspace`, expect.objectContaining({ method: "DELETE", keepalive: true }));
+  });
+});
+
+describe("governed writes", () => {
+  it("publishes a version and reads the history back", async () => {
+    stubWebLocks();
+    const { calls } = recorder(() => Response.json({ ok: true, data: { version: 3 } }));
+
+    const outcome = await publishDocumentVersion(goAuthoredDocument.id, {
+      title: "Service quote",
+      content: authoredDocument.content,
+      html: "<p>Hello</p>",
+      pageSettings: DEFAULT_PAGE_SETTINGS,
+      note: "Terms",
+    }, templateScope);
+
+    expect(outcome).toEqual({ kind: "completed", data: { version: 3 } });
+    const sent = bodyOf(calls[0]!);
+    expect(calls[0]?.url).toBe("/api/capabilities/execute");
+    expect(sent).toMatchObject({
+      capabilityId: "documents.saveDocVersion",
+      input: { documentId: goAuthoredDocument.id, title: "Service quote", html: "<p>Hello</p>", note: "Terms" },
+    });
+    expect(typeof sent.intentId).toBe("string");
+  });
+
+  it("preserves the approval-pending envelope instead of calling it success or failure", async () => {
+    stubWebLocks();
+    const { calls } = recorder((call) => call.url === "/api/capabilities/execute"
+      ? Response.json({ ok: false, pendingApproval: true, reason: "Template approval required", approvalId: "6f1b2c3d-0000-4000-8000-000000000003" }, { status: 202 })
+      : Response.json({ pendingApproval: true, hint: "This change waits for approval in the Approvals inbox." }, { status: 202 }));
+
+    const published = await publishDocumentVersion(goAuthoredDocument.id, {
+      title: "Service quote",
+      content: authoredDocument.content,
+      html: "<p>Hello</p>",
+      pageSettings: DEFAULT_PAGE_SETTINGS,
+    }, templateScope);
+    expect(published).toEqual({ kind: "pending", hint: "Template approval required" });
+
+    const restored = await restoreDocumentVersion(goAuthoredDocument.id, 1, templateScope);
+    expect(restored.kind).toBe("pending");
+    const renamed = await updateDocumentMetadata(goAuthoredDocument.id, { title: "Renamed" }, templateScope);
+    expect(renamed.kind).toBe("pending");
+    const templated = await createDocumentTemplate("Quote", authoredDocument.content, templateScope);
+    expect(templated).toEqual({ kind: "pending", hint: "Template approval required" });
+    expect(window.localStorage.length).toBe(4);
+
+    expect(calls.slice(0, 3).map((call) => bodyOf(call).capabilityId)).toEqual([
+      "documents.saveDocVersion", "documents.restoreDocVersion", "documents.updateDocMetadata",
+    ]);
+    expect(calls.slice(0, 3).every((call) => call.url === "/api/capabilities/execute")).toBe(true);
+    expect(calls.slice(0, 4).every((call) => organizationHeaderOf(call) === templateScope.organizationId)).toBe(true);
+    expect(bodyOf(calls[3]!).capabilityId).toBe("documents.createTemplate");
+    const intentId = bodyOf(calls[3]!).intentId;
+
+    const { calls: retryCalls } = recorder(() => Response.json({ ok: true, data: { templateId: "6f1b2c3d-0000-4000-8000-000000000002", placeholders: [] } }));
+    await expect(createDocumentTemplate("Quote", authoredDocument.content, templateScope)).resolves.toMatchObject({ kind: "completed" });
+    expect(bodyOf(retryCalls[0]!).intentId).toBe(intentId);
+    expect(window.localStorage.length).toBe(3);
+  });
+
+  it("restores, renames and stores templates with their own intent identities", async () => {
+    stubWebLocks();
+    const { calls } = recorder((_call) => {
+      const sent = bodyOf(calls[calls.length - 1]!);
+      if (sent.capabilityId === "documents.restoreDocVersion") return Response.json({ ok: true, data: { version: 4 } });
+      if (sent.capabilityId === "documents.createTemplate") return Response.json({ ok: true, data: { templateId: "6f1b2c3d-0000-4000-8000-000000000002", placeholders: ["customer.name"] } });
+      return Response.json({ ok: true, data: { documentId: goAuthoredDocument.id, previous: { title: "Old", folder: null, linkedRecordType: null, linkedRecordId: null, linkedRecordLabel: null } } });
+    });
+
+    await expect(restoreDocumentVersion(goAuthoredDocument.id, 2, templateScope)).resolves.toEqual({ kind: "completed", data: { version: 4 } });
+    await expect(createDocumentTemplate("Quote", authoredDocument.content, templateScope)).resolves.toEqual({
+      kind: "completed",
+      data: { templateId: "6f1b2c3d-0000-4000-8000-000000000002", placeholders: ["customer.name"] },
+    });
+    await expect(updateDocumentMetadata(goAuthoredDocument.id, { title: "Renamed" }, templateScope)).resolves.toMatchObject({ kind: "completed", data: { documentId: goAuthoredDocument.id, previous: { title: "Old" } } });
+
+    expect(calls[0]?.url).toBe("/api/capabilities/execute");
+    expect(bodyOf(calls[0]!)).toMatchObject({ capabilityId: "documents.restoreDocVersion", input: { documentId: goAuthoredDocument.id, sourceVersion: 2 } });
+    expect(organizationHeaderOf(calls[0]!)).toBe(templateScope.organizationId);
+    expect(calls[1]?.url).toBe("/api/capabilities/execute");
+    expect(bodyOf(calls[1]!)).toMatchObject({ capabilityId: "documents.createTemplate", input: { name: "Quote" } });
+    expect(organizationHeaderOf(calls[1]!)).toBe(templateScope.organizationId);
+    expect(bodyOf(calls[2]!)).toMatchObject({ capabilityId: "documents.updateDocMetadata", input: { documentId: goAuthoredDocument.id, title: "Renamed" } });
+    expect(organizationHeaderOf(calls[2]!)).toBe(templateScope.organizationId);
+    const identities = calls.map((call) => bodyOf(call).intentId);
+    expect(new Set(identities).size).toBe(3);
+  });
+
+  it.each([
+    ["publish", (title: string) => publishDocumentVersion(goAuthoredDocument.id, { title, content: authoredDocument.content, html: "<p>Hello</p>", pageSettings: DEFAULT_PAGE_SETTINGS }, templateScope), "Service quote"],
+    ["restore", (version: number) => restoreDocumentVersion(goAuthoredDocument.id, version, templateScope), 2],
+    ["metadata", (title: string) => updateDocumentMetadata(goAuthoredDocument.id, { title }, templateScope), "Renamed"],
+  ])("reuses the exact %s intent after uncertainty and rejects changed input", async (_name, action, originalInput) => {
+    stubWebLocks();
+    const { calls } = recorder(() => { throw new Error("connection lost"); });
+    await expect(action(originalInput as never)).rejects.toMatchObject({ status: 0 });
+    const intentId = bodyOf(calls[0]!).intentId;
+    const changedInput = typeof originalInput === "string" ? `${originalInput} changed` : (originalInput as number) + 1;
+    await expect(action(changedInput as never)).rejects.toThrow("Retry those exact details");
+    expect(calls).toHaveLength(1);
+
+    const { calls: retryCalls } = recorder((call) => {
+      const capabilityId = bodyOf(call).capabilityId;
+      return capabilityId === "documents.updateDocMetadata"
+        ? Response.json({ ok: true, data: { documentId: goAuthoredDocument.id } })
+        : Response.json({ ok: true, data: { version: 3 } });
+    });
+    await action(originalInput as never);
+    expect(bodyOf(retryCalls[0]!).intentId).toBe(intentId);
+    expect(window.localStorage.length).toBe(0);
+  });
+
+  it("serializes concurrent retries and preserves the same intent after an uncertain request", async () => {
+    stubWebLocks();
+    const { calls } = recorder((_call) => calls.length === 1
+      ? Promise.reject(new Error("connection lost")) as unknown as Response
+      : Response.json({ ok: true, data: { version: 4 } }));
+    const first = restoreDocumentVersion(goAuthoredDocument.id, 2, templateScope);
+    const second = restoreDocumentVersion(goAuthoredDocument.id, 2, templateScope);
+    await expect(first).rejects.toMatchObject({ status: 0 });
+    await expect(second).resolves.toEqual({ kind: "completed", data: { version: 4 } });
+    expect(calls).toHaveLength(2);
+    expect(bodyOf(calls[0]!).intentId).toBe(bodyOf(calls[1]!).intentId);
+    expect(window.localStorage.length).toBe(0);
+  });
+
+  it("reuses a scoped template intent after network uncertainty and blocks changed details", async () => {
+    stubWebLocks();
+    const { calls } = recorder(() => { throw new Error("connection lost"); });
+    await expect(createDocumentTemplate("Quote", authoredDocument.content, templateScope)).rejects.toMatchObject({ status: 0 });
+    const first = bodyOf(calls[0]!);
+    await expect(createDocumentTemplate("Different", authoredDocument.content, templateScope)).rejects.toThrow("Retry its exact saved details");
+    expect(calls).toHaveLength(1);
+
+    const { calls: retryCalls } = recorder(() => Response.json({ ok: true, data: { templateId: "6f1b2c3d-0000-4000-8000-000000000002", placeholders: [] } }));
+    await expect(createDocumentTemplate("Quote", authoredDocument.content, templateScope)).resolves.toMatchObject({ kind: "completed" });
+    const retry = bodyOf(retryCalls[0]!);
+    expect(retry.intentId).toBe(first.intentId);
+    expect(retry.capabilityId).toBe("documents.createTemplate");
+  });
+
+  it("fails closed when template output is malformed and requires the same intent to retry", async () => {
+    stubWebLocks();
+    const { calls } = recorder(() => Response.json({ ok: true, data: { templateId: "tpl-1", placeholders: [] } }));
+    await expect(createDocumentTemplate("Quote", authoredDocument.content, templateScope)).rejects.toMatchObject({ status: 200 });
+    const intentId = bodyOf(calls[0]!).intentId;
+    const { calls: retryCalls } = recorder(() => Response.json({ ok: true, data: { templateId: "6f1b2c3d-0000-4000-8000-000000000002", placeholders: [] } }));
+    await createDocumentTemplate("Quote", authoredDocument.content, templateScope);
+    expect(bodyOf(retryCalls[0]!).intentId).toBe(intentId);
+  });
+
+  it("turns a refused governed write into a readable error", async () => {
+    const { calls } = recorder(() => Response.json({ error: "document not found" }, { status: 422 }));
+    stubWebLocks();
+    await expect(restoreDocumentVersion(goAuthoredDocument.id, 2, templateScope)).rejects.toEqual(expect.objectContaining({ name: "DocumentsEditorApiError", status: 422 }));
+    expect(calls[0]?.url).toBe("/api/capabilities/execute");
+  });
+});
+
+describe("writing assist", () => {
+  it("returns the model text for a selection rewrite", async () => {
+    const { calls } = recorder(() => Response.json({ ok: true, text: "Tighter copy." }));
+    await expect(requestAssist({ kind: "selection", action: "shorten", text: "Long copy", language: "English" })).resolves.toEqual({ ok: true, text: "Tighter copy." });
+    expect(calls[0]?.url).toBe("/api/docs/assist");
+    expect(bodyOf(calls[0]!)).toMatchObject({ kind: "selection", action: "shorten" });
+    expect(bodyOf(calls[0]!)).not.toHaveProperty("intentId");
+    expect(calls[0]?.init.credentials).toBe("same-origin");
+  });
+
+  it("returns template prefill values from the Go assist response", async () => {
+    const { calls } = recorder(() => Response.json({ ok: true, values: { "customer.name": "Ada" } }));
+    await expect(requestAssist({ kind: "prefill", templateId: "6f1b2c3d-0000-4000-8000-000000000004" })).resolves.toEqual({ ok: true, values: { "customer.name": "Ada" } });
+    expect(calls[0]?.url).toBe("/api/docs/assist");
+    expect(bodyOf(calls[0]!)).toEqual({ kind: "prefill", templateId: "6f1b2c3d-0000-4000-8000-000000000004" });
+  });
+
+  it("rejects an empty or unreadable assist answer", async () => {
+    recorder(() => Response.json({ ok: true, text: "  " }));
+    await expect(requestAssist({ kind: "chat", documentId: "doc-1", question: "Why?" })).rejects.toThrow("The writing assistant could not help with that, try again.");
+
+    const { calls } = recorder(() => Response.json({ error: "the model returned nothing, try again" }, { status: 502 }));
+    await expect(requestAssist({ kind: "chat", documentId: "doc-1", question: "Why?" })).rejects.toThrow("the model returned nothing, try again");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe("/api/docs/assist");
+  });
+});
+
+describe("document html safety", () => {
+  it("drops active content, inline styles and remote media from stored or pasted markup", () => {
+    const cleaned = sanitizeDocumentHtml(
+      '<p onclick="steal()">Terms</p><script>alert(1)</script><iframe src="https://evil.test"></iframe>'
+      + '<style>body{display:none}</style><img src="https://tracker.test/pixel.gif"><a href="javascript:alert(1)">go</a>'
+      + '<unknown-tag data-x="1"><b>kept</b></unknown-tag><a href="https://ok.test" style="color:red">link</a>',
+    );
+
+    expect(cleaned).not.toContain("script");
+    expect(cleaned).not.toContain("onclick");
+    expect(cleaned).not.toContain("iframe");
+    expect(cleaned).not.toContain("style=");
+    expect(cleaned).not.toContain("tracker.test");
+    expect(cleaned).not.toContain("javascript:");
+    expect(cleaned).toContain("<b>kept</b>");
+    expect(cleaned).toContain('href="https://ok.test"');
+  });
+
+  it("keeps an image only when it is an inline picture, never an uploaded document", () => {
+    const inline = 'data:image/png;base64,iVBORw0KGgo=';
+    expect(sanitizeDocumentHtml(`<img alt="Logo" src="${inline}">`)).toBe(`<img alt="Logo" src="${inline}">`);
+    expect(sanitizeDocumentHtml('<img alt="Logo" src="/api/documents/doc-9/content">')).toBe("");
+    expect(sanitizeDocumentHtml('<img src="data:text/html;base64,PHNjcmlwdD4=">')).toBe("");
+  });
+
+  it("serializes the editor tree to allowlisted html and back again", () => {
+    const tree = {
+      type: "doc",
+      content: [
+        { type: "heading", attrs: { level: 2 }, content: [{ type: "text", text: "Terms" }] },
+        { type: "paragraph", content: [
+          { type: "text", text: "Pay in " },
+          { type: "text", text: "30 days", marks: [{ type: "bold" }] },
+          { type: "hardBreak" },
+          { type: "text", text: "Thank you", marks: [{ type: "italic" }, { type: "link", attrs: { href: "https://example.test/terms" } }] },
+        ] },
+        { type: "bulletList", content: [{ type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "One" }] }] }] },
+        { type: "table", content: [{ type: "tableRow", content: [
+          { type: "tableHeader", content: [{ type: "paragraph", content: [{ type: "text", text: "Item" }] }] },
+          { type: "tableHeader", content: [{ type: "paragraph", content: [{ type: "text", text: "Amount" }] }] },
+        ] }, { type: "tableRow", content: [
+          { type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text: "Design" }] }] },
+          { type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text: "1,200" }] }] },
+        ] }] },
+        { type: "horizontalRule" },
+      ],
+    };
+
+    const html = documentJsonToHtml(tree);
+    expect(html).toBe(
+      "<h2>Terms</h2><p>Pay in <strong>30 days</strong><br><a href=\"https://example.test/terms\" target=\"_blank\" rel=\"noopener noreferrer\"><em>Thank you</em></a></p>"
+      + "<ul><li><p>One</p></li></ul>"
+      + "<table><thead><tr><th>Item</th><th>Amount</th></tr></thead>"
+      + "<tbody><tr><td>Design</td><td>1,200</td></tr></tbody></table><hr>",
+    );
+
+    const back = documentHtmlToJson(html);
+    expect(back.type).toBe("doc");
+    const blocks = back.content as Array<{ type: string; content?: Array<{ type: string }> }>;
+    expect(blocks.map((block) => block.type)).toEqual(["heading", "paragraph", "bulletList", "table", "horizontalRule"]);
+    const cells = (blocks[3]!.content as Array<{ type: string; content?: Array<{ type: string }> }>)[0]!.content!;
+    expect(cells.map((cell) => cell.type)).toEqual(["tableHeader", "tableHeader"]);
+    const paragraph = blocks[1]!.content!;
+    expect(paragraph.map((node) => node.type)).toEqual(["text", "text", "hardBreak", "text"]);
+    expect((paragraph[1] as { content?: unknown }).content).toBeUndefined();
+    const link = paragraph[3] as { marks?: Array<{ type: string }> };
+    expect(link.marks?.map((mark) => mark.type)).toEqual(["link", "italic"]);
+    expect(documentJsonToHtml(back)).toBe(html);
+  });
+
+  it("escapes text and drops unsafe links and remote images when serializing", () => {
+    const html = documentJsonToHtml({
+      type: "doc",
+      content: [
+        { type: "paragraph", content: [{ type: "text", text: "<script>alert(1)</script> & co" }] },
+        { type: "paragraph", content: [{ type: "text", text: "click", marks: [{ type: "link", attrs: { href: "javascript:alert(1)" } }] }] },
+        { type: "image", attrs: { src: "https://tracker.test/pixel.gif" } },
+      ],
+    });
+
+    expect(html).toBe("<p>&lt;script&gt;alert(1)&lt;/script&gt; &amp; co</p><p>click</p>");
+  });
+
+  it("refines the preview paper: header rows, numeric columns and layout tables", () => {
+    const refined = refineDocumentHtml(
+      '<table><tbody><tr><th>Item</th><th>Amount</th></tr><tr><td>Design</td><td>1,200</td></tr></tbody></table>'
+      + '<table><tbody><tr><td>Acme Ltd</td></tr><tr><td>Balance</td><td>0</td></tr></tbody></table>'
+      + '<p>INVOICE</p>',
+    );
+
+    expect(refined).toContain("<table class=\"doc-table\"><thead><tr>");
+    expect(refined).toContain("<th class=\"num\">Amount</th>");
+    expect(refined).toContain("<td class=\"num\">1,200</td>");
+    expect(refined).toContain("doc-grid doc-totals");
+    expect(refined).not.toContain("doc-letterhead");
+    expect(refined).toContain('class="doc-eyebrow">INVOICE<');
+  });
+
+  it("reads a leading headerless table as the letterhead", () => {
+    const refined = refineDocumentHtml('<table><tbody><tr><td>Acme Ltd</td><td>Invoice 42</td></tr></tbody></table>');
+    expect(refined).toContain("doc-grid doc-letterhead");
+    expect(refined).not.toContain("doc-totals");
+  });
+});
+
+describe("docx export", () => {
+  function readEntries(bytes: Uint8Array): Array<{ name: string; method: number; crc: number; size: number; data: string }> {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const decoder = new TextDecoder();
+    const endSignature = view.getUint32(bytes.length - 22, true);
+    expect(endSignature).toBe(0x06054b50);
+    const entries = view.getUint16(bytes.length - 22 + 10, true);
+    let cursor = view.getUint32(bytes.length - 22 + 16, true);
+    const found: Array<{ name: string; method: number; crc: number; size: number; data: string }> = [];
+    for (let index = 0; index < entries; index += 1) {
+      expect(view.getUint32(cursor, true)).toBe(0x02014b50);
+      const method = view.getUint16(cursor + 10, true);
+      const crc = view.getUint32(cursor + 16, true);
+      const size = view.getUint32(cursor + 24, true);
+      const nameLength = view.getUint16(cursor + 28, true);
+      const name = decoder.decode(bytes.subarray(cursor + 46, cursor + 46 + nameLength));
+      const offset = view.getUint32(cursor + 42, true);
+      expect(view.getUint32(offset, true)).toBe(0x04034b50);
+      const localNameLength = view.getUint16(offset + 26, true);
+      const dataStart = offset + 30 + localNameLength + view.getUint16(offset + 28, true);
+      expect(decoder.decode(bytes.subarray(offset + 30, offset + 30 + localNameLength))).toBe(name);
+      found.push({ name, method, crc, size, data: decoder.decode(bytes.subarray(dataStart, dataStart + size)) });
+      cursor += 46 + nameLength + view.getUint16(cursor + 30, true) + view.getUint16(cursor + 32, true);
+    }
+    return found;
+  }
+
+  it("builds a stored zip whose parts are the Word document the editor describes", () => {
+    const bytes = buildDocxBytes("Quote & Co", {
+      type: "doc",
+      content: [
+        { type: "heading", attrs: { level: 1 }, content: [{ type: "text", text: "Summary" }] },
+        { type: "paragraph", content: [{ type: "text", text: "Payable", marks: [{ type: "bold" }] }] },
+        { type: "orderedList", content: [{ type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "First" }] }] }] },
+      ],
+    });
+
+    expect(decoder(bytes.subarray(0, 2))).toBe("PK");
+    const entries = readEntries(bytes);
+    expect(entries.map((entry) => entry.name)).toEqual([
+      "[Content_Types].xml",
+      "_rels/.rels",
+      "word/_rels/document.xml.rels",
+      "word/styles.xml",
+      "word/numbering.xml",
+      "word/document.xml",
+    ]);
+    expect(new Set(entries.map((entry) => entry.method))).toEqual(new Set([0]));
+    expect(new Set(entries.map((entry) => entry.crc > 0))).toEqual(new Set([true]));
+
+    const document = entries.find((entry) => entry.name === "word/document.xml")!.data;
+    expect(document).toContain("<w:t xml:space=\"preserve\">Quote &amp; Co</w:t>");
+    expect(document).toContain("<w:pStyle w:val=\"Heading1\"/>");
+    expect(document).toContain("<w:b/>");
+    expect(document).toContain('<w:numId w:val="2"/>');
+    expect(document).toContain("<w:sectPr>");
+  });
+
+  it("escapes a title that would otherwise break the document part", () => {
+    const bytes = buildDocxBytes("<script>alert(1)</script>", { type: "doc", content: [] });
+    const document = readEntries(bytes).find((entry) => entry.name === "word/document.xml")!.data;
+    expect(document).not.toContain("<script>");
+    expect(document).toContain("&lt;script&gt;");
+  });
+});
+
+function decoder(bytes: Uint8Array): string {
+  return new TextDecoder().decode(bytes);
+}

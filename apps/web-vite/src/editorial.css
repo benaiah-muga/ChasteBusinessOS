@@ -1,0 +1,83 @@
+/*
+ * Shared editorial surface for business pages. The support app and Settings
+ * own their own display type and spacing, so they are excluded here.
+ */
+#main-content main:not(.support-app):not(.settings-page-shell) h1 {
+  font-family: Georgia, "Times New Roman", serif !important;
+  font-weight: 500 !important;
+  letter-spacing: -0.045em !important;
+  line-height: 1.04 !important;
+  text-wrap: balance;
+}
+
+#main-content main:not(.support-app):not(.settings-page-shell) h2 {
+  font-family: Georgia, "Times New Roman", serif !important;
+  font-weight: 500 !important;
+  letter-spacing: -0.03em !important;
+  text-wrap: balance;
+}
+
+#main-content main:not(.support-app):not(.settings-page-shell) [class$="-eyebrow"] {
+  color: var(--gold-700);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+#main-content main .ui-card {
+  border-color: var(--line);
+  border-radius: 12px;
+  background: var(--paper-50);
+  box-shadow: 0 7px 22px rgb(48 45 36 / 4%);
+}
+
+#main-content main:not(.support-app):not(.settings-page-shell) h1,
+#main-content main:not(.support-app):not(.settings-page-shell) h2 {
+  font-optical-sizing: auto;
+}
+
+/* One tab language across business pages, matching the support app's gold rule. */
+#main-content main:not(.support-app):not(.settings-page-shell) [class$="-tabs"] {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 2px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--line);
+  scrollbar-width: none;
+}
+
+#main-content main:not(.support-app):not(.settings-page-shell) [class$="-tabs"]::-webkit-scrollbar {
+  display: none;
+}
+
+#main-content main:not(.support-app):not(.settings-page-shell) [class$="-tabs"] > button,
+#main-content main:not(.support-app):not(.settings-page-shell) [class$="-tabs"] > a {
+  min-height: 34px;
+  flex: 0 0 auto;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  padding: 0 10px;
+  background: transparent;
+  color: var(--ink-500);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+#main-content main:not(.support-app):not(.settings-page-shell) [class$="-tabs"] > button:hover,
+#main-content main:not(.support-app):not(.settings-page-shell) [class$="-tabs"] > a:hover {
+  color: var(--ink-800);
+}
+
+#main-content main:not(.support-app):not(.settings-page-shell) [class$="-tabs"] > button[aria-selected="true"],
+#main-content main:not(.support-app):not(.settings-page-shell) [class$="-tabs"] > button[aria-pressed="true"],
+#main-content main:not(.support-app):not(.settings-page-shell) [class$="-tabs"] > button.is-active,
+#main-content main:not(.support-app):not(.settings-page-shell) [class$="-tabs"] > a[aria-current="page"] {
+  border-bottom-color: var(--gold-600);
+  background: transparent;
+  color: var(--ink-900);
+}

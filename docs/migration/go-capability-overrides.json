@@ -1,0 +1,1540 @@
+{
+  "capabilities": [
+    {
+      "id": "crm.convertLead",
+      "title": "Convert lead",
+      "intent": "Promote a lead-stage deal to qualified and attach its customer, creating a customer record when requested.",
+      "module": "crm",
+      "risk": "write",
+      "permission": "crm.write",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": "crm.undoLeadConversion",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "dealId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "customerId": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "dealId",
+              "customerId"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "dealId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "createCustomer": {
+                "type": "boolean",
+                "const": true
+              },
+              "customerName": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "dealId",
+              "createCustomer",
+              "customerName"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "dealId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "customerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversionIntentId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "stage": {
+            "type": "string",
+            "const": "qualified"
+          }
+        },
+        "required": [
+          "dealId",
+          "customerId",
+          "conversionIntentId",
+          "stage"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "crm.reapplyLeadConversion",
+      "title": "Reapply lead conversion",
+      "intent": "Restore the exact lead conversion from its unchanged undo receipt, recreating the customer when required.",
+      "module": "crm",
+      "risk": "write",
+      "permission": "crm.write",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": "crm.undoLeadConversion",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "undoIntentId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          }
+        },
+        "required": [
+          "undoIntentId"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "reapplied": {
+            "type": "boolean",
+            "const": true
+          },
+          "dealId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "customerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversionIntentId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          }
+        },
+        "required": [
+          "reapplied",
+          "dealId",
+          "customerId",
+          "conversionIntentId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "crm.undoLeadConversion",
+      "title": "Undo lead conversion",
+      "intent": "Restore a converted deal to its lead state and remove its unchanged unreferenced customer when safe.",
+      "module": "crm",
+      "risk": "destructive",
+      "permission": "crm.write",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": "crm.reapplyLeadConversion",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "conversionIntentId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          }
+        },
+        "required": [
+          "conversionIntentId"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "undone": {
+            "type": "boolean",
+            "const": true
+          },
+          "dealId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "customerDeleted": {
+            "type": "boolean"
+          },
+          "conversionIntentId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "undoIntentId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          }
+        },
+        "required": [
+          "undone",
+          "dealId",
+          "customerDeleted",
+          "conversionIntentId",
+          "undoIntentId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "documents.allocateNumber",
+      "title": "Allocate authored document number",
+      "intent": "Reserve the next organization-scoped number for an authored business document.",
+      "module": "documents",
+      "risk": "write",
+      "permission": "documents.write",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "invoice",
+              "quote",
+              "receipt",
+              "delivery_note",
+              "purchase_order",
+              "voucher",
+              "employment_contract",
+              "employment_agreement"
+            ]
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "number": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "number"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "harness.listCompositions",
+      "title": "List harness compositions",
+      "intent": "Inspect an organization's immutable harness compositions and their safe profile, bundle, and configuration key metadata.",
+      "module": "settings",
+      "risk": "read",
+      "permission": "harness.approve",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "compositions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "inspection": {
+                  "type": "object",
+                  "properties": {
+                    "profile": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "version": {
+                          "type": "string"
+                        },
+                        "environment": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "version",
+                        "environment"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "profileDigest": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    },
+                    "compositionDigest": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    },
+                    "bundles": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "version": {
+                            "type": "string"
+                          },
+                          "serviceIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "requiredBundleIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "version",
+                          "serviceIds"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "patches": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "version": {
+                            "type": "string"
+                          },
+                          "configKeys": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "version",
+                          "configKeys"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "profile",
+                    "profileDigest",
+                    "compositionDigest",
+                    "bundles",
+                    "patches"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "id",
+                "createdAt",
+                "inspection"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "compositions"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "iam.getOrgPolicy",
+      "title": "Read org approval policy",
+      "intent": "Read the organization's approval policy: the highest risk class that can run autonomously, the money threshold in minor units, and the risk classes that always need human approval. Use it to explain why an action needs approval or to propose a policy change.",
+      "module": "iam",
+      "risk": "read",
+      "permission": "iam.read",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "maxRiskAutonomous": {
+            "type": "string"
+          },
+          "moneyThresholdMinor": {
+            "type": "number"
+          },
+          "requiresApprovalFor": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "maxRiskAutonomous",
+          "moneyThresholdMinor",
+          "requiresApprovalFor"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "iam.restoreAgentSoul",
+      "title": "Restore agent persona",
+      "intent": "Restore a previously captured organization agent persona after an authorized change. The previous persona is returned so the restore can be reversed again.",
+      "module": "iam",
+      "risk": "write",
+      "permission": "iam.admin",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": "iam.setAgentSoul",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "agentSoul": {
+            "type": "string",
+            "maxLength": 8000,
+            "description": "Standing instructions, voice, and hard rules for every agent turn. An empty string clears the persona."
+          }
+        },
+        "required": [
+          "agentSoul"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "agentSoul": {
+            "type": "string"
+          },
+          "previousAgentSoul": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agentSoul",
+          "previousAgentSoul"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "iam.setAgentSoul",
+      "title": "Set agent persona",
+      "intent": "Replace the organization's standing agent persona, the instructions every agent turn follows. The previous persona is returned so the change can be restored.",
+      "module": "iam",
+      "risk": "write",
+      "permission": "iam.admin",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": "iam.restoreAgentSoul",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "agentSoul": {
+            "type": "string",
+            "maxLength": 8000,
+            "description": "Standing instructions, voice, and hard rules for every agent turn. An empty string clears the persona."
+          }
+        },
+        "required": [
+          "agentSoul"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "agentSoul": {
+            "type": "string"
+          },
+          "previousAgentSoul": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agentSoul",
+          "previousAgentSoul"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "inventory.replenishmentPlan",
+      "title": "Plan inventory replenishment",
+      "intent": "Calculate a deterministic replenishment plan from live stock, open reservations, recent sales, incoming purchase orders, and configured lead times without creating an order.",
+      "module": "inventory",
+      "risk": "read",
+      "permission": "inventory.read",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "sku": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "lookbackDays": {
+            "type": "integer",
+            "minimum": 7,
+            "maximum": 365
+          },
+          "reviewDays": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 90
+          },
+          "leadTimeDays": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 365
+          },
+          "serviceLevel": {
+            "type": "string",
+            "enum": [
+              "90",
+              "95",
+              "98",
+              "99"
+            ]
+          },
+          "includeSufficient": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "asOf": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "assumptions": {
+            "type": "object"
+          },
+          "summary": {
+            "type": "object"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "asOf",
+          "currency",
+          "assumptions",
+          "summary",
+          "items",
+          "warnings",
+          "truncated"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "operations.getRecord",
+      "title": "Read operational record",
+      "intent": "Read one persistent objective, exception, or Decision Record and its conversation card.",
+      "module": "operations",
+      "risk": "read",
+      "permission": "operations.read",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "objective",
+              "exception",
+              "decision"
+            ]
+          },
+          "stableKey": {
+            "type": "string",
+            "maxLength": 200
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "id": "operations.listRecords",
+      "title": "List operational records",
+      "intent": "List persistent objectives, exceptions, and Decision Records filtered by kind and status.",
+      "module": "operations",
+      "risk": "read",
+      "permission": "operations.read",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "objective",
+              "exception",
+              "decision"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "id": "operations.upsertRecord",
+      "title": "Upsert operational record",
+      "intent": "Create or update a persistent business objective, deduplicated exception, or Decision Record under a stable key.",
+      "module": "operations",
+      "risk": "write",
+      "permission": "operations.write",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "objective",
+              "exception",
+              "decision"
+            ]
+          },
+          "stableKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "status": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "details": {
+            "type": "object"
+          },
+          "authorityRef": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "approvalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ownerUserId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "kind",
+          "stableKey",
+          "status",
+          "title"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "id": "pos.listSessions",
+      "title": "List POS sessions",
+      "intent": "List the organization's POS register sessions, newest first, with register, status, opening float, expected and counted cash, variance, and open or close times. Use the session id with pos.shiftSummary for details.",
+      "module": "pos",
+      "risk": "read",
+      "permission": "pos.read",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "sessions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "register": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "openingFloatMinor": {
+                  "type": "number"
+                },
+                "expectedCashMinor": {
+                  "type": "number"
+                },
+                "countedCashMinor": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "varianceMinor": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "varianceReason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "openedByUserId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "closedByUserId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "openedAt": {
+                  "type": "string"
+                },
+                "closedAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "register",
+                "status",
+                "openingFloatMinor",
+                "expectedCashMinor",
+                "countedCashMinor",
+                "varianceMinor",
+                "varianceReason",
+                "openedByUserId",
+                "closedByUserId",
+                "openedAt",
+                "closedAt"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "sessions"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "projects.list",
+      "title": "List projects",
+      "intent": "List the organization's projects with their id, name, active or archived status, due date, and creation time, newest first, so work can be found before opening a board. Optionally filter to active or archived projects.",
+      "module": "projects",
+      "risk": "read",
+      "permission": "projects.read",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ],
+            "description": "Optional status filter; omit for every project."
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "projects": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "dueAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "createdAt": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "status",
+                "dueAt",
+                "createdAt"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "projects"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "purchasing.createPurchaseOrder",
+      "title": "Create purchase order",
+      "intent": "Commit an authorized purchase order with its vendor, lines, quantities, prices, and promised delivery date.",
+      "module": "purchasing",
+      "risk": "money",
+      "permission": "purchasing.write",
+      "executionScope": "organization",
+      "moneyThresholdMinor": 0,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "vendorId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "memo": {
+            "type": "string"
+          },
+          "promisedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lines": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "quantity": {
+                  "type": "integer"
+                },
+                "unitPriceMinor": {
+                  "type": "integer"
+                },
+                "expenseAccountCode": {
+                  "type": "string",
+                  "pattern": "^[0-9]{4}$"
+                },
+                "sku": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "description",
+                "quantity",
+                "unitPriceMinor"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "vendorId",
+          "lines"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "poNumber": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "poNumber"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "purchasing.getPurchaseOrder",
+      "title": "Read purchase order",
+      "intent": "Read one purchase order with its status, ordered lines, received quantities, and receipt history for verification.",
+      "module": "purchasing",
+      "risk": "read",
+      "permission": "purchasing.read",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "poNumber": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "poNumber"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "poNumber": {
+            "type": "integer"
+          },
+          "vendorId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "vendorName": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "memo": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "orderedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "promisedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "totalMinor": {
+            "type": "integer"
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "receipts": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "fullyReceived": {
+            "type": "boolean"
+          },
+          "backordered": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "poNumber",
+          "vendorId",
+          "vendorName",
+          "status",
+          "memo",
+          "orderedAt",
+          "promisedAt",
+          "totalMinor",
+          "lines",
+          "receipts",
+          "fullyReceived",
+          "backordered"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "purchasing.listVendors",
+      "title": "List purchasing vendors",
+      "intent": "List this organization's suppliers with contact details, payment terms, and active state for purchasing decisions.",
+      "module": "purchasing",
+      "risk": "read",
+      "permission": "purchasing.read",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "includeInactive": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "vendors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "email": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "paymentTermDays": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "active": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "email",
+                "paymentTermDays",
+                "active"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "vendors"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "purchasing.selectWinningQuote",
+      "title": "Award purchase quote",
+      "intent": "Select a quoted supplier as the winner and commit the resulting purchase order under purchase authority.",
+      "module": "purchasing",
+      "risk": "money",
+      "permission": "purchasing.write",
+      "executionScope": "organization",
+      "moneyThresholdMinor": 0,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "rfqId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "rfqId"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "poNumber": {
+            "type": "integer"
+          },
+          "vendorId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "quoteAmountMinor": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "poNumber",
+          "vendorId",
+          "quoteAmountMinor"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "accounting.createQuote",
+      "title": "Create quote",
+      "intent": "Draft a price quote for a customer with line items so they can accept it later and it becomes an invoice without retyping anything",
+      "module": "accounting",
+      "risk": "write",
+      "permission": "accounting.write",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": "accounting.declineQuote",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "customerId": {
+            "type": "string"
+          },
+          "dealId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Optional CRM deal UUID; the quote customer must match the deal customer when one is set."
+          },
+          "memo": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+          },
+          "lines": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "quantity": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "description": "thousandths of a unit; 1000 = one unit"
+                },
+                "unitPriceMinor": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "taxMinor": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "taxCodeId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "sku": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120,
+                  "description": "Optional catalogue SKU; stock-backed lines carry the item into the sales order so confirmation can reserve it."
+                }
+              },
+              "required": [
+                "description",
+                "quantity",
+                "unitPriceMinor"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "customerId",
+          "lines"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "quoteId": {
+            "type": "string"
+          },
+          "quoteNumber": {
+            "type": "number"
+          },
+          "totalMinor": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "quoteId",
+          "quoteNumber",
+          "totalMinor"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "purchasing.createBill",
+      "title": "Record vendor bill",
+      "intent": "Record an invoice received from a supplier; posts the expense and the amount owed to Accounts Payable",
+      "module": "purchasing",
+      "risk": "write",
+      "permission": "purchasing.write",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": "accounting.reverseEntry",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "vendorId": {
+            "type": "string"
+          },
+          "vendorRef": {
+            "type": "string"
+          },
+          "memo": {
+            "type": "string"
+          },
+          "poNumber": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "lines": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "quantity": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "description": "thousandths of a unit"
+                },
+                "unitPriceMinor": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "expenseAccountCode": {
+                  "default": "6000",
+                  "description": "chart-of-accounts code the cost lands on, e.g. 5000 for COGS",
+                  "type": "string",
+                  "pattern": "^\\d{4}$"
+                },
+                "taxMinor": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "taxCodeId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "poLineNumber": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "description",
+                "quantity",
+                "unitPriceMinor",
+                "expenseAccountCode"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "documentId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Optional ingested document being reviewed; it is linked to the bill atomically and cannot be reused."
+          }
+        },
+        "required": [
+          "vendorId",
+          "lines"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "billNumber": {
+            "type": "number"
+          },
+          "totalMinor": {
+            "type": "number"
+          },
+          "entryId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "billNumber",
+          "totalMinor",
+          "entryId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "sales.createOrderFromQuote",
+      "title": "Create sales order from quote",
+      "intent": "Award a sent quote into a draft sales order with the same lines so credit checks, stock reservations, fulfilment, invoicing, and collection continue from one record.",
+      "module": "sales",
+      "risk": "write",
+      "permission": "sales.write",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": "sales.cancelOrder",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "quoteId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "quoteId"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "orderNumber": {
+            "type": "integer"
+          },
+          "quoteNumber": {
+            "type": "integer"
+          },
+          "totalMinor": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "orderId",
+          "orderNumber",
+          "quoteNumber",
+          "totalMinor"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "crm.getCustomerProfile",
+      "title": "Read customer profile",
+      "intent": "Read one customer's CRM profile: name, contact details, owner, tags, notes, status, merged records, last activity, purchase count, and lifetime POS spend in minor units. Use it when a person asks what the business knows about a customer and you already have the customer id.",
+      "module": "crm",
+      "risk": "read",
+      "permission": "crm.read",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "customerId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          }
+        },
+        "required": [
+          "customerId"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "customer": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "customer"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

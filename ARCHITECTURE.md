@@ -63,6 +63,14 @@ Every action, by human UI click or agent tool-call, funnels through the same
 place to enforce security, one place to audit, and the AI can do *everything* the human
 can because they share the same contract.
 
+Registration is also the agent discovery index: every supported, non-hidden
+capability is merged into the model-facing catalog after its domain registers
+it. A capability must carry a reviewed contract (title, intent, and a closed
+input schema) in its spec, the migration manifest, or the hand-written tool
+catalog; CI fails otherwise. Hiding a business capability from the agent
+requires an explicit `humanOnly` or `agentHidden` reason, reviewed in the
+conformance test. See [capability coverage](docs/CAPABILITY_COVERAGE.md).
+
 ### Governance pipeline (per action)
 
 ```
@@ -163,50 +171,51 @@ Model routing (all via NVIDIA NIM unless overridden):
 | Layer | Choice | Why |
 |---|---|---|
 | Repo | Turborepo + pnpm workspaces | parallel builds, shared versioning, clean package boundaries |
-| Language | TypeScript (strict) end-to-end | one type system from DB to UI; agents generate typed code |
-| Web | Next.js 16 (App Router, RSC, Cache Components) | server components for dense ERP grids; streaming agent UIs (ADR 0027, 0028) |
-| API | Next.js route handlers + Zod boundaries | thin adapters over the capability kernel; tRPC considered, not needed yet |
+| Language | TypeScript strict in the browser; Go for the business runtime | generated API types keep the boundary checked; no TypeScript server remains after cutover (ADR 0070) |
+| Web | React 19 + Vite static client | faster client iteration and a separately compiled browser app; the Next.js server was retired on 2026-10-19 (ADR 0070) |
+| API | Go HTTP service with validated, versioned contracts | one governed capability executor owns business writes; 163 API methods are Go-owned and verified, and the two Better Auth catch-all methods stay auth-owned and pending by design |
 | DB | PostgreSQL 16 + Drizzle ORM | relational integrity is non-negotiable for accounting; SQL-native migrations |
 | Vectors | pgvector | no extra infra; joins with transactional data; HNSW indexes |
-| Auth | better-auth (multi-org) | TS-first, org/team plugins, passkeys ready |
-| UI | Tailwind v4 + in-repo primitives (`apps/web/src/components/ui.tsx`) | token-driven theme and brand shell (ADR 0015, 0030); no component-library dependency; a shared `ui/` package is a future extraction |
-| Validation | Zod 4 | shared schemas across kernel/UI/LLM function-calling |
-| Jobs | Postgres-backed durable queue (`jobs`, claimed `FOR UPDATE SKIP LOCKED`) | no extra infra; schedules advanced at claim time for at-most-once execution. Drives routines and ingestion |
-| Observability | console logging + event ledger in DB | structured pino logs and OpenTelemetry traces are planned, not wired |
-| Testing | Vitest (unit + DB integration); property-based tests for ledger invariants | double-entry balance is a property, not a test case; Playwright e2e planned |
+| Auth | Go-owned, Better Auth-compatible sessions | preserve passwords, sessions, verified identity binding, and active-org behavior; unsupported Better Auth endpoints return 404 or 405 |
+| UI | Existing token-driven theme and in-repo components, ported into Vite in slices | preserve the current brand and accessible controls; keep the component system in-repo |
+| Validation | Versioned API schemas with Go runtime validation and generated TypeScript types | reject contract drift at the HTTP boundary while retaining strict browser types |
+| Jobs | Go worker over the existing PostgreSQL durable queue | preserve `FOR UPDATE SKIP LOCKED` claims, leases, retries, occurrence receipts, and existing rows |
+| Observability | console logging + event ledger in DB | structured Go logs and OpenTelemetry traces are planned, not wired |
+| Testing | Vitest, Go tests and vet, database integration proofs, and browser checks | retain the existing demo proofs and drive them through the migrated API; property-test ledger invariants |
 
-Monorepo layout (as actually built):
+Monorepo migration layout (current owner is recorded in
+`docs/migration/route-ownership.json`; see ADR 0070):
 
 ```
 apps/
-  web/            Next.js app (ERP console + agent chat + approvals inbox)
+  web-vite/       React + Vite browser client (HTTP to the Go API only)
+  api/            Go HTTP API, capability executor, capability registry, and workers
 packages/
-  kernel/         capability registry, governance pipeline, event ledger, agent loop
-  db/             drizzle schema + migrations (all modules)
-  ai/             provider adapters (NIM, openai-compat), embeddings
+  db/             drizzle schema + migrations (every domain)
   erp-core/       pure domain logic: posting rules, tax, inventory math (no IO)
-  plugin-kit/     signed plugin manifest format for marketplace capabilities
-modules/          ERP modules (each exports capabilities over @chaste/db)
-  money & trade   accounting/ purchasing/ sales/ pos/ inventory/
-  operations      manufacturing/ projects/ hr/ documents/
-  growth          crm/ marketing/ support/
-  platform        iam/ messaging/ creator/ skills/ routines/
-  intelligence    signals/ analytics/
 ```
 
-Two of these are cross-cutting rather than domain modules:
+Capabilities live in `apps/api/internal/capability`, grouped by domain:
+money & trade (accounting, purchasing, sales, pos, inventory), operations
+(manufacturing, projects, hr, documents), growth (crm, marketing, support),
+platform (iam, messaging, creator, skills, routines), and intelligence
+(signals, analytics). Each domain contributes its own capability specs,
+parsers, and handlers; `apps/web-vite` consumes REST APIs only.
 
-- **`signals`** hosts the needs-attention registry (ADR 0034). Modules
-  contribute deterministic producers; `signals.list` aggregates them red-first
+Two capability groups are cross-cutting rather than domain modules:
+
+- **signals** hosts the needs-attention registry (ADR 0034). Domain producers
+  contribute deterministically; `signals.list` aggregates them red-first
   with evidence and a suggested governed action. A failing producer degrades to
   missing signals, never a broken dashboard.
-- **`analytics`** is the understanding layer (ADR 0039): `explainChange`
+- **analytics** is the understanding layer (ADR 0039): `explainChange`
   decomposes a revenue delta with exact, property-tested contributions, and
   `askYourBusiness` answers from cited extracts and signals, ending in a
   *proposed* governed action rather than executing one.
 
-Domain rule: `erp-core` is pure functions; `modules/*` may touch DB via `db`;
-only `kernel` executes capabilities; only humans approve `identity/destructive`.
+Domain rule: `erp-core` is pure functions; capability handlers in Go query
+through org-scoped transactions (`internal/dbx.WithOrgTx`); only humans
+approve `identity/destructive`.
 
 ---
 

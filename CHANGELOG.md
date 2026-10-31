@@ -11,7 +11,1756 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-01
+
+This minor release makes Customer support the first composable app surface,
+introduces the shared Settings workspace and the editorial page system, and
+publishes the project's search and AI discovery surface.
+
 ### Added
+
+- Public web discovery now includes a product title and description, Open Graph and Twitter metadata, `SoftwareApplication` structured data, a web manifest, crawler rules, `llms.txt`, and route-level canonical and robots handling. The sign-in entry is indexable; every authenticated workspace, portal, widget, invitation, reset, print, and onboarding page is explicitly `noindex,nofollow`. The SEO surface and its deployment-domain boundary are documented in [docs/SEO.md](docs/SEO.md).
+- The customer support module now has a composable app surface at `/support`: horizontal Inbox, Overview, Knowledge, Channels, and Settings tabs, deep-linkable conversations at `/support/inbox/<id>`, a three-pane queue, thread, and context desk, a visible handoff reason, staff and customer message modes, quick replies, a copilot draft that stays in the composer until a person sends it, and responsive desktop and mobile layouts. The queue includes unbound website-widget conversations, so a widget escalation reaches a person with the visitor email and no unverified account facts. The support customer picker now accepts `support.read` as well as `crm.read` or `pos.sell`, so a support-only role can choose an existing customer without opening the CRM surface.
+- Support capability reads now carry staff-facing triage context: ticket number, priority, category, assignee id and name, SLA due time, channel, customer email, and created and updated times in the conversation list and the full detail read. The legacy agent-facing detail projection is unchanged, and the legacy `/api/support` list keeps its seven-field shape without the customer email and remains customer-bound.
+- `pnpm seed:support` seeds a reviewable Northwind desk into an existing workspace through the governed capability path, with eight governed customer conversations, one unbound website-widget escalation, quick replies, knowledge articles, internal tickets, and an optional unpaid invoice for billing context. It replaces only its own demo conversations and leaves invoices and other business records alone.
+- New support app tests cover horizontal navigation, deep links, queue filters, staff and customer messages, copilot drafts, quick replies, resolve, escalation, ticket edits, new conversations, unbound widget threads, module-disabled state, retry recovery, failed writes, knowledge, channel settings, and support settings.
+- Every business page now uses the shared editorial surface: serif display headings, balanced section titles, gold eyebrow labels, warm cards, and one gold-rule tab language. The support app and Settings retain their own denser chrome and section navigation. The README opening was rewritten as a product and engineering overview instead of a manifesto.
+- CBOS Settings now uses a shared settings workspace: a grouped section index, a focused configuration column, and URL-addressable sections at `/settings/<section>`. The former tab strip is gone. The index is reduced to General, AI & automation, and Operations, with no separate access links; Team & access sits inside Workspace. Email and Agent are exposed as first-class sections, while Print branding lives under Workspace and Quality under Governance. The Customer support app adds a Settings tab at `/support/settings` with overview, real channel configuration, the person's support ticket notification preference, shared workspace links, and audit links.
+- Settings typography is rebalanced around a 42px page title, 29px section title, 12px navigation and body, and 11px supporting copy. The CBOS page lede is removed, and the workspace status is moved inline beside the Settings title instead of taking a stacked row, so the page opens directly on the section index. The support palette's muted sage, plum, and slate tones appear only on group labels, section icons, and the settings status dot; gold remains the single active accent.
+- Settings and support configuration now have a reusable layout and test coverage: `SettingsWorkspace` owns the left index and content anatomy, `SettingsPage` covers section links and a deep-linked Modules section, and the support app covers its Settings tab, embedded channel controls, and notification preference save.
+- Quotes can be linked to the CRM opportunity they came from. `accounting.createQuote` accepts an optional `dealId`, refuses a deal from another workspace or a customer that does not match the deal customer, and quote reads include the deal title. The Sales workspace adds an Opportunity selector that prefills the customer and shows the linked deal on the quote row.
+- Business exceptions can now be assigned to any member of the workspace. The Inbox lists team members, shows the owner's name, preserves ownership through acknowledge and resolve, and adds a "Mine" queue. The governed record write refuses an owner who is not a member of the organization.
+- Vendor and employee lookups now use the same normalized identity rules as customers: exact email, name tokens in any order, company suffixes ignored for vendors, and person normalization for employees. `resolve_entity` reports why each vendor or employee matched.
+- A gated action that is not a purchase order now renders as an "Approval required" card in the conversation. It shows the capability, risk class, rationale, and up to six stored payload fields with sensitive keys redacted, and it supports approve and reject with an honest outcome. Purchase orders keep the line-item proposal card.
+
+- Customer identity resolution now normalizes and ranks evidence instead of substring matching. `resolve_entity` matches normalized email, the last nine digits of a phone, names in any token order, company suffixes ignored, and a conservative typo rule, and reports why each customer matched.
+- A customer that was merged now resolves to the surviving record and reports the duplicate name in `mergedFrom`. The assistant can no longer receive a tombstoned customer id and be refused by the executor after confidently naming it.
+- The coding-agent MCP bridge advertises three meta tools, `chaste_discover`, `chaste_describe`, and `chaste_dispatch`, instead of every capability definition. Discovery returns short ranked matches without schemas, describe returns one contract with its advisory skills, and dispatch runs through the same governed executor with agent claims, approvals, and audit.
+- A production coding-agent connection with no pinned tools now reaches the whole governed catalog through the meta surface. Previously its empty allowlist advertised no tools at all.
+
+- Every Workmate turn now starts with a code-computed `<turn_facts>` block: read time, pending approvals with capability, risk class, rationale, raiser, age, and approval id, and the unread notification count with its latest title. A read that fails renders as unknown, never as zero, so the assistant can no longer claim nothing is waiting when the inbox was never read.
+- Workmate records one effect per capability execution from the executor's verdict and verifies the final answer against it. A pending approval the answer omitted gains an explicit notice, a failed material action the answer skipped gains the executor's error and a no-change statement, and dash characters are rewritten to allowed punctuation in both the stream and the stored text. Each correction is counted on the stored assistant event and logged.
+- The turn facts digest (read time, pending approval ids, unread count) is stored on the user event, so session replay shows the context the model was given.
+
+- Quote-to-cash is now one continuous governed path: quote lines can carry a catalogue SKU, `sales.createOrderFromQuote` awards a sent quote into a draft sales order with the same lines, `sales.confirmOrder` checks credit and reserves stock, `sales.deliverOrder` invoices what shipped, and the invoice points back to its order. Cancelling an untouched order returns its source quote to sent, so the award has a complete inverse.
+- The Inbox now keeps business exceptions: acknowledge, take ownership of, resolve, and reopen a signal through the persisted operational record path. A saved exception whose signal stops firing stays visible as no longer detected until a person resolves it, and a resolved condition that still fires can be reopened.
+- New deterministic exception producers cover purchase orders past their promised date, overdue supplier bills, expense claims at least three times the category median with at least three settled claims of history, and parsed documents with open coding suggestions that have waited more than two days for review.
+- Documents can be promoted into the books: a reviewer checks the extracted text and coding suggestions, chooses the supplier, edits quantity, price, and account code, and records a vendor bill with the source document linked atomically and only once. The bill and document link commit together. Pasted text is projected as parsed content at ingest, while uploaded raw bytes and raw text stay private.
+- A new `replenishment-to-payment` advisory skill carries the planner through cash forecast and payables context, supplier comparison, purchase approval, receiving, three-way-matched billing, and a reviewed payment run. The `quote-to-cash` skill now follows the order and delivery path instead of accepting straight into an invoice.
+
+- The organization agent persona (`agent_soul`) is now a governed capability: `iam.setAgentSoul` requires `iam.admin`, writes a ledger event, returns the previous persona, and is reversible through `iam.restoreAgentSoul`. Workmate can update it when an administrator asks, and the persona still cannot override security, approval, or financial integrity rules.
+- Workmate can read the organization's approval policy through `iam.getOrgPolicy`, including the autonomy ceiling, money threshold, and risk classes that always need approval, so it can explain why an action is waiting.
+- Workmate can list POS register sessions through `pos.listSessions`, including register, status, opening float, expected and counted cash, variance, and open or close times, then drill into a shift with `pos.shiftSummary`.
+- Workmate can read one customer's CRM profile through `crm.getCustomerProfile`, including tags, notes, owner, contact details, status, merged records, last activity, purchase count, and lifetime POS spend in minor units. The 500-row CRM collection remains human-only.
+- Capability coverage is now gated at the module and HTTP layers. Every installed module must have a supported, agent-visible capability, and every HTTP-layer file that writes to PostgreSQL outside the executor is listed with a reviewed reason. A new module without capabilities or a new unreviewed direct write fails CI.
+- Every supported governed capability is now discoverable by the workmate as soon as it is registered. The discovery catalog merges `capabilitySpecs` after domain initialization, and a conformance gate fails CI unless each visible capability has an authored intent and closed input schema. Human-only and agent-hidden capabilities require a reviewed reason.
+- `projects.list` is now a governed read capability with a `projects.read` gate, module check, audit event, and agent contract. The workmate can answer "are there any active projects?" without being given a project id.
+- Eight capabilities that were executable but absent from discovery are now visible with contracts: `creator.listCapabilityGaps`, `hr.pendingTimeEntries`, `inventory.listItemMetadata`, `inventory.listLocationRecords`, `notifications.restoreRead`, `purchasing.listPaymentRunBills`, `sales.updateDraftOrder`, and `support.listLibrary`. Identity, SCIM, SSO, widget credential, and internal inverse capabilities are explicitly hidden with reasons.
+- Workmate can resume a previous conversation from Agent runs, the recent runs list, or a `/chat?session=<id>` link. The active session is remembered per organization and user, so a reload reopens the last thread and the next message appends to the same server session.
+- Session revert can plan the inverse of `sales.updateDraftOrder` from its nested before snapshot, restoring the previous customer, note, and lines.
+
+- Session replay can revert a single governed action through its declared inverse, with confirmation, human authority, audit, and an approval stop when the inverse needs one. Supported actions are customer creation, project creation, sales orders, invoice payments, supplier bill payments, and supplier bills.
+- Approvals now show an execution plan: the concrete steps, projected ledger direction, risk class, and the inverse action that can reverse the decision.
+- The command palette searches customers, suppliers, items, invoices, supplier bills, documents, and projects through permission-aware `GET /api/search`, with a Records group above the workmate fallback.
+- `resolve_entity` now also finds invoices by number or customer, supplier bills by number or supplier, goods receipts by number, and documents by title.
+
+- Workmate now retains tool calls and bounded tool results across turns, so a follow-up can reuse the customer id or report rows it just retrieved without re-reading the world.
+- Workmate can read the signed-in person's notifications with an unread count, and the daily brief includes notifications alongside approvals, signals, and changes.
+- Workmate can resolve customers, vendors, items, employees, and projects by name, email, SKU, or code through `resolve_entity` before a write that needs an id.
+- The model default is now DeepSeek through `DEEPSEEK_API_KEY`, with `deepseek-chat` for primary and fast roles and `deepseek-reasoner` for reasoning. The provider is selectable in Settings and the environment example matches the deployment.
+- Sessions can be searched by title, id, model, mode, or status and filtered to assist, creator, or failed runs. Tool results persisted for follow-up context are also inspectable from the replay.
+
+- Workmate commands now include `/notifications` and `/views` for the notification feed and saved customer views.
+
+- Workmate can now compose a daily brief from signals, financial overview, receivables, payables, low stock, open tasks, leave, open support, pending approvals, and state-changing ledger events, and answer "what needs my attention", "what changed", and "what should I do first" with concrete figures and one recommendation.
+- Workmate can search every supported governed capability and invoke it with a schema-valid input, so a request no longer depends on the hand-written shortlist. Human-only capabilities stay hidden, and the executor still enforces permissions, policy, approvals, inverses, and audit.
+- Workmate has an approvals inbox tool for "what needs my sign-off", and a recent-changes tool that reads only state-changing ledger events.
+- Workmate now loads bounded user, assistant, and tool-result history into the next turn, so follow-up questions remember both the conversation and the ids or rows returned by earlier tools.
+- A failed provider request after a successful tool execution now returns a deterministic confirmation that names the action, says whether it completed or is waiting for approval, and includes the approval id.
+
+- A branded product shell built from the supplied logo and campaign identity: warm paper, near-black ink, burnished gold, a transparent mark with a gold variant, a matching favicon and touch icon, and a custom orbit loader used for session checks and lazy routes.
+- A shadcn-style primitive layer in `apps/web-vite/src/ui/` using Radix Dialog, Dropdown Menu, Popover, Tooltip, and Toast plus `class-variance-authority`, `clsx`, and `cmdk`. The components use product tokens and custom CSS rather than a default Tailwind palette.
+- A command palette at Cmd/Ctrl+K with grouped navigation, recent destinations, quick asks, and an unmatched-query fallback that opens Workmate with the query. The shell also gains a rail search trigger, a Create menu for six common jobs, keyboard shortcuts, and a shortcut sheet.
+- A first-class Inbox at `/inbox` that combines the previously unsurfaced `/api/signals` feed with pending approvals. It ranks urgent, coming-up, and opportunity items, filters and searches them, links each item to its owning workspace, offers an ask-Workmate action, and summarizes the queue through `my-work/summarize`.
+- A Workmate redesign with grouped starter prompts, a live session card, a context meter, slash commands, a command menu, copy transcript, a confirmed new conversation, recent agent runs that deep-link into replay, and a dock that shares the same session. A compaction event now renders a plain-language context card, tool activity uses readable names such as "People · Run Payroll", and each reply has a copy action.
+- An OpenCode 2 connection surface in Settings > AI & automation. It lists coding-agent connections, connects a local OpenCode server through `/api/ai-connections`, sets or clears the default runtime, disconnects, and explains the governed MCP boundary.
+- A branded notifications popover with unread counts, mark-all-read, error and empty states, an inbox handoff, and humanized capability labels.
+- Toast notifications for organization switching, sign out, chat transcript copy, new conversations, coding-agent actions, and queue briefs.
+- A mobile navigation drawer with scrim, Escape handling, body scroll lock, a close control, and a compact top bar.
+
+- Business objectives, deduplicated exceptions, and Decision Records are now persistent operating records with stable keys, revisions, authority references, and JSON evidence. Workmate renders read-only exception, progress, waiting, and verified-result cards from tool results without treating them as approvals.
+- Workmate tool results can now carry a structured record card for exceptions, progress, waiting states, and results. The card shows the kind, title, status, optional severity, summary, and next step, with bounded evidence text, and it stays read-only so approvals remain with the proposal card.
+- Purchase-order and quote-award approvals are now versioned proposals: a revised request supersedes the pending earlier version, and the approval inbox exposes the version and superseded link. RFQ quotes can carry line-level quantities and prices, and a quote award now creates a real multi-line purchase order instead of a synthetic single line.
+- Settings now has a Quality tab that runs live agent evaluations against fixture tool results using DeepSeek flash. Scenarios cover a low-stock purchase proposal, incoming supply that covers the gap, and missing sales history, and report tool choice, final-answer checks, duration, and token usage without touching business records. Runs require an organization admin. Completed runs are stored per workspace with row level security, and the tab shows recent runs, per-scenario last-five trends, a pass-rate summary, an 80% baseline, and the full trace of a stored run. A partial-receipt scenario, quote award, receivables aging, and supplier lead-time risk extend coverage to seven scenarios. The pass-rate baseline is configurable per workspace, history retains 50 runs, release metrics and model comparison are visible, and a nightly GitHub workflow runs the scripted and live evaluation.
+- A purchase approval now follows through to the order: the proposal card reads the resulting purchase order after approval and shows its status, remaining quantities, and receipt history, with a refresh action. Workmate can call `purchasing.getPurchaseOrder` for the same verification. A backend acceptance proof covers plan, pending proposal, human approval, order creation, receipt, and the next plan.
+- Workmate can now list suppliers, compare supplier delivery performance, and prepare an approval-gated purchase order. A pending purchase commitment renders a proposal card in the conversation from the stored approval payload, showing the supplier, lines, quantities, prices, timing, and total, with approve and reject actions that use the existing approvals path.
+- Go now exposes `inventory.replenishmentPlan`, a read-only governed capability that plans replenishment from live stock balances, open reservations, recent sales demand, open purchase orders, and recorded costs. It returns the demand rate, variability, configured lead time, safety stock, reorder point, target stock, suggested quantity, cost estimate, assumptions, and warnings, and it is available to Workmate and scheduled routines under `inventory.read`. It never creates or reserves an order.
+- Vite now has the workmate chat: a full `/chat` page and a floating dock on every workspace page, both sharing one conversation over the Go NDJSON chat route. Messages typed mid-run steer the running turn (with a visible fallback queue when steering is refused or unreachable), clarification cards answer into the next turn, stop keeps partial replies, per-turn and session token usage render, and dashboard shortcuts open `/chat?prompt=` (auto-sending into an untouched conversation, pre-filling otherwise). Creator mode is gated on the creator module switchboard and hidden when unavailable.
+- Go now produces the business signals behind the dashboard feed: stockout risk, dead stock, duplicate payments, late claims, stalled deals, overdue tasks, expired documents, cash and burn anomalies, and support SLA breaches, each with evidence and a suggested governed action. Producers are registered at the app layer and collected on read through the existing `signals.list` capability, so every module's coverage grows with the install.
+- Go now owns the remaining legacy messaging, documents, CRM, and purchasing collection routes: conversations and messages, docs and folders, document ingest, deals, customers, views, import, purchasing reads and writes, and payment runs. Requests resolve cookie or bearer sessions, enforce same-origin cookie writes, validate input strictly, execute through the governed capability kernel under tenant-scoped transactions, and keep the legacy envelopes for refusals and pending approvals.
+- Go now owns the remaining finance, platform, support, manufacturing, SCIM, and routines routes: quotes, recurring templates, reports, sales and inventory writes, AI connections and MCP tools, capability gaps, harness compositions, proposals, marketplace, creator agent and evolution, invite links, support inbox actions, manufacturing actions, SCIM collection deletion, and webhook reads. The same session, same-origin, validation, and governed-execution rules apply, and capability domain errors keep the legacy 403/404/422 statuses while infrastructure failures stay 500.
+- Go now owns the chat streaming routes: POST `/api/chat` and POST `/api/chat/steer` stream NDJSON step, delta, tool, compaction, clarification, stop, and done frames with session ids, governed agent tool calls, steering, compaction, and cached-input token accounting. Sessions are organization-scoped and rate limited, and coding-agent connections that Go has not ported answer an explicit error frame instead of failing silently.
+- A versioned public OpenAPI contract now generates Go and Vite TypeScript models for the Support channel settings API.
+- The public OpenAPI contract now describes the generic Go capability execution request and its success, approval-pending, refusal, and authentication/error response envelopes. Vite Support uses the generated request and success-envelope types while retaining runtime validation.
+- The public OpenAPI contract now covers GET and POST for the Go module switchboard. Vite Settings uses generated response types, validates module write requests, and retains runtime response validation.
+- The public OpenAPI contract now covers the cookie-session organization list and active-organization switch. Go handlers and the Vite organizations client use generated models while preserving runtime validation.
+- The public OpenAPI contract now also covers organization agent-persona reads and writes, including admin and same-origin checks, input limits, and error responses. Resolver infrastructure failures now return a logged generic 500 instead of appearing as unauthorized requests.
+- The public OpenAPI contract now covers the Go approval inbox and decision routes, including session and bearer authentication, organization selection, decision outcomes, and raw JSON approval payloads. Vite Approvals uses generated request and response types with its existing runtime validation.
+- The public OpenAPI contract now covers Go notification feed and mark-read routes, including cookie and bearer authentication, organization selection, cache headers, list bounds, strict write input, governed mutation outcomes, and the exact-path mount's configured-method 405 response. Go handlers and the Vite client use generated models while retaining runtime validation.
+- The public OpenAPI contract now covers Go team member and role reads plus governed role creation, permission updates, role assignment, and invitations. Action-discriminated request/result schemas describe cookie and bearer auth, organization selection, same-origin writes, idempotency, and method behavior; Go and Vite consume generated models with runtime validation.
+- The public OpenAPI contract now covers the Go dashboard read, including its tenant selector, cache and authentication headers, error responses, and strict response schema. Vite dashboard data is typed from generated models and still validated at runtime.
+- The public OpenAPI contract now covers the Go setup checklist read, including cookie and bearer authentication, organization selection, cache and error headers, and its safe-local-path response shape. Go and Vite use generated response models while keeping runtime validation; the enabled exact-path Go mount rejects unsupported methods before auth.
+- The public OpenAPI contract now covers Go GET `/api/signals`, including cookie and bearer authentication, organization membership checks, first-value filters, UTF-8 byte bounds, cache headers, and error statuses. Go and Vite consume generated signal models with runtime validation; malformed filters return 400, permission or organization mismatches return generic 403, and session resolver infrastructure failures no longer appear as unauthorized.
+- The public OpenAPI contract now covers Go GET `/api/my-work`, including cookie and bearer authentication, organization selection, permission-scoped cards, cache headers, and error statuses. Go and Vite use generated response models with runtime validation; invalid signal projections fail closed and the enabled exact-path mount rejects unsupported methods.
+- The public OpenAPI contract now covers Go GET `/api/ledger`, including cookie and bearer authentication, accounting-read permission, organization selection, pagination coercion and cursors, raw JSON payloads, nullable audit fields, cache headers, and errors. Go and Vite use generated event models with runtime validation; sequence numbers are bounded to JavaScript's exact integer range, the public response omits internal auth-session IDs, resolver infrastructure failures return a generic 500, short secrets return 503, and the enabled exact-path mount rejects unsupported methods.
+- The public OpenAPI contract now covers Go POST `/api/my-work/summarize`, including cookie and bearer authentication, same-origin enforcement for cookie requests, verified organization selection, card and UTF-16 prompt limits, provider/configuration outcomes, sanitized errors, and cache headers. Go and Vite use generated request, response, and error models with runtime validation; resolver infrastructure failures return a logged generic 500, short secrets return 503, and the enabled exact-path mount rejects unsupported methods.
+- The public OpenAPI contract now covers Go POST `/api/conversations/{id}/agent-reply`, including cookie and bearer authentication, explicit organization membership, same-origin cookie writes, messaging permission, strict request limits, governed pending approvals, replay behavior, sanitized errors, and cache headers. Go and Vite use generated request and response models with runtime validation; resolver infrastructure failures return a logged generic 500, short secrets return 503, and the exact Go-owned path rejects unsupported methods with `Allow: POST`.
+- The public OpenAPI contract now covers the six accounts receivable capability execution inputs and outputs: invoice listing, invoice creation, payment recording and reversal, credit notes, and customer statements. Inputs enforce contract bounds, outputs carry the invoice status enum and per-action result fields, and Go and Vite use generated request, result, and envelope models with runtime validation; Vite rejects invoice rows outside the contract status enum.
+- Go now owns organization-scoped SSO connection listing and routes SSO creation, disablement, and restoration through audited, reversible `iam.admin` capabilities.
+- Go routine agents now expose the legacy manufacturing read tools for production runs, work orders, BOM trees and reports, cost previews, lot traceability, and production feasibility through existing governed capabilities.
+- Go now accepts session-authenticated durable-run creation requests and dispatches ordered, approval-gated steps through the Go jobs worker.
+- Vite Event Ledger can load older organization-scoped events from Go in 100-entry pages, and searches include every page already loaded.
+- Go now delivers queued approval notification emails through a dedicated SMTP worker. A notification-only database role claims approval-email jobs, reads payloads in organization-scoped transactions, and uses fenced acknowledgements to prevent blind retries after uncertain SMTP delivery.
+- Go now delivers queued Vite marketing campaign emails through a dedicated SMTP worker role. It rechecks the recipient's current address, active status, and opt-out setting before sending, with separate tenant-scoped payload access and fenced acknowledgements.
+- Docker Compose now runs the static React/Vite client, Go API, capability jobs worker, and webhook outbox worker; it provisions least-privilege database roles and requires a PostgreSQL 16 snapshot before applying migrations.
+- Vite Inventory now displays lot balances from the Go inventory read, including zero balances, with a strict validated response contract.
+- Vite Expenses validates Go claims, policies, payment IDs, and pending approval receipts, and preserves retry identity after malformed successful responses.
+- Vite Projects validates Go project action receipts with required fields while preserving separately typed legacy receipts during migration.
+- Vite Sales quotes, Products, and invoice printing validate Go response contracts, including nullable fields and action-specific receipts; malformed write responses retain their retry intent.
+
+- Vite Accounting, HR, Marketing, and POS collection actions now execute through session-authenticated Go handlers and the governed capability pipeline.
+- Vite Support can quick-create customers through the authenticated Go CRM capability without relying on a client-only rollout flag.
+- Vite Documents can start drafts from Go-backed reusable templates, with matching Go and Vite validation for ProseMirror content and canonical JSON limits.
+- Vite Analytics compares invoiced revenue across two inclusive date ranges by customer or product through the authenticated Go `analytics.explainChange` capability, showing totals and contribution details.
+- Vite CRM can edit open task titles and notes through Go, reload the stored details, and restore the complete prior task snapshot.
+- Vite CRM Overview reads complete deal-stage counts and totals from Go, independent of the 200-row deal list used by the interactive pipeline.
+- Vite CRM discards stale collection refreshes after a newer organization load starts, keeping overview totals and customer rows bound to the active organization.
+- Vite Sales can edit draft order notes and line details through the Go capability, with draft-only status checks and matching note length validation.
+- Vite Hiring captures opening departments and role notes through Go and displays the stored details after reload.
+- Vite Marketplace shows when a listing cannot be installed until verification and keeps organization uninstall available for existing installs.
+- Vite Purchasing can reverse an individual standalone vendor bill payment through Go after entering a reason; payment-run members remain available only through whole-run reversal.
+- Vite Sales can deliver selected quantities from confirmed orders and invoice each delivery through Go, with Go-reported reserved balances and retry-safe line quantities.
+- Vite Payroll can execute and void draft runs and reverse executed postings through Go, with explicit confirmation and actor/org scoped exact retry recovery.
+- Vite People can deactivate active employees through Go after confirmation; deactivated records remain visible and no longer appear as eligible for future payroll runs.
+- Vite Inventory can reconcile stock value to the General Ledger and reverse recent valuation summaries through Go, with policy-dependent approval handling and exact retry recovery for uncertain actions. Posting remains available to `inventory.write` users when the separate Accounting history read is denied; reversing a prior summary requires `accounting.read`.
+- Go Messaging agents can query organization-scoped receivables aging through the governed `accounting.arAging` capability when the signed-in user has `accounting.read`.
+- Vite Accounting can post period-end foreign receivables revaluations through the approval-gated Go capability, with scoped retry recovery for pending or uncertain submissions.
+- Vite Accounting reports the net base-currency adjustment and number of foreign currencies after a completed Go revaluation.
+- Vite CRM supports undoing the latest single or bulk customer profile update through Go, with scoped recovery after pending or uncertain results.
+- Vite Inventory can cancel an untouched pending stock transfer draft through Go after explicit confirmation, with scoped exact retry recovery.
+- Vite Hiring can close an open role through Go and keeps it closed after refresh.
+- Vite and future clients can read and update accounting budgets, banking data, and time entries through session-authenticated Go REST routes. Write requests require a client-supplied idempotency intent ID.
+- Vite and future clients can use Go-owned session-authenticated expenses, tax, and accounting period-close APIs. Writes use the governed capability executor and require client-supplied idempotency intent IDs.
+- Vite Sales can quick-create a catalog item through Go's `inventory.createItem` capability and add it to a sales draft, with actor/org-scoped retry recovery.
+- Vite Support can file an internal request, bug, or capability-gap ticket through Go's `support.createTicket` capability with actor/org-scoped exact retry recovery.
+- Vite Sales can decline sent quotes through Go after explicit confirmation, with exact retry recovery and stale actor/workspace result suppression.
+- Vite Manufacturing can undo and redo BOM changes through Go using exact snapshot checks, with the recovery action tracking repeated undo and redo operations.
+- Vite CRM starts a customer follow-up with a clean task draft, retaining only its customer and generated title.
+- Vite Inventory reads open reservations through Go and labels the most-recent-100 cap, while hiding prior actor or workspace data immediately.
+- Vite Support lists the 20 newest filed internal tickets through Go's `support.listTickets` capability with permission and actor/workspace scoped result handling.
+- Vite Analytics answers revenue, collections, and pipeline questions through Go's authenticated `analytics.askYourBusiness` capability, showing cited organization data and suggestions without executing them.
+- Vite People can edit an employee's department and job title through Go's `hr.updateEmployeeStructure` capability, with exact actor/org-scoped retries for pending or uncertain results.
+- Vite People can clock active employees in and out through Go's governed HR capabilities, with organization-scoped attendance reads and exact retry recovery.
+- Vite Manufacturing loads nested BOM quantities and scrap rates from Go, with safe-integer overflow checks on scaled component quantities.
+- Vite Documents shows stored coding suggestions on each ingested document, loaded and strictly validated from Go.
+- Vite Accounting compares a selected budget scenario with posted actuals and open purchase commitments by month through Go.
+- Vite Inventory can page through stock movement history beyond the latest 100 entries using the authenticated Go reader.
+- Vite CRM can record a deal's source and owner through Go, and the pipeline shows those attribution details after reload.
+- Vite Hiring can hire offer-stage applicants as employees through Go `hr.hireApplicant`.
+- Creator Mode proposals now scaffold Go capability artifacts: a `generated_<module>_<action>.go` file with the capability id constant, spec entry, typed input parser reusing the package validation helpers, and a refusal stub; a Go test skeleton; and the risk document restated in Go terms. Rendered Go is gofmt-formatted and validated with `go/parser` by the renderer tests (ADR 0085).
+
+- The workspace rail is flat: every top-level surface is one click, with no expandable sub-surfaces or chevrons.
+- Workspaces use a content-shaped loading skeleton instead of a blank card or one line of text, covering CRM, Purchasing, People, Projects, Documents, Inventory, and Manufacturing.
+- Invoices has a real receivables workspace: search, status filter, billed and outstanding summary, status tones, row actions, a clear empty state, and a direct `?create=invoice` handoff into Accounting.
+- Accounting overview has a finance action rail for receivables, supplier bills, period close, and asking the workmate, with live counts.
+- Support opens with a care-desk setup path and three-step explanation when there are no conversations, and the internal team ticket form is secondary.
+- Projects shows one honest empty state instead of a duplicate empty list and board, with a direct focus action on the project name.
+- CRM has a New customer action and a single pipeline empty state with a Create a deal action.
+- People's empty team card offers Add your first employee instead of only instructional text.
+
+- Workmate can mark a notification read from chat through `notifications.markRead`, and capability discovery now includes that self-scoped receipt tool.
+- Settings has per-person in-app notification preferences for approval requests, support tickets, routine runs, and system notices. Muted kinds stay in the audit feed table but leave the person's bell and unread count.
+- Session replay can revert a whole turn: the server plans every reversible write in the turn, executes inverses in reverse order, stops on approval, and reports each action.
+- Workmate accepts up to five attached record or document sources. The composer searches permission-filtered records, shows source chips, uploads a PDF or image into Documents, and sends the exact ids with the turn. Sources are persisted on the user event.
+- Saved views are reusable across Invoices, Inventory, and Agent sessions, scoped to the active organization in browser storage; CRM keeps its server-backed shared views.
+
+### Changed
+
+- The Customer support app no longer spends a separate row on its own business-app header. The shell now exposes a support action slot in the global top bar, and the app portals its live waiting status and New conversation action into it. The Inbox, Overview, Knowledge, Channels, and Settings tabs start directly below the top bar, saving the app header row while keeping the action state inside the app. The global Create launcher is replaced on support routes; the waiting count hides at 1280px and the action becomes icon-only at 1120px.
+- The support seed now preserves an existing workspace's embed token, auto-reply setting, and greeting. It creates the demo widget settings only when the workspace has none, so seeding demo conversations cannot silently change a real channel configuration.
+- `/support` now opens the Customer support app instead of the old single Support page. The app owns its internal horizontal tabs, the global rail stays flat, and the floating Workmate dock is hidden so the full-height composer is not covered. The old Support page and its isolated tests are removed.
+- The support queue renders ticket metadata from the read contract instead of deriving it per thread. The context panel uses `support.lookupOrderStatus` to show the customer's own outstanding balance and recent invoices, labels counts as the loaded queue, and does not invent fields the support schema does not have.
+- The in-conversation approval card chooses its presentation from the approval's capability instead of whether the payload happens to contain lines. Only `purchasing.createPurchaseOrder` renders as a purchase proposal; every other governed action uses the generic card.
+- The approvals page and the conversation card now share one payload presentation module, so both redact the same sensitive keys and label fields the same way.
+
+- Capability discovery ranks natural-language queries better: filler words are ignored, a match in the id or title outweighs a match in prose, the id's object segment outweighs both, common asking verbs map to capability verbs, and ties prefer the shorter id. This makes `find a customer` reach `crm.listCustomers` before `crm.listDeals`.
+- MCP connections still support direct pinned tools, and `tools/call` still accepts their names, so a cached client keeps working. The connection allowlist now controls direct advertisement only; the executor remains the authority boundary.
+- `resolve_entity` describes the merge behavior in its contract so the model knows a surviving record may be returned for an old name.
+- - The Workmate client now treats the `done` reply as authoritative and replaces streamed text with it. A deterministic correction or an appended approval notice is what the person sees, and it matches the stored transcript.
+- Three long approval and notification rules left the Workmate system prompt. The facts block and post-turn enforcement now guarantee that behavior, so the prompt carries phrasing guidance instead of rules the runtime can enforce.
+- `accounting.acceptQuote` remains available for deliberate invoice-first service work, but the Sales workspace now presents "Create sales order" as the primary action and labels invoice-first as "Invoice immediately" so shipped goods do not silently skip credit, stock reservation, and fulfilment.
+- Sales order reads include their source quote, delivery invoices link to their order, and the Sales workspace shows the quote an order came from.
+- The capability manifest and agent catalog now carry the SKU-aware quote contract, the document-aware bill contract, and the new quote-to-order capability.
+
+- `crm.listCustomerViews` is selected directly for saved-view questions, and notifications are a first-class read instead of an incidental dashboard feed.
+- Tool trajectory writes are ordered under a mutex so a tool call never lands after its result and history reconstruction stays valid.
+- DeepSeek joins the supported provider list in the API and Settings UI, with a 128k context window in the example environment.
+
+- Workmate selects at most twelve capabilities per turn from a reviewed catalog, with brief requests reduced to the core reads plus `daily_brief`. This keeps provider requests small and replaces the previous eighteen-tool hand-written list.
+- Provider failures now explain rate limits, oversized requests, missing models, credential refusals, and outages in product language. The implicit fallback to an unverified model is disabled; a fallback runs only when `MODEL_PRIMARY_NIM` is configured.
+- Workmate's ticket fallback now runs only after capability search returns no useful fit, instead of being the first response to a hard request.
+
+- The rail is grouped by workflow and uses Lucide icons: Overview, Money, Operations, Relationships, People, and Company. Accounting, Sales, Purchasing, and Inventory expose their real sub-surfaces, the active branch is expanded, and the rail can collapse to an icon-only form.
+- Approvals is once again a direct rail destination, alongside the broader Inbox. The live approval badge is suppressed on routes that already load approvals so the page owns the read.
+- Page headings now use one product type treatment. Editorial serif remains on the login story, portal, and print surfaces where it carries the brand.
+- The dashboard now uses the inked brand masthead with a gold watermark, a direct "Open inbox" action, a personalized greeting, larger labels, and the new currency formatting.
+- Tables across the product share a hover and keyboard-focus treatment, and disclosure summaries and in-page anchors use the same brand interaction language.
+- Workmate replaces the raw greeting with a designed welcome, visible governance guarantees, and a right-hand context rail. Creator mode uses the brand gold instead of purple.
+- Internal implementation language was removed from customer-facing screens, including "Go workspace", "Go governed", "Go payment runs", and capability-name notifications.
+- CRM now formats money with the active workspace currency instead of a hardcoded UGX formatter.
+- CRM tabs are deep-linkable through `?tab=`, so Inbox and external links open the right view.
+- Agent runs can be opened directly with `?session=`, and Workmate links recent runs to their replay.
+- The page title is now the product name and page name rather than "Chaste BusinessOS | React migration".
+
+- Purchase order creation and quote award are now money-risk capabilities with a zero threshold. Agent and system commitments fail closed without a verified human approval, and a system purchase-order job without one writes no order. A deactivated supplier cannot receive a new commitment, and the public capability route rejects money, destructive, or identity capabilities without an intent. Human purchasing under the default autonomy policy is unchanged.
+
+- Project startup no longer shows a false "wait for your account and organization" error while the workspace scope is still resolving.
+- CRM startup no longer shows a permission-looking error banner while the active organization is still loading.
+
+### Fixed
+
+- `support.lookupOrderStatus` returned the conversation transcript because it parsed into the conversation-read input type. It now parses into its own input and returns the customer's invoice context. A regression test pins the distinction, and the support app uses the result for its billing context panel.
+- The support composer's quick-reply popover cancelled its own library request when the loading state changed, so the picker stayed empty. The in-flight read is no longer torn down, and a retry is available if it fails.
+- The support thread no longer scrolls the escalation reason out of view. The handoff reason sits above the transcript and stays visible while messages scroll, and the context panel shows the full subject.
+- A customer creation or other non-purchase approval in the conversation was labeled "Purchase proposal" and told the person the card could not review it. It now renders as a reviewable "Approval required" card.
+- `resolve_entity` returned vendors and employees on a literal substring only, so reordered names and formatted emails missed the record. They now use the ranked resolver.
+
+- `resolve_entity` could return a merged customer as the id to act on, because it matched the tombstone row and ignored `merged_into_customer_id`. It now follows the merge root and returns the survivor.
+- A coding-agent MCP connection configured with an empty direct-tool allowlist advertised zero tools. It now advertises the discover, describe, dispatch surface.
+- - Follow-ups no longer lose the ids and rows returned by earlier tool calls; the recent conversation window now includes structured tool messages.
+- DeepSeek requests no longer fall back to an unverified NIM model, and the default provider no longer rate-limits a normal multi-step brief.
+
+- Workmate no longer appends "No registered capability can do this" to every user request, and no longer files a ticket merely because no single brief tool exists.
+- Internal model reasoning is no longer rendered as the final answer when a provider returns reasoning without content. The loop nudges once, then fails honestly.
+- Daily-brief changes no longer count read-only capability events as business changes.
+- Approval and ledger reads now have a first-class Workmate surface instead of being invisible to the agent.
+
+- The desktop shell no longer shows the mobile menu control, and the mobile drawer no longer exposes navigation items under its footer.
+- The notifications popover returns focus to its trigger on Escape.
+- The rail and top bar no longer overflow or hide active content behind the footer on narrow screens.
+- Chat and shell keyboard shortcuts ignore non-element event targets and pause while a field is focused.
+
+### Added
+
+- Business objectives, deduplicated exceptions, and Decision Records are now persistent operating records with stable keys, revisions, authority references, and JSON evidence. Workmate renders read-only exception, progress, waiting, and verified-result cards from tool results without treating them as approvals.
+- Workmate tool results can now carry a structured record card for exceptions, progress, waiting states, and results. The card shows the Go accounts receivable parsers now reject non-UUID customer IDs and malformed non-empty `fxRate` and `settleFxRate` values before any database access, so malformed capability requests get a governed refusal instead of a PostgreSQL cast error surfaced as a 500, and an invalid rate is no longer silently replaced by the latest stored rate. The contract now documents that an empty `currency`, `fxRate`, or `settleFxRate` selects the base currency or latest stored rate, matching the legacy clients.
+- The Go auth integration suites now run the email outbox on a session-local shadow table with a single-connection pool, so they pass while the development API's outbox worker is running instead of racing it for the same rows.
+- The Go worker supervisor keeps routine scheduling and agent execution opt-in until their migration parity gates pass, while preserving explicit `GO_ROUTINE_SCHEDULER=1` and `GO_ROUTINE_AGENT_RUNNER=1` configuration.
+- The Go webhook outbox worker now marks a 429 response on the final allowed attempt as failed, retaining the provider receipt and completion time instead of leaving an unclaimable pending message.
+- Go Messaging agent replies now have a generated OpenAPI contract and strict Vite validation; Go reports exact-path method errors and sanitizes server failures while retaining diagnostic details in logs.
+- Vite Purchasing shows receipt progress per order line and prevents entries above the remaining quantity.
+- Vite Projects can delete and undo tasks through Go using a guarded task snapshot.
+- Vite Sales shows order-line fulfillment details from Go and validates CRM deal lists against the Go response contract.
+- Vite Documents can delete ingested records through Go with confirmation and scope-pinned exact-retry recovery.
+- Vite Accounting can match bank lines to exact remaining payments or whole journal entries through Go.
+- Vite Support can insert organization-scoped saved replies into inbox drafts without sending them.
+- Vite Approvals reads and submits decisions through the Go session routes with explicit organization scope and strict response validation.
+- Go message attachment downloads encode filenames with RFC 5987, escaping header delimiters and control bytes in untrusted names.
+
+- Go AI settings now count input limits in JavaScript-compatible UTF-16 units and accept the full encrypted representation of a maximum-length provider key.
+- Go routine and public support workers validate stored AI configuration with a bounded parser and fail closed on malformed settings.
+- Vite Approvals removes completed decisions from its actionable inbox immediately, including when the follow-up read is unavailable, and distinguishes follow-on approvals from executed actions.
+- Vite Dashboard keeps a failed Go work queue visibly unavailable instead of displaying a false empty state.
+- Go Messaging presence reads now require `messaging.read` and an enabled Messaging module. Go Documents editor workspace reads require `documents.read`, all workspace operations require `documents.write`, and assistant actions enforce the appropriate Documents permission and module state before accessing workspace data or AI services.
+- Vite CRM now gives actionable sign-in and permission messages for Go 401 and 403 responses instead of displaying raw authorization codes.
+- Vite CRM binds every read and write to the active organization, rejects missing or malformed organization IDs before sending, and hides old-organization CRM data while the next scope loads.
+- Go workspace onboarding now rejects unknown fields and unsupported or repeated deferred steps before invoking workspace bootstrap; Vite validates the same step contract before sending.
+- Go Documents ingested, editor detail, and version reads now run by default to match Vite's unconditional Go client path; operators can explicitly disable each read group with its API flag set to `0`.
+- Go CRM customer and deal reads now reject undeclared response fields, matching the exact DTOs served by the capability API.
+- Go CRM customer collections no longer expose owner or editor names and emails for users who are not members of the customer’s organization.
+- Vite Purchasing keeps receipt drafts bound to the selected order while Go history loads or retries, preserving edited quantities and reasons.
+- Go standalone vendor payment reversals now persist reversal evidence on the payment; refreshed Purchasing bills no longer offer a second reversal for the same payment.
+- Vite Expenses serializes actor and organization scoped retry marker reservations across tabs and only clears the exact completed intent, preserving newer unresolved actions.
+- Vite Payroll blocks draft creation when a run already exists for the selected period, preventing a duplicate-period request from leaving an unresolved retry marker.
+- Go payroll domain rejections now return definite 422 capability results, so clients can clear retry markers for duplicate periods and invalid lifecycle transitions while internal failures remain retryable.
+- Vite POS session history no longer adds the opening float twice after a register closes; the Go closed-session total is shown as-is.
+- Vite POS lets staff name a register when opening a shift and sends the normalized name to Go, which validates the same 1-80 character contract.
+- Vite Accounting clears an in-flight revaluation confirmation when the active actor or organization changes, preventing a stale dialog from posting under the new scope.
+- Go CRM rejects stale profile undo or reapply snapshots atomically when another client has changed any included customer.
+- Vite Support clears a ticket retry marker after definitive authorization and request rejections, while preserving exact retries for uncertain outcomes and Go's 422 intent-conflict response.
+- Vite Sales rejects unexpected fields in Go create, deliver, and cancel responses, preserving retry markers when a response violates the exact contract.
+- Vite Accounting rejects unexpected or missing fields in Go module switchboard responses, and retains invoice-create retry state until an exact successful response is received.
+- Vite Inventory rejects cycle-count responses outside Go's exact output bounds, while preserving the same retry intent after a malformed response.
+- Vite Purchasing rejects vendor and AP aging payloads that do not match Go's exact workspace contract.
+- Vite Sales narrows recovered write results by action before reading delivery status, keeping its confirmed-order message correctly typed.
+- Vite Support and Dashboard reject Go responses that contain malformed IDs, unsupported values, or undeclared fields, and preserve retry intents after malformed write receipts.
+- Vite Analytics rejects unsafe integer values in Go preview and report data and strictly validates module, dataset, preview, and report contracts.
+- Vite Auth, Organizations, Team, and Settings reject malformed Go session and workspace envelopes, including injected session tokens and invalid policy approval values.
+- Database migrations apply on a fresh database again: every `chaste_app` grant and revoke is guarded by a role-existence check, so `pnpm --filter @chaste/db db:migrate` no longer fails with `role "chaste_app" does not exist` before runtime provisioning has created the role. `ensureAppRole` now also grants the resolver functions and jobs-worker schema access that later migrations expect, closing the drift between the two paths.
+- Go AI provider URLs prefer `GO_PUBLIC_APP_URL` and fall back through `CHASTE_PUBLIC_URL`, `NEXT_PUBLIC_APP_URL`, and `PUBLIC_URL`, so images and links keep working now that the Next.js app no longer sets its public URL.
+- The root workspace manifest again declares `@chaste/db`, `@chaste/erp-core`, `drizzle-orm`, and `openai`, so `pnpm demo:*`, `pnpm test:groq`, and the migration scripts resolve their imports; the Next.js retirement had dropped these, breaking every demo at module load.
+
+### Changed
+
+- Documentation now describes the Vite + Go runtime only: the README, setup guide, architecture, roadmap, contributing guide, and migration-plan status were rewritten for the retired Next.js app, and dead `GO_*` and `CHASTE_GO_*` switches were removed from `.env.example`.
+- The Go internal capability bridge now answers executor domain refusals with the legacy 403/404/422 statuses and messages instead of collapsing them to a generic 500, and the Next bridge accepts the new 404 refusal envelope.
+- The migration route census now records onboarding state reads and updates as Go-owned after authenticated Vite runtime proof.
+- CI now requires the focused Vite and Go verification command while retaining the migration-era workspace checks and live TypeScript proofs; the Next.js production build is no longer required.
+- Vite Messaging refreshes the latest thread page and advances its read cursor only while the reader is near the bottom. Search-around results and older pages remain in place while reading history.
+- The default `pnpm dev` command starts only the React/Vite app; the temporary `dev:legacy` Next compatibility command no longer exists.
+- The Vite development API proxy now sends unclaimed `/api` paths to Go, where unsupported routes fail with 404 instead of reaching the legacy server.
+- Vite keeps unknown page URLs in its own not-found page instead of redirecting them to the legacy app.
+- Vite Documents capability writes now pin the requested organization in the Go request, and malformed messaging presence or attachment paths stay owned by Go instead of reaching the legacy API proxy.
+- Vite invoice and settings email requests always route through the authenticated Go email handler; the legacy route toggle has been removed.
+- Vite AI configuration reads and writes always route through Go, and unsupported methods or nested paths in that namespace fail closed without reaching the legacy API.
+- Vite sends the complete authentication namespace to Go regardless of stale rollback selectors; the Go API always mounts auth and requires an explicit runtime auth configuration.
+- Vite Creator proposals now use Go for proposal and capability-gap reads,
+  compare-and-set reviews, and governed release actions. Creator setup no longer
+  reports the server's local coding-agent detection as browser state, and Go
+  surfaces expected evidence and release-state refusals as typed client errors.
+- Vite Creator release actions reuse an exact actor- and organization-scoped
+  intent after pending or uncertain responses, preventing duplicate approvals.
+- Go now owns `/api/docs/assist` for writing suggestions, continuations, template
+  prefill, and document questions. It resolves the user session directly and
+  loads document, template, and profile facts within the active organization.
+- Vite CRM saved-view writes now always use the Go capability executor with
+  exact retry recovery. A missing Go route fails closed instead of sending the
+  write to the legacy CRM API. Browser tabs serialize retry-marker updates, and
+  delayed responses can clear only the intent and fingerprint they reserved.
+- Vite governed capability execution now proxies directly to Go regardless of
+  legacy slice selector flags, so a missing migration flag cannot send a
+  governed request back to the temporary app.
+- POS quick-add and opening-stock writes now fail closed when Go inventory
+  item writes are disabled.
+- Vite POS register sessions, sales, and returns now use the Go capability
+  executor directly, with retry recovery pinned to Go and no per-action legacy
+  selectors.
+- Delayed POS sale, queued-sale, and return responses cannot change another
+  organization's in-progress register state after an organization switch.
+- Go routine webhooks now accept only enabled webhook routines, and the app
+  database role has schema usage limited to invoking the enqueue function.
+- Go routine listings preserve the legacy webhook URL projection for routines
+  with stored tokens, including disabled routines; webhook execution still
+  refuses disabled routines.
+- Vite Marketplace browsing and signature verification now use Go when Creator
+  Mode is disabled; publishing and installing remain unavailable until an admin
+  enables it.
+- Go organization switching and persona writes now require a same-origin
+  Origin header, with trusted proxy CIDRs honored before the cookie or persona
+  mutation proceeds.
+- Go module listings now honor the session resolver's membership fallback when
+  the active-organization cookie is stale, while explicit mismatched
+  `X-Organization-ID` requests remain forbidden.
+- Marketplace signature, ownership, listing-state, and stale-listing refusals
+  now return actionable client errors. Vite preserves the same exact actor,
+  organization, and action intent through uncertain retries and clears it only
+  after a definitive refusal or verified completion.
+- Vite Marketing reads, campaign drafting, sending, and analytics now use Go
+  capabilities. Segment spend converts persisted invoice currencies to the
+  workspace base currency, and incomplete reads cannot mark a campaign sent.
+- Vite dashboard, approvals, close-readiness, and purchasing-aging handoffs now
+  remain inside React routes. Dashboard workmate prompts arrive in the Messages
+  composer, and document links load the requested Go document directly with
+  recovery states for invalid or missing records.
+- Vite auth now uses a schema-validated Go HTTP client with same-origin cookie
+  sessions and rejects unexpected browser tokens or mutation responses.
+- Vite HR expense claims use Go capabilities only and preserve each claim's
+  stored currency. Claim and policy inputs follow currency-specific minor units
+  and reject values with excess fractional precision.
+- Vite Projects now surfaces Go team-directory failures and disables assignment
+  controls until its member list has loaded successfully.
+- Vite accounting invoices, reports, reminders, customer statements, close
+  readiness, and cash-basis summaries now use Go capabilities without legacy
+  API fallback.
+- Vite Accounting bank account and transaction changes now use scoped Go
+  capabilities with durable, exact-intent recovery across tabs.
+- Vite manual journal reversals now always use the organization-scoped Go
+  capability and preserve the same intent for exact recovery, independent of
+  migration selector flags. Delayed responses clear only their own retry marker.
+- Vite Sales orders and customer lookup now use organization-scoped Go APIs;
+  customer options require Sales read permission and stay isolated across actor
+  or workspace changes.
+- Vite message deletion recovery retries uncertain outcomes with the original
+  Go intent and remains actionable after transient failures.
+- The Manufacturing workspace now opens in Vite and reads its overview through
+  the Go capability API.
+- Vite Accounting period reopening and foreign exchange rate writes now use
+  scoped Go capabilities with durable exact-intent recovery.
+- Vite Accounting credit notes now always use the scoped Go capability, with
+  exact retry recovery even when the former migration selector is unset.
+- Vite purchasing vendor and bill creation, bill payment, and bill credits now
+  use Go capabilities. Credits on foreign-currency bills fail closed until an
+  exchange rate is available.
+- Vite purchasing aging, sourcing, receiving, receipt history, payment runs,
+  returns, and close actions now use Go-backed routes with explicit organization
+  scope.
+- Vite inventory catalog, stock, cycle counts, transfers, locations,
+  reservations, and history now use Go-backed APIs. Product imports preserve
+  currency-specific price precision and reject unsupported fractional units.
+- Vite Documents library and preview reads now always use Go's authenticated
+  `documents.listIngestedDocuments` capability, without a legacy API fallback.
+- Vite authored-document publishing, restore, metadata updates, writing assist,
+  and editor workspace collaboration now use Go capabilities or authenticated
+  Go session routes, without legacy API fallback.
+  Publish, restore, and metadata retries retain their scoped Go intent through
+  uncertain responses, and malformed workspace paths remain in Go's route
+  namespace.
+- Vite CRM task creation, completion, and detail updates now use Go capabilities
+  with organization-bound, retry-safe requests across tabs and workspace
+  changes.
+- Go Messaging agent sessions now advertise only the CRM capabilities with
+  authored tool descriptions and input schemas. Broader Go capabilities remain
+  unavailable to model tool calls until their contracts are authored.
+- Vite HR Leave and Time reads and writes use the Go capability API directly;
+  obsolete HR-specific route selectors have been removed.
+- Vite People reports, hiring actions, and expense data now use organization-scoped
+  Go requests, with stale report and recovery state discarded when the workspace changes.
+- Vite CRM customer creation now uses the Go `crm.createCustomer` capability
+  by default. Vite reports Go errors directly and keeps the exact retry intent
+  for uncertain writes.
+- Vite Support reply drafts now use a session-authenticated Go route. Go loads
+  the active organization's thread and provider configuration before generating
+  a draft, with a per-user limit across conversations that also applies to
+  missing-thread probes. The route accepts JSON request bodies only; sending the
+  draft remains a separate human action.
+- Vite Support inbox and thread reads, library reads, and conversation, ticket,
+  canned-response, and knowledge-article writes now use Go capabilities directly.
+  Unscoped write entry points fail closed, while approval-pending and uncertain
+  writes retain their organization-scoped intent for exact retries.
+- Vite Messaging agent replies now bind their effect intent to the source
+  message and serialize concurrent generation for that trigger. Replayed
+  requests return the persisted reply text, and the Vite client allows enough
+  time for the bounded Go model loop to finish. The trigger lock currently
+  assumes a single Go API instance; multi-replica deployments need shared
+  coordination.
+- Go CRM follow-up drafts now require a same-origin request for cookie sessions
+  and accept JSON request bodies only. Bearer-authenticated native clients keep
+  their cross-origin access.
+- Vite Accounting payment reversals now execute through the Go capability
+  executor and retain an actor/org-scoped retry intent for approval and
+  uncertain outcomes.
+- Vite Accounting books, reports, cash-basis, and banking reads now require
+  the active organization. Invoice creation and payment recording go directly
+  to Go with the same organization scope and exact retry identity.
+- Vite Purchasing request creation now uses the Go capability executor and
+  restores its scoped draft when approval or an uncertain result needs retry.
+- Vite Settings model edits now capture the input value before scheduling the
+  React state update, avoiding a detached-event error while typing.
+- Vite Inventory location and reservation controls unlock after a successful
+  write while the report refreshes, so separate actions do not wait on each
+  other's reads.
+- Vite document file downloads now use a direct Go route. Go verifies the
+  signed session, active organization, `documents.read` permission, and module
+  access before returning bounded file bytes with safe download headers.
+- Vite Settings runtime composition history now uses the authenticated
+  `harness.listCompositions` capability. Go verifies organization scope and
+  persisted digests, limits access to authorized human operators, and returns
+  composition metadata without patch values.
+- Vite Manufacturing reads and writes now use authenticated Go capabilities,
+  including BOMs, work orders, production, and lot trace. The Vite adapters no
+  longer select the legacy manufacturing endpoint. Uncertain writes persist
+  their validated action and exact intent for replay after reload, and
+  expected business refusals return a recoverable client error.
+- Vite Proposals now reads proposal details and capability gaps from Go, and
+  performs reviews and release transitions through authenticated Go
+  capabilities. Human review uses organization scoped permissions and
+  compare-and-set state changes; release domain refusals retain their typed
+  client errors.
+- Vite Purchasing receipt history and the Receiving desk now load orders and
+  receipt details through Go capabilities. Purchasing navigation stays on
+  Vite routes, with no legacy Purchasing requests or links.
+- Vite now loads its `CHASTE_` and `GO_` settings from the repository-root
+  `.env`, matching the documented workspace setup so Go capability selectors
+  are honored when the app runs from its package directory.
+- Vite CRM now reads deals, customers, follow-up tasks, saved views, and
+  customer timelines through authenticated Go capabilities. Go resolves the
+  session and organization scope, and invalid or unavailable responses fail
+  closed without a legacy read fallback.
+- Vite CRM follow-up drafts now use an authenticated Go route. Go reads customer
+  activity through `crm.customerTimeline`, applies CRM permission, organization,
+  DNC, source, and rate-limit checks, then generates drafts with the configured
+  workspace provider or the user's connected coding plan. The Vite client has
+  no legacy CRM draft fallback.
+- Vite Sales now creates and lists quotes, accepts sent quotes into invoices,
+  and shows Go-backed customers and deals. Quote writes use authenticated Go
+  capabilities with actor/workspace-scoped exact retry intents, including
+  non-UUID Better Auth user IDs. Go validates quote inputs against PostgreSQL
+  integer limits and returns a client error when the selected customer is
+  outside the active workspace. The Sales page no longer links to the legacy
+  workspace.
+- Vite HR reports, employee actions, time data, and expenses now use Go
+  capabilities without legacy HR or time API fallbacks.
+- Vite Settings now links team, agent sessions, and creator proposals to their
+  same-origin Vite routes instead of the legacy application.
+- Vite Documents now creates editable drafts, saves templates, and ingests
+  pasted text or PDF/image records through authenticated Go capabilities. The
+  browser checks upload size, MIME type, text length, scope, and exact retry
+  intent; Go allows uploads up to 5 MB and keeps other capability requests at
+  the 64 KiB body limit. The page no longer links to the legacy documents app.
+- Vite Support knowledge-base article creation now uses Go's authenticated
+  `support.createKbArticle` capability with an actor- and organization-scoped
+  retry intent. The generic legacy action helper rejects article creation.
+- Vite Accounting year-end close now uses Go's authenticated
+  `accounting.closeYear` capability with an actor- and organization-scoped
+  exact retry intent. Invoice workspace links stay on the Vite route.
+- Vite Inventory no longer links users to the legacy inventory workspace.
+  Stock, item actions, counts, locations, reservations, transfers, and movement
+  history remain available on the Vite route.
+- Vite Inventory item, cycle-count, location, reservation, and transfer writes
+  now use Go capabilities. Disabled Go selectors and failed Go requests stop
+  the write instead of routing it through the legacy inventory endpoint.
+- Vite Purchasing receiving now loads module status, orders, and receipt history
+  from Go, and records receipts through Go's governed capability route. The
+  page requires authenticated actor and organization scope and fails closed if
+  Go is unavailable.
+- Vite purchase order creation now always uses Go's session-authenticated
+  `purchasing.createPurchaseOrder` capability. Go errors fail closed without a
+  legacy fallback, concurrent exact-draft retries share one actor and
+  organization scoped intent, and responses require a valid purchase order
+  number.
+- Vite Products & Services create, edit, archive, and stock-adjustment writes
+  now use Go's session-authenticated capabilities with actor and organization
+  scoped retry intents and strict output validation.
+- Vite Manufacturing BOM definition and deletion now use Go capabilities with
+  exact before-and-after component snapshots. Guarded inverses refuse stale
+  changes, and selected Go failures do not retry through the legacy route.
+- Vite team invitation links now preview and accept invitations through Go.
+  Acceptance requires a verified signed-in account with the invited email,
+  and updates membership, role, and invitation status atomically.
+- Vite Support ticket edits now send explicit nulls when clearing a category,
+  assignee, or SLA deadline, and Go persists those clears within the active
+  organization. Go also rejects unknown fields on Support conversation create
+  and message writes.
+- Go sign-in and password recovery now accept existing Better Auth credential
+  rows with a null issuer and canonicalize the issuer when a password is reset.
+- Go authored-document creation now persists default A4 portrait page settings
+  when callers omit the optional page settings object.
+- Vite document editor presence, autosave drafts, and editing locks now use
+  the authenticated Go workspace endpoint, with same-origin checks and
+  organization-scoped RLS writes.
+- Vite Documents now handles Go list results with omitted empty arrays as an
+  empty library while continuing to validate every returned document row.
+- Vite Messaging presence GET now reads through Go; typing heartbeat POST uses
+  the Go session route and delegates to the governed capability executor,
+  retaining its intent receipts, inverses, permissions, and module gate.
+- Vite Messaging global search now uses Go's session-authenticated
+  `messaging.searchMessages` capability with organization and conversation
+  membership scoping, literal wildcard handling, and fail-closed errors.
+- Vite Settings SMTP status and test sends, plus Accounting invoice email,
+  now use the authenticated Go `/api/email` route. Go owns SMTP delivery and
+  derives the actor and organization from the verified session or bearer token.
+  Invoice lookup is organization scoped, invoice links use the governed share
+  capability, and a failed SMTP send revokes its new link when possible.
+- Vite Support quick-create now uses Go's `crm.createCustomer` capability with
+  actor- and organization-scoped retry protection, and fails closed when the
+  Go customer-create route is disabled.
+- Vite CRM customer-directory reads now use Go's session-authenticated
+  `GET /api/customers` route, with the existing restricted customer projection
+  retained for POS-only users.
+- Vite cycle-count barcode lookup now uses Go's governed
+  `inventory.lookupByBarcode` capability and fails closed when the Go route is
+  disabled or unavailable.
+
+- Marketing segment lifetime spend thresholds now use PostgreSQL `bigint`, so
+  valid minor-unit amounts above the old 32-bit limit persist without a 500.
+
+- Vite HR Expenses now loads its employee and workspace report through Go's
+  authenticated `hr.report` capability whenever Go expense reads and writes are
+  enabled. The expense page no longer needs the legacy `/api/hr` route before
+  it can use Go `accounting.*` capabilities.
+- Vite CRM lead conversion now uses the authenticated Go `crm.convertLead`
+  capability. Go records a receipt-bound inverse that restores the lead and
+  removes a newly created customer only when that customer is unchanged and
+  unreferenced. Approved undo and receipt-bound reapply run through the Go job
+  worker. Uncertain browser retries restore the exact input and intent.
+- Vite Settings > AI & automation now reads and writes workspace model-provider
+  configuration through the authenticated Go API. Go returns a strict public
+  projection without stored credentials and encrypts submitted keys before
+  governed persistence.
+- Vite onboarding customer and product CSV imports and undo now use the Go
+  `crm.importCustomers`, `crm.undoCustomerImport`, `inventory.importItems`,
+  and `inventory.undoItemImport` capabilities. Currency-aware minor units,
+  row-level validation, duplicate counts, created IDs, and the customer Go
+  import receipt are preserved. Major-unit credit limits use the workspace
+  currency scale; explicitly labeled minor-unit values pass through unchanged,
+  and conflicting columns are set aside with a row error. Invalid rows stay out of the Go batch, and
+  files above the Go capability body limit can be imported in split batches.
+  Undo receipts persist per batch across reloads, older batches can be undone
+  independently, and service SKUs remain stable when the same CSV is retried.
+- Vite onboarding now resumes unfinished setup for existing workspaces. Import
+  receipts stay available at the saved setup step; completed or absent setup
+  state still sends the user to the dashboard.
+
+- Vite routes signed-in users without a workspace and the dashboard's
+  "Finish workspace setup" action to the Vite `/onboarding` page.
+
+- Vite Marketplace Verify now calls the authenticated Go `creator.verifyPlugin`
+  capability with the manifest and publisher signature material. Valid and
+  invalid signature results use Go's strict capability envelope; invalid
+  signatures are returned as a normal verdict and do not use the legacy HTTP
+  422 response. Publish, install, and uninstall use their authenticated Go
+  capabilities.
+
+- Vite Marketplace publish now uses the authenticated Go `creator.publishListing`
+  capability, with strict success and pending approval validation. Successful
+  publishes refresh the Go listing read, and errors do not retry through the
+  legacy route. Install and uninstall also use Go.
+
+- Vite Marketplace install now uses the authenticated Go
+  `creator.installListing` capability. Go re-verifies the signed listing and
+  derives the installer organization from transaction-scoped RLS context. The
+  installer state update is narrowly delegated to a database function; install
+  remains idempotent and does not fall back to the legacy route. Uninstall is
+  now routes through Go as well.
+
+- Vite Marketplace uninstall now calls the authenticated Go
+  `creator.uninstallListing` capability using only the listing ID. Go removes
+  only the active organization from install state and confirms the persisted
+  result; repeat and not-installed requests remain idempotent. The database
+  update runs through a narrowly granted helper so publisher-owned columns
+  stay protected by RLS.
+- Vite Marketplace action submission now accepts only publish, install, and
+  uninstall contracts and always calls Go's capability API. Invalid action
+  payloads fail before a request, with no `/api/marketplace` fallback.
+
+- Vite Purchasing now loads vendors, recent purchase orders and bills, accounts
+  payable aging, requests and RFQs, price history, and supplier performance
+  from the authenticated Go `purchasing.listWorkspace` capability. Go enforces
+  `purchasing.read` and active-organization scope; the page no longer requests
+  legacy `GET /api/purchasing`.
+
+- Vite HR People directory now uses the existing Go `hr.report` capability,
+  matching Overview's session, permission, active-organization, and response
+  path. The report keeps the newest-hired-first employee list and 200-row
+  limit; People no longer requests legacy `GET /api/hr`.
+
+- Vite HR Time now loads its employee picker through Go's authenticated
+  `hr.report` capability. Time totals and pending approvals continue to use
+  `hr.timeReport` and `hr.pendingTimeEntries`; the Time tab no longer requests
+  legacy `GET /api/hr`.
+
+- The Vite Support customer picker now reads from Go's session-authenticated
+  customer projection. Go enforces organization membership and `crm.read` or
+  `pos.sell`, preserving deactivated customers for CRM readers and active-only
+  results for POS users. The shared `/api/customers` route and write methods
+  remain unchanged.
+
+- Vite Accounting now loads bank accounts, unmatched/matched/excluded statement
+  lines, payment candidates, and account totals from Go's authenticated
+  `accounting.listBankingWorkspace` capability. Banking detail no longer reads
+  `GET /api/banking`; existing reconciliation writes continue to use their
+  current route.
+
+- Vite Accounting and Purchasing now load tax codes through Go's
+  `accounting.listTaxCodes` capability. Go returns the tenant's full catalog in
+  legacy active-first, newest-first order; each client retains its existing
+  active output or input filtering. The Next route remains available to the
+  legacy app. Authenticated browser and live legacy differential proof remain
+  pending.
+
+- Vite Settings now sends exact `GET` and `POST /api/policy` requests to Go by
+  default. Go resolves the signed session and active organization, reads policy
+  through tenant-scoped RLS, and derives `canEdit` from resolved `iam.admin`
+  permission. Writes validate the legacy request contract and execute through
+  `iam.setOrgPolicy`, retaining server-side permission, approval, and audit
+  behavior. Explicit `moneyThresholdMinor: null` is rejected like the legacy
+  schema. Authenticated browser proof and live legacy differential remain
+  pending.
+
+- Vite Inventory module defaults now use Go for exact `GET` and `POST
+/api/module-settings` requests. Go resolves the signed session and organization,
+  keeps reads available to members, and executes saves through
+  `iam.setModuleConfig`, which checks `iam.admin` and retains approval and
+  audit handling. Missing inventory settings remain `{}`; unsupported module
+  writes return 404 as before. Authenticated browser proof and live legacy
+  differential remain pending.
+
+- Vite Settings now sends exact `GET` and `POST /api/memory` requests to Go by
+  default. Go resolves the signed session and active organization, derives
+  `canEdit` from resolved permissions, and scopes list/search reads through
+  tenant RLS. Search includes source text and supports empty and one-character
+  queries; deletion runs through `documents.deleteOrgMemory`. Other methods
+  and suffix paths retain their current owner. Authenticated browser proof and
+  live legacy differential remain pending.
+
+- Vite Settings now sends exact `GET` and `POST /api/routines` collection
+  requests to Go by default. Routine schedules in the Vite form are checked
+  against the shared deterministic parser before submission, so unsupported
+  natural-language schedules cannot reach a Go handler that cannot refine
+  them. Go remains authoritative and applies its own schedule validation; the
+  Vite guard provides pre-submit feedback. The webhook endpoint and worker
+  lifecycle remain separately owned.
+  Authenticated browser proof and live legacy differential proof remain pending.
+
+- Vite now sends exact `PUT` and `PATCH /api/org` persona settings requests to
+  Go alongside organization list and switch requests. Go applies an 8,000
+  UTF-16-code-unit limit with a bounded 64 KiB JSON body. Authenticated
+  browser proof of persona read and save remains pending.
+
+- Vite now sends exact `GET /api/sales/{orderId}` invoice reads to Go
+  unconditionally. Go mounts the handler by default; set
+  `GO_SALES_INVOICE_ROUTE=0` to unmount it. Other methods and non-exact paths
+  keep their current owner.
+
+- Vite now sends exact `GET /api/portal/invoice/{token}` requests to Go by
+  default. The Go handler is mounted by default and can be unmounted with
+  `GO_PORTAL_INVOICE_ROUTE=0`; other methods and suffix paths keep their current
+  owner.
+- Vite now sends exact `GET` and `POST /api/support/channels` requests to Go
+  unconditionally. The Go handler mounts by default; set
+  `GO_SUPPORT_CHANNELS_ROUTE=0` to unmount it. Other methods and paths retain
+  their current owner.
+- Vite now sends exact `GET /api/inventory` requests, including SKU history
+  queries, to Go unconditionally. The Go handler mounts by default; set
+  `GO_INVENTORY_READ_ROUTE=0` to unmount it. Inventory POSTs and nested paths
+  keep their current owner.
+- Vite HR Overview now reads its `hr.report` capability through Go
+  unconditionally. Go errors fail closed; the other HR tabs keep their current
+  report routes.
+
+- Vite marketplace listing reads now execute `creator.listMarketplace` through
+  the Go session capability API. Marketplace writes keep their current routes;
+  Verify now uses `creator.verifyPlugin` through the same capability API.
+
+- Go-backed Vite write recovery now accepts Better Auth's opaque user IDs when
+  scoping local retry intents across CRM, products, accounting, HR, expenses,
+  marketing, support, projects, and purchasing payment runs. Organization IDs
+  remain UUID-validated.
+
+- The Vite Manufacturing page no longer links back to the legacy workspace.
+  Its overview, BOM, production, work order, and runs/lot sections remain in
+  the React app.
+
+- Vite now sends `GET` and `POST /api/approvals` to Go by default. Go resolves
+  the verified session and active organization for each request, and decisions
+  use the governed capability approval path. Reject decisions now require the
+  same capability permission as approvals. The existing page owner is unchanged.
+
+- The Go jobs worker now discovers due recurring invoice templates and enqueues
+  one linked occurrence job. The TypeScript worker leaves
+  `accounting.generateDueInvoices` to Go, which posts the invoice and advances
+  that exact schedule occurrence in one governed transaction.
+
+- Go now claims approved `purchasing.instructPaymentRun` and
+  `purchasing.reversePaymentRun` jobs. The worker verifies each approval's
+  organization, capability, and exact input payload before posting, then marks
+  the approval executed after the governed action succeeds. The DB proof
+  rejects payload, organization, and capability mismatches without financial
+  effects.
+
+- The route ownership manifest now includes Go-only endpoints declared with
+  their Go source, including verified `GET /api/pos/customers` ownership.
+
+- The route ownership manifest now records verified Go ownership for POS shift
+  summary submission.
+
+- The migration ownership manifest now records `/pos` as Vite-owned after the
+  authenticated browser proof exercised its Go-backed register, manual cash
+  sale and return flow. Stock-tracked item effects were not part of that proof.
+
+- Go now owns the full inventory cycle-count job lifecycle: creation, recording,
+  variance posting, and cancellation. The worker proof verifies tenant
+  isolation, stock effects, action receipts, and system audit events for every
+  successful lifecycle capability; the legacy worker leaves all four jobs to
+  Go.
+
+- Vite now routes only `GET /api/pos` to Go by default. The Go handler preserves
+  the session and sale response contract and enforces the `pos.read` permission
+  with organization-scoped database access; POST actions remain unchanged.
+
+- Corrected the migration ownership manifest to record Go as the current auth
+  namespace owner while Better Auth compatibility parity remains pending.
+  Unsupported auth endpoints continue to fail closed in Go.
+
+### Added
+
+- Go now exclusively claims Purchasing payment-run draft creation, draft
+  cancellation and restoration, and listing jobs. Instruction and reversal
+  jobs follow their separately approval-bound Go worker path.
+  `TestPurchasingPaymentRunDraftJobsClaimAndExecute` verifies each selected
+  job's receipt and system audit, tenant-scoped listing, and final draft state.
+
+- Go now exclusively claims purchasing purchase-order creation, goods receipt,
+  and goods-return jobs. The legacy claimant leaves these job types pending
+  for Go, which executes them through the governed capability worker with one
+  durable action receipt per job.
+
+- Go routine agents can now list ingested documents through the governed
+  `documents.listDocuments` capability. The tool keeps the existing
+  `documents.read` permission and organization scope.
+
+- Go jobs worker now exclusively owns `inventory.createCycleCount` jobs. The
+  TypeScript claimant leaves cycle-count creation queued for Go, which records
+  the open snapshot and governed action receipt.
+
+- Go jobs worker now exclusively owns CRM deal and task jobs. TypeScript leaves
+  deal creation, stage moves, lead conversion, and task creation, completion,
+  and detail update/restore pending for Go, which executes them through the
+  governed path with action receipts.
+
+- Go jobs worker now exclusively owns `crm.createCustomer` jobs. TypeScript
+  leaves customer creation queued for Go, which executes it through the
+  governed path with receipt replay, approval linkage, and system audit.
+
+- Go jobs worker now owns asynchronous document parsing. The TypeScript worker
+  leaves `documents.parseDocument` queued for Go, which records the governed
+  action receipt and derived memory update.
+
+- Vite dashboard reads now use the Go session handler by default, preserving
+  the existing tenant-scoped calculations and permission-based financial
+  fields. Setting both route selectors to `0` restores the compatibility
+  handler.
+
+- Vite now routes the dashboard's `GET /api/setup` checklist read to Go by
+  default. The Go handler resolves the verified session and active organization
+  itself and keeps the `iam.admin` gate; setting both paired route flags to `0`
+  restores the compatibility handler.
+
+- Vite Analytics dataset discovery, previews, and report generation now route
+  to Go by default through the existing authenticated Analytics session
+  handler. The route ownership manifest now assigns exact `POST /api/analytics`
+  to Go. Setting the paired report route selectors to `0` restores the legacy
+  report path during migration rollback; unsupported methods and paths retain
+  legacy ownership.
+
+- Vite Marketing overview reads now use Go's `marketing.overviewSnapshot`
+  capability by default whenever the session capability route is enabled.
+  Setting `CHASTE_GO_MARKETING_OVERVIEW_READS=0` keeps the overview on the
+  legacy endpoint. The response retains the strict segments, campaigns,
+  provider send counts, and recent delivery log contract, with all reads
+  scoped to the active organization.
+
+- Vite now routes organization list GET and active-organization POST requests
+  to Go unconditionally. The Go handler is mounted by default and can be
+  unmounted with `GO_ORG_ROUTE=0`; Vite has no legacy route selector. An
+  authenticated browser check confirmed a same-org switch returns 200 and sets
+  the active-org cookie; a forged nonmember target returns 403.
+
+- Vite Marketing segment creation now reserves its exact intent in durable,
+  actor- and organization-scoped storage. Browser-wide Web Locks prevent
+  concurrent tabs from generating competing IDs, and unresolved Go requests
+  cannot fall through to the legacy route.
+
+- Vite Manufacturing overview reports can now read through Go's
+  `manufacturing.overviewReport` capability. Go returns the existing strict
+  report shape from organization-scoped reads, including BOMs, assemblies,
+  work orders, production runs, and lot balances.
+
+- Vite Manufacturing production planning reads use Go's cost preview,
+  feasibility, and BOM report capabilities when both route selectors are on.
+  Setting the module selector to 0, or disabling the global Go capability
+  route, selects the legacy Manufacturing endpoint. Go failures never retry it.
+
+- Go now serves onboarding state reads and setup-step updates for the Vite
+  wizard. Session identity and organization scope are resolved by the Go API;
+  changed deferred steps record a notification in the same transaction.
+
+- Vite Projects direct Go writes now reserve and clear retry intents under a
+  cross-tab Web Lock. Project actions fail closed before dispatch when Web
+  Locks are unavailable, preventing concurrent tabs from creating competing
+  intent IDs for the same action.
+
+- Vite HR Time Go writes now reserve their actor and organization retry marker
+  atomically across tabs. Browsers without Web Locks fail closed before a time
+  action is sent.
+
+- Vite CRM customer CSV import and Undo now use Go's session-authenticated
+  capabilities by default when session routing is enabled. Exact scoped intents
+  and import receipts survive uncertain results and reloads; selector rollback
+  cannot send a Go import or Undo through the legacy route.
+
+- Vite Support canned-response saves now use the session-authenticated Go
+  `support.createCannedResponse` capability by default when session routing is
+  enabled. Exact action details and the idempotency intent survive uncertain
+  failures and reloads within the actor and organization scope; unresolved Go
+  saves cannot fall through to the legacy route.
+
+- Vite conversation creation now routes through the session-authenticated Go
+  `messaging.createConversation` capability by default when session routing is
+  enabled. The pending form and idempotency key survive reloads within the
+  actor and organization session scope.
+- Vite conversation settings updates now route through the session-authenticated
+  Go `messaging.updateConversation` capability by default when session routing
+  is enabled. Pending settings and their idempotency key survive reloads within
+  the actor, organization, and conversation scope.
+- Vite conversation archive and restore actions now route through the
+  session-authenticated Go `messaging.archiveConversation` capability by
+  default when session routing is enabled. Unresolved requests stay pinned to
+  their Go intent across reloads and selector rollback.
+- Vite leave-conversation actions now route through the session-authenticated
+  Go `messaging.leaveConversation` capability by default when session routing
+  is enabled. Exact pending requests survive reload and selector rollback;
+  successful leaves clear their retry record before list refresh.
+- Vite add-member actions now route through the session-authenticated Go
+  `messaging.addMember` capability by default when session routing is enabled.
+  Same-org targets are validated in Go, and pending requests retain their
+  exact target and intent across reloads and selector rollback.
+- Vite conversation deletion now routes through the session-authenticated Go
+  `messaging.deleteConversation` capability by default when session routing is
+  enabled. Confirmed deletions serialize with sends and other lifecycle writes;
+  unresolved requests retain their exact intent across reloads and rollback.
+- Vite Accounting invoice lists now read through the session-authenticated Go
+  `accounting.listInvoices` capability by default when session routing is
+  enabled. Go invoice rows require the exact response fields, including a safe
+  integer `creditedMinor`; selected Go failures do not retry through the old
+  invoice route.
+- Vite payment-reminder drafts now read through the session-authenticated Go
+  `accounting.buildReminders` capability by default when session routing is
+  enabled. Strict response validation rejects malformed Go results, and
+  `CHASTE_GO_ACCOUNTING_PAYMENT_REMINDERS=0` restores the legacy read.
+- Vite cash-basis summaries now read through the session-authenticated Go
+  `accounting.cashBasisReport` capability by default when session routing is
+  enabled. Go's additional accrual expense total is validated and omitted from
+  the current UI shape; unavailable or malformed Go results stay nullable.
+- Vite bank reconciliation match and unmatch actions now use the
+  session-authenticated Go `accounting.matchBankTransaction` and
+  `accounting.unmatchBankTransaction` capabilities when both route selectors
+  are enabled. Exact actor- and organization-scoped requests survive uncertain
+  outcomes and block legacy fallback until resolved.
+- Vite Accounting Payables bill payments now use the existing Go-backed
+  Purchasing finance flow when `CHASTE_GO_PURCHASING_FINANCE_WRITES=1`. The
+  exact amount is preserved, and Go applies its `bank_transfer` default when
+  the payment method is omitted.
+- Vite supplier payment runs now use Go capabilities for bill eligibility,
+  run reads, draft creation, cancellation, restoration, instruction, and
+  reversal when `CHASTE_GO_PURCHASING_PAYMENT_RUNS=1`. Go remains authoritative
+  for the bill balances and currencies included in each run.
+- Vite People time reports, submitted-entry lists, time logging, and time
+  decisions use Go capabilities directly. The report and pending queue use
+  separate capabilities so decisions retain their entry IDs and employee
+  details.
+- Vite Payroll report reads and draft creation now use Go capabilities when
+  `CHASTE_GO_HR_PAYROLL=1`. The draft is generated from the active employees'
+  current salary, tax, and approved unpaid leave data.
+- Vite HR Hiring report reads, opening creation, applicant creation, and
+  applicant stage changes now use Go capabilities when `CHASTE_GO_HR_HIRING=1`.
+  The Hiring pipeline stays in Vite and records each change through the governed
+  Go path.
+- Vite Accounting overview reads now always use the session-authenticated Go
+  `accounting.overview` capability.
+  Go entry debit aggregates are validated as safe integer minor units, and
+  Go errors fail closed without retrying the legacy overview route.
+- Vite Support inbox and selected-thread reads now use the session-authenticated
+  Go `support.listConversations` and `support.readConversation` capabilities by
+  default when session routing is enabled. Strict Go response validation
+  preserves the customer-bound inbox behavior and Support page contract, and
+  selected Go errors do not retry the legacy Support route. Set
+  `CHASTE_GO_SUPPORT_INBOX_READS=0` for rollback.
+- Vite Support canned responses and knowledge articles now read through the
+  session-authenticated Go `support.listLibrary` capability by default when
+  session routing is enabled. Responses are strictly validated and selected Go
+  errors do not retry the legacy library route. Set
+  `CHASTE_GO_SUPPORT_LIBRARY_READS=0` for rollback.
+- Vite Support conversation creation, message posting, escalation, resolution,
+  and reopen now use session-authenticated Go capabilities by default when
+  session routing is enabled. Exact payloads and intent IDs survive uncertain
+  outcomes and reloads, and unresolved actions block legacy fallback. Staff
+  can still record customer words, attributed to the signed-in actor. Set
+  `CHASTE_GO_SUPPORT_CONVERSATION_WRITES=0` for explicit rollback.
+- Vite Support ticket priority, category, assignee, and SLA changes now use the
+  session-authenticated Go `support.updateTicket` capability by default when
+  session routing is enabled. Exact actor- and organization-scoped ticket
+  updates survive uncertain outcomes and block legacy fallback until resolved.
+  Set `CHASTE_GO_SUPPORT_TICKET_WRITES=0` for explicit rollback.
+- Vite conversation archive changes now route through the session-authenticated
+  Go `messaging.archiveConversation` capability by default when session routing
+  is enabled, with an independent selector for rollback.
+- Vite conversation leave actions now route through the session-authenticated
+  Go `messaging.leaveConversation` capability by default when session routing
+  is enabled, with an independent rollback selector and exact receipt checks.
+
+### Fixed
+
+- Go `accounting.reverseEntry` now refuses generic journal reversal of invoice
+  credit notes. A mirror-only reversal would leave the invoice's credited
+  balance unchanged; the error directs operators to a follow-up invoice. The
+  session capability API returns this expected workflow refusal as HTTP 422,
+  so Vite treats it as a definitive failure instead of an uncertain write.
+
+- Go session authorization now expands an organization's wildcard role grant
+  when checking named permissions, so newly bootstrapped workspace owners can
+  use admin-gated settings and capabilities.
+
+- Go email verification now treats a valid token for an already verified user
+  as an idempotent success without changing the account's `updated_at` value.
+  Unknown accounts still receive an invalid-token response.
+
+- Vite Accounting now preserves Go FX exposure permission errors and rejects
+  incomplete exchange-rate result tuples instead of treating rejected reads as
+  missing report data.
+- Vite home Ask links now preserve their Workmate prompt through the legacy
+  sign-in screen until the authenticated home opens the dock.
+- Vite HR time reporting and actions now always use Go capability APIs, with
+  the obsolete time-route selector removed.
+- Vite Manufacturing now gives expired sessions and denied permissions clear
+  guidance when Go planning reads fail. Active Manufacturing tabs also update
+  their border without conflicting shorthand styles.
+- Vite Accounting clears a displayed customer statement when its customer
+  changes, ignores late results from the previous selection, and rejects rows
+  with malformed timestamps.
+- Vite Manufacturing lot-trace reads now ignore stale responses when a user
+  selects another lot before the first trace finishes loading.
+- Vite Documents editor detail, version history, and archived-version reads
+  now use Go session capabilities without legacy GET fallbacks. Go document
+  reads require the explicit `GO_DOCUMENTS_EDITOR_READS=1` opt-in.
+- Vite Support category suggestions now use the Go capability path and reject
+  unknown request fields, including caller-supplied organization IDs.
+
+### Changed
+
+- Go message attachment uploads keep the `messaging.write` permission and
+  secret-class audit redaction, while private reversible draft staging skips
+  approval payloads that would serialize file bytes. Sending the message
+  remains governed separately.
+
+- Vite POS sales no longer retry through legacy `/api/pos` when the selected Go
+  `pos.completeSale` capability returns 404. The actor-scoped exact sale intent
+  is pinned to its route and kept for exact Go retry; selector rollback is
+  blocked while the Go attempt is unresolved. Corrupt retry markers now block
+  both routes without being overwritten or cleared, and the POS screen explains
+  how to recover safely. Selector-off sales remain on legacy.
+
+- Vite POS session open/close and returns, plus inventory item and cycle-count
+  writes, now keep exact Go retry intents through uncertain outcomes. Selected
+  Go errors cannot fall through to legacy writes, and unresolved attempts block
+  selector rollback until the same action is retried or resolved.
+
+- Vite Purchasing lifecycle, receipt, and sourcing writes now reserve their
+  exact actor- and organization-scoped intent across tabs. Selected Go errors
+  stay on Go, malformed success envelopes are rejected, and the aggregate
+  Purchasing page uses the scoped Go receipt client.
+
+- Vite CRM deal-stage moves now reserve one durable intent per actor,
+  organization, and deal. Exact retries reuse it, changed moves stay blocked
+  while an earlier result is unresolved, and Go treats foreign-org deal IDs as
+  not found.
+
+- Vite Sales confirmation now preserves the exact approval intent and
+  backorder choice across reloads. A browser-wide lock serializes the request
+  and outcome update, and the action fails closed when durable retry state is
+  unavailable.
+
+- Vite HR Time reports and approval writes now use Go session capabilities
+  unconditionally. Actor- and organization-scoped retries stay pinned to Go,
+  and no time action falls through to the legacy `/api/time` handler.
+
+- Vite Projects create, archive, and task writes now use direct Go capabilities
+  by default. Set `CHASTE_GO_PROJECTS_WRITES=0` to send them through the
+  existing `POST /api/projects` route, which remains Go-backed while
+  `CHASTE_GO_PROJECTS_ROUTE=1`. Actor/org-scoped exact retries stay pinned
+  while unresolved, and Go enforces authenticated
+  organization membership and `projects.write`.
+
+- Selected Go Manufacturing writes for BOM definition, work orders, and
+  production fail closed on 404 without retrying through `/api/manufacturing`.
+  Their actor/org-scoped exact intent stays pending for same-action Go retry;
+  selector rollback is blocked until that retry is resolved. Selector-off
+  actions continue to use the legacy route. BOM definition now uses Go by
+  default; set both `CHASTE_GO_MANUFACTURING_DEFINE_BOM_SLICE` and
+  `GO_MANUFACTURING_DEFINE_BOM_SLICE` to `0` for explicit legacy rollback.
+
+- Vite HR Overview reads its authenticated Go `hr.report` capability
+  unconditionally. Go errors fail closed without retrying legacy `/api/hr`;
+  other HR tabs retain their existing report routes.
+
+- Vite Sales order create, deliver, and cancel writes fail closed when the
+  selected Go capability route returns 404. They keep the exact actor- and
+  organization-scoped retry intent, pinned to the route that created it, and
+  never retry through legacy `/api/sales`; the legacy route is used only when
+  the Go write selector is off. Pre-upgrade route-less retry markers fail
+  closed until the user reviews Sales order history and explicitly confirms
+  clearing that scoped marker in the Vite page. Recovery sends no Sales write;
+  valid route-pinned or malformed markers cannot be cleared through this flow.
+
+- Vite's authored-document editor now uses Go by default for its primary detail
+  and version history behind paired `CHASTE_GO_DOCUMENTS_EDITOR_READS=1`,
+  `CHASTE_GO_DOCUMENTS_VERSION_READS=1`, and
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. The API gates
+  `documents.getDoc` and `documents.listDocVersions` with
+  `GO_DOCUMENTS_EDITOR_READS=1` and `GO_DOCUMENTS_VERSION_READS=1`. For full
+  legacy rollback, set all four Vite and API editor/version selectors to `0`.
+  The selected Go path does not fetch legacy detail for version rows or fall back after a Go
+  failure. Workspace, collaboration, compare-owned routes, and writes remain
+  unchanged.
+
+- Vite Messaging mention lists and add-member searches now use the authenticated
+  Go `messaging.listPeople` capability by default, with the Vite feature
+  selector and legacy people-route dependency removed. The API enables the
+  capability by default and can disable it with `GO_MESSAGING_PEOPLE_READS=0`;
+  Vite reports Go errors without retrying the legacy route. Initial mentions
+  retain the 100-person limit; add-member search retains the 30-person limit
+  and trimmed 80-character query bound. The capability checks org-scoped
+  `messaging.read`.
+
+- Vite authored-document version history and archived compare previews can use
+  the authenticated Go `documents.listDocVersions` and
+  `documents.getDocVersion` capabilities behind paired
+  `CHASTE_GO_DOCUMENTS_VERSION_READS=1` and
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. The API enforces
+  `GO_DOCUMENTS_VERSION_READS=1` for every caller. Document content, editor,
+  collaboration, and writes retain their existing routes; selected-Go errors
+  do not retry through legacy.
+
+- Vite Documents library list and preview detail now use Go's authenticated
+  `documents.listIngestedDocuments` capability by default behind
+  `CHASTE_GO_DOCUMENT_INGESTED_READS=1` and
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. The API enforces
+  `GO_DOCUMENT_INGESTED_READS=1` for all callers. For legacy rollback, set both
+  `CHASTE_GO_DOCUMENT_INGESTED_READS` and `GO_DOCUMENT_INGESTED_READS` to `0`.
+  Go output is strictly validated, and selected-Go errors do not retry through
+  legacy. Authored editor/version selectors and content/write routes are
+  unchanged.
+
+- Vite inventory catalog and item history reads use the authenticated Go
+  session reader unconditionally. It preserves the catalog and `{ movements }`
+  contracts and strict movement validation; Go errors do not retry via the
+  legacy handler.
+
+- Vite analytics report generation now routes only `POST /api/analytics` to
+  the existing authenticated Go Analytics handler by default in `.env.example`.
+  Set both `GO_ANALYTICS_REPORT_ROUTE=0` and
+  `CHASTE_GO_ANALYTICS_REPORT_ROUTE=0` for explicit legacy rollback. Dataset
+  discovery and previews keep their existing GET routing, and report response
+  and download behavior remain unchanged.
+
+- Vite Purchasing A/P aging can read through Go's authenticated
+  `purchasing.apAging` capability behind paired
+  `CHASTE_GO_PURCHASING_AP_AGING_READS=1` and
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors, with the API's
+  `GO_PURCHASING_AP_AGING_READS=1` flag also required. The read validates Go's
+  bucket response and uses the workspace currency; selected-Go failures do not
+  retry through `/api/purchasing`.
+
+- Vite receiving-desk receipt history can use Go's `purchasing.listReceipts`
+  capability by default in `.env.example`, paired with
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set
+  `CHASTE_GO_PURCHASING_RECEIPT_HISTORY_READS=0` for legacy rollback. Order
+  listing and receipt submission keep their existing routes, and selected Go
+  errors do not retry the legacy receipt-detail action.
+
+- Vite Purchasing requests and RFQs now use the direct authenticated Go
+  `purchasing.listPurchaseWorkflow` capability by default in `.env.example`.
+  Set both `CHASTE_GO_PURCHASING_WORKFLOW_READS=0` and
+  `GO_PURCHASING_WORKFLOW_READS=0` for explicit legacy rollback. Only
+  `workspace.requests` is replaced; the aggregate remains the source for other
+  workspace data. Strict output validation strips the Go-only RFQ `vendorId`,
+  and selected-Go errors do not retry through the aggregate request.
+
+- Vite inventory transfer create and confirm writes no longer fall back to the
+  legacy inventory route when a selected Go capability returns 404. The exact
+  actor/org scoped intent is retained, and retries remain targeted to the
+  route selected when the attempt began. Pre-route markers without a recorded
+  destination are preserved and fail closed; the transfer panel exposes an
+  explicit confirmation to resolve one after review of transfer history.
+
+- Vite CRM saved-view create, pin, and share writes can use Go's authenticated
+  `crm.saveCustomerView` capability behind paired
+  `CHASTE_GO_CRM_VIEW_WRITES=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`
+  selectors. Exact action retries are scoped to the active actor and
+  organization and recover after reload; pending or uncertain writes block
+  duplicate edits and legacy fallback. Saved-view reads remain unchanged.
+
+- Vite product CSV imports, undo, and restore can use Go's authenticated
+  `inventory.importItems`, `inventory.undoItemImport`, and
+  `inventory.restoreItemImport` capabilities. Exact pending intent inputs and
+  created item IDs are recoverable within the active actor and organization
+  session; retries preserve the same intent through approvals and uncertain
+  results. The Go route never falls back to `/api/import`. Imports exceeding the
+  64 KiB capability request limit or Go row constraints are rejected before
+  dispatch, and undo/restore retain the exact affected item IDs.
+
+- Vite Marketing campaign creation, send, and analytics use Go's authenticated
+  capabilities by default in `.env.example`, with validated response envelopes.
+  Set `CHASTE_GO_MARKETING_CAMPAIGN_WRITES=0` for explicit legacy rollback.
+  Go-selected writes fail closed on a missing capability route; campaign send
+  retries retain the exact actor and organization scoped intent through 404,
+  malformed, and uncertain results. The Marketing snapshot remains on its
+  existing route.
+
+- Vite cycle-count create, record, post, and cancel use Go's session capability
+  route when paired Vite and API selectors are enabled. Exact retry markers are
+  scoped to the active actor and organization and retained through pending
+  approvals and uncertain outcomes. Go errors never retry through
+  `/api/inventory`; legacy rollback also requires loaded actor and organization
+  scope and is blocked while a Go action is unresolved. Inventory permission,
+  module, approval, and intent-receipt checks remain enforced.
+
+- Vite Projects can route create, archive, task creation, task movement, and task
+  assignment through Go capabilities behind paired `CHASTE_GO_PROJECTS_WRITES=1`
+  and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Go derives actor and
+  organization from the authenticated session. Exact action intents are retained
+  per actor and organization across approvals and uncertain results, with a
+  recovery control after reload and no legacy fallback while a Go result is
+  unresolved. Project and board reads remain on their existing path.
+  Capability receipts now retain exact project-task snapshots for guarded
+  delete and restore, and task move/assignment compensations refuse to overwrite
+  later edits.
+
+- Vite's Accounting budgets screen loads budget scenarios and the 13-week cash
+  forecast directly through Go's `accounting.listBudgetScenarios` and
+  `accounting.cashForecast` capabilities. Scenario rows and IDs are validated
+  and projected into the existing UI summary shape. Scenario-list failures
+  expose a retry action, and invalid scenario IDs are rejected before dispatch;
+  neither read retries through the legacy Accounting API.
+
+- Vite Sales order lists and refreshes can read through Go's session-authenticated
+  `sales.listOrders` capability behind paired `CHASTE_GO_SALES_ORDER_READS=1`
+  and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Go derives organization
+  scope from the authenticated session; selected Go reads strictly validate the
+  response and fail closed on pending, malformed, or unavailable results.
+- Vite customer statements can read through Go's session-authenticated
+  `accounting.customerStatement` capability behind paired
+  `CHASTE_GO_ACCOUNTING_CUSTOMER_STATEMENT_READS=1` and
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Customer IDs are validated
+  as UUIDs, output is strictly validated, and pending, malformed, or unavailable
+  Go responses surface as errors without retrying the legacy Accounting route.
+- Vite Manufacturing can route production cost previews, feasibility checks,
+  and BOM reports through Go's `manufacturing.costPreview`,
+  `manufacturing.checkProductionFeasibility`, and `manufacturing.bomReport`
+  capabilities by default in `.env.example`, paired with
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set
+  `CHASTE_GO_MANUFACTURING_PLANNING_READS=0` for legacy rollback. Responses
+  are validated, pending or malformed results show errors, and selected Go
+  reads never fall back to `/api/manufacturing`.
+- Vite BOM production and production-run reversal now use Go by default in
+  `.env.example`. Set `CHASTE_GO_MANUFACTURING_PRODUCTION_WRITES=0` for legacy
+  rollback after resolving any pending Go action. Selected-Go 404, malformed,
+  or uncertain results retain the actor/org-scoped exact intent and never
+  retry through the legacy writer.
+- Vite Accounting Reports can load the aggregate directly from Go's income
+  statement, balance sheet, cash flow, FX exposure, and report currency
+  metadata capabilities behind paired `CHASTE_GO_ACCOUNTING_REPORTS=1` and
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. The required reports fail
+  the load on pending, malformed, or unavailable results; only optional cash
+  flow and FX 422 domain errors remain `null`. Reads use no-store caching, and
+  Go errors do not fall back to `/api/reports`.
+- Vite Purchasing Intel can load price history and supplier performance through
+  Go's `purchasing.priceHistory` and `purchasing.supplierPerformance` read
+  capabilities behind paired `CHASTE_GO_PURCHASING_INTEL_READS=1` and
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Go enforces
+  `purchasing.read` and derives organization scope from the session. Pending,
+  malformed, and unavailable results display errors instead of empty analytics.
+  Other Purchasing flows retain their current routes.
+- Vite employee creation can use Go's session-authenticated `hr.hireEmployee`
+  capability behind paired `CHASTE_GO_HR_EMPLOYEE_WRITES=1` and
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Salary remains integer
+  minor units, and actor/org scoped exact attempts survive pending approvals,
+  uncertain responses, and reloads. Go 404 does not fall back to the legacy
+  writer; cross-tab reservations reuse the same intent and stale responses
+  cannot erase a newer marker. Browsers without Web Locks fail closed.
+  Successful recovery clears the matching form to prevent duplicates.
+  Other People actions retain their current routes.
+- Vite supplier statements can read through Go's session-authenticated
+  `purchasing.supplierStatement` capability behind paired
+  `CHASTE_GO_PURCHASING_SUPPLIER_STATEMENT_READS=1` and
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Go enforces
+  `purchasing.read` and derives organization scope from the session. Vendor IDs
+  are validated as UUIDs, and pending, malformed, or unavailable responses
+  surface as errors instead of empty statements. Other Purchasing flows retain
+  their current routes.
+- Vite period-close readiness can read through Go's session-authenticated
+  `accounting.periodCloseWorkbench` capability behind paired
+  `CHASTE_GO_ACCOUNTING_PERIOD_CLOSE_READS=1` and
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Go derives organization
+  access from the session and enforces `accounting.read`; a Go error does not
+  fall back to the legacy readiness route. Other Accounting screens and
+  actions retain their current routes.
+- Vite Hiring now reads openings and applicants through Go's `hr.report`
+  capability and routes opening creation, applicant creation, and pipeline
+  stage changes through `hr.createOpening`, `hr.addApplicant`, and
+  `hr.moveApplicant`. The paired `CHASTE_GO_HR_HIRING=1` selector requires
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Exact actor/org scoped attempts and
+  pending or uncertain action recovery survive reload; Go 404 never falls back
+  to the legacy writer. Applicant-to-employee conversion is not part of this
+  Vite slice. Retry intents reserve atomically across tabs, stale responses
+  cannot clear a newer action, and browsers without Web Locks fail closed.
+- Vite Payroll now reads payroll runs through Go's `hr.report` capability and
+  creates drafts through `hr.createPayrollRun` behind paired
+  `CHASTE_GO_HR_PAYROLL=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors.
+  Draft attempts are scoped to actor and organization, and pending or uncertain
+  actions can be retried with the same intent after reload. Go 404 and uncertain
+  results never fall back to the legacy writer. Payroll execution, void, and
+  reversal controls remain outside this Vite slice. Retry intents reserve
+  atomically across tabs, stale responses cannot clear a newer draft, and
+  browsers without Web Locks fail closed.
+- Vite supplier payment runs can use Go's governed purchasing capabilities for
+  eligible bill reads, draft creation, cancellation and restoration, approval,
+  and reversal behind paired `CHASTE_GO_PURCHASING_PAYMENT_RUNS=1` and
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Exact actor/org scoped
+  attempts and approval recovery survive reload; Go 404 and uncertain outcomes
+  never fall back to legacy routes. Go checks current bill balances and
+  currencies before creating and instructing a run. Retry intents reserve
+  atomically across tabs, stale responses cannot clear a newer action, and
+  browsers without Web Locks fail closed.
+- Vite HR Time reports, submitted-entry approvals, time logging, and decisions use
+  the Go `hr.*` capabilities directly. A new org-scoped
+  `hr.pendingTimeEntries` read provides decision IDs and employee details. Exact
+  actor/org scoped writes and approval recovery survive reload; Go 404 and
+  uncertain results never fall back to the legacy writer. Other HR tabs keep
+  their current routes.
+- Vite invoice `recordPayment` writes can use Go's session-authenticated
+  `accounting.recordPayment` capability behind the paired
+  `CHASTE_GO_ACCOUNTING_RECORD_PAYMENT=1` and
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Exact actor/org scoped
+  payment attempts and pending approval recovery survive reload; Go 404 and
+  uncertain results never fall back to the legacy writer. An unresolved Go
+  payment blocks legacy rollback and remains retryable from the global notice,
+  even if the invoice is absent from the refreshed list. Browser-wide Web Locks
+  serialize retry reservations across tabs; browsers without Web Locks fail
+  closed before submitting a payment. Other Accounting operations keep their
+  existing routes. Set the selector to `0` for explicit legacy rollback.
+- Vite invoice creation can use Go's session-authenticated
+  `accounting.createInvoice` capability behind the paired
+  `CHASTE_GO_ACCOUNTING_CREATE_INVOICE=1` and
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Actor/org scoped exact
+  attempts and pending approvals survive reload. Go 404 and uncertain results
+  never fall back to the legacy writer, and an unresolved attempt blocks legacy
+  rollback. Browser-wide Web Locks serialize retry reservations across tabs;
+  browsers without Web Locks fail closed before creating an invoice. Other
+  Accounting actions retain their existing routes.
+- Vite invoice credit notes can use Go's session-authenticated
+  `accounting.creditNote` capability behind the paired
+  `CHASTE_GO_ACCOUNTING_CREDIT_NOTE=1` and
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Exact actor/org scoped
+  attempts and approval recovery survive reload; Go 404 and uncertain outcomes
+  never fall back to the legacy writer. Go checks the locked invoice's live
+  balance before posting, and an unresolved attempt blocks legacy rollback.
+  Browser-wide Web Locks serialize retry reservations across tabs; browsers
+  without Web Locks fail closed before applying a credit. Other Accounting
+  actions retain their existing routes.
+- Vite manual/general journal reversals can use Go's session-authenticated
+  `accounting.reverseEntry` capability behind the paired
+  `CHASTE_GO_ACCOUNTING_REVERSE_ENTRY=1` and
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Exact actor/org scoped
+  attempts and approval recovery survive reload; Go 404 and uncertain outcomes
+  never fall back to the legacy writer. Go checks reversal eligibility and
+  directs invoice, payment, and year-end entries to their domain workflows.
+  Browser-wide Web Locks serialize retry reservations across tabs; browsers
+  without Web Locks fail closed before reversing an entry. Other Accounting
+  actions retain their existing routes.
+- Vite bank reconciliation match and unmatch writes can use Go's
+  session-authenticated `accounting.matchBankTransaction` and
+  `accounting.unmatchBankTransaction` capabilities behind the paired
+  `CHASTE_GO_BANK_RECONCILIATION_WRITES=1` and
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Exact actor/org scoped
+  attempts and approval recovery survive reload; Go 404 and uncertain outcomes
+  never fall back to the legacy writer. Go remains authoritative for matching
+  eligibility and allocation rules. Browser-wide Web Locks serialize retry
+  reservations across tabs; browsers without Web Locks fail closed before
+  matching or unmatching. Other banking actions and reads retain their existing
+  routes.
+- Accounting Payables now routes bill payments through the existing Go
+  `purchasing.payBill` client flow when
+  `CHASTE_GO_PURCHASING_FINANCE_WRITES=1`. The exact amount and optional method
+  are preserved, including Go's `bank_transfer` default when method is
+  omitted. Actor/org scoped retries and approval recovery survive reload, and
+  the payBill retry intent is shared with the Purchasing workspace.
+  Browser-wide Web Locks serialize Purchasing finance intent reservations
+  across tabs; browsers without Web Locks fail closed before submitting these
+  actions.
+- Go leave requests now verify that the employee belongs to the caller's
+  organization before inserting a request. Missing and cross-organization
+  employee IDs are rejected without creating leave records.
+- Vite HR Leave reads its report through Go's session-authenticated
+  `hr.report` capability and routes leave requests, decisions, and cancellation
+  through `hr.requestLeave`, `hr.decideLeave`, and `hr.cancelLeave`. Exact
+  actor/org scoped retries and pending approval recovery survive reload; a Go
+  404 never falls back to the legacy endpoint. Other HR tabs keep their
+  existing routes.
+- Vite HR Expenses now reads claims and policy limits through Go's
+  session-authenticated `accounting.listExpenseClaims` and
+  `accounting.listExpensePolicies` capabilities, and sends submissions,
+  decisions, reimbursements, and policy updates through their matching Go
+  capabilities. The paired `CHASTE_GO_HR_EXPENSES=1` selector is enabled in
+  local setups and requires `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Exact
+  actor/org scoped retries and pending approval recovery survive reload; a Go
+  404 never falls back to the legacy endpoint, and selector rollback blocks
+  unresolved actions. Expense memo and policy category limits match Go at 3 to
+  500 characters and 2 to 40 characters respectively. Set the selector to `0`
+  for explicit legacy rollback.
+- Vite CRM customer CSV import and undo now use Go's session-authenticated
+  `crm.importCustomers` and `crm.undoCustomerImport` capabilities by default in
+  local setups. Exact rows, created-ID undo state, actor/org scoped intents, and
+  pending or uncertain retries survive reload; a Go 404 never falls back to
+  `/api/import`, and selector rollback blocks unresolved attempts. Go binds undo
+  to the successful import receipt and actor, and binds restore to the successful
+  undo receipt while rejecting changed records. Undo remains on Go for imports
+  created by Go. Set `CHASTE_GO_CRM_CUSTOMER_IMPORT=0` to use `/api/import` for
+  new legacy imports.
+- Vite CRM customer merge and undo now use Go's session-authenticated
+  `crm.mergeCustomers` and `crm.restoreCustomerMerge` capabilities by default
+  in local setups. Merge and undo inputs retain exact actor and organization
+  scoped retry intents through approval and uncertain results. A Go 404 never
+  falls back to the legacy writer, and selector rollback blocks unresolved
+  actions. The successful merge snapshot is persisted so undo remains available
+  after reload. Go now binds undo to the server's durable original merge receipt
+  and rejects restore if any affected record changed after the merge. Set
+  `CHASTE_GO_CRM_CUSTOMER_MERGE=0` to use `/api/customers`.
+- Vite CRM customer deactivation now uses Go's session-authenticated
+  `crm.deactivateCustomer` capability by default in local setups. The scoped
+  retry marker preserves the exact customer action and intent through pending
+  approvals and uncertain results; a Go 404 never retries through the legacy
+  writer, and rolling the selector back blocks while that Go result is
+  unresolved. Set `CHASTE_GO_CRM_CUSTOMER_DEACTIVATE=0` to use `/api/customers`.
+- Go now owns the exact `/api/auth` root and every nested auth path when the
+  Vite Go auth proxy is enabled. Unsupported paths and methods fail closed in
+  Go instead of reaching the legacy Better Auth handler; `CHASTE_GO_AUTH_ROUTE=0`
+  keeps the legacy compatibility path available.
+- Organization creation now has a single Go writer. The legacy Next POST is a
+  strict session-preserving proxy to Go with no TypeScript fallback; it
+  forwards the original bounded body, Cookie or Bearer token, Origin, and Host,
+  then validates Go's response. The Vite POST selector defaults off in code
+  and pairs with `GO_ONBOARDING_ROUTE=1`; onboarding GET and PATCH stay on the
+  legacy handlers during transition. HTTPS terminated before Go requires the
+  exact Next proxy peer CIDRs in `GO_API_TRUSTED_PROXY_CIDRS` for forwarded
+  scheme checks.
+
+- Added the Go pre-organization `iam.bootstrapOrganization` capability boundary for verified human workspace creation. The dedicated executor stays out of org-scoped dispatch and agent tools, checks the live verified session against the resolved identity, and atomically commits bootstrap data and the first `organization.created` ledger event. Its internal database function derives ownership from that session, serializes attempts by user, and atomically creates the organization, seed records, and intent receipt under a dedicated `NOBYPASSRLS` owner role; only `chaste_app` can execute it. The bounded nullable auth-session reference is hash-covered and preserved after logout without a foreign key. Embedding upgrade runs best-effort after commit. The Go endpoint stays off unless `GO_ONBOARDING_ROUTE=1`.
+- Fixed Go purchasing quote-award validation to report a losing or already-awarded RFQ before checking whether its parent request can create an order. Kept the serialized request decision check intact.
+- Fixed Vite POS register open and close recovery so retries use the exact actor/org scoped payload and intent. Missing scope, unavailable storage, and corrupt retry markers fail closed; scope changes ignore stale responses, unresolved inputs are frozen, and 408/429 keep the retry identity.
+- Fixed Vite manual stock adjustments so pending and uncertain Go writes restore the exact actor/org scoped action and retry intent after reload. Inputs freeze while saving or unresolved, stale responses from an old workspace are ignored, and 408/429 keep the retry intent. Damaged markers fail closed; rolling back the Go selector checks for unresolved attempts before permitting fresh legacy writes.
+- Fixed Vite Sales create recovery so organization changes clear the previous draft and block writes until the new actor/org retry marker is checked. Damaged retry markers now remain intact and keep API submission and UI recovery locked.
+- Fixed Vite inventory retry safety so malformed transfer and reservation markers fail closed, Go location/reservation writes require actor and organization scope plus durable action and scope markers, and selector rollback cannot route an unresolved Go action through legacy, even while scope is temporarily unavailable.
+- Fixed Vite Manufacturing and Sales scope transitions. Manufacturing clears old-scope inputs and targets and ignores stale reads, previews, and writes; Sales clears stale action targets and ignores confirmation or delivery results from a previous organization.
+- Fixed Vite Marketing recovery across selector rollback and organization changes. Unresolved Go campaign attempts block legacy writes, and prior-scope campaigns, send logs, analytics, and delayed action results stay hidden from the next organization.
+- CRM stage-move retries now keep the same intent after HTTP 408 or 429, which may represent an uncertain outcome.
+- Vite CRM reads for deals, customers, tasks, saved views, and customer timelines now go directly to Go, where the Better Auth session, organization membership, and capability permissions are resolved and checked. The local template enables the paired Vite and Go route flags. Go service failures fail closed without a Next.js read fallback.
+- Vite Sales create attempts persist the exact action with the actor/org scoped intent. Pending or uncertain drafts restore locked after remount and retry with the original payload and intent; a definitive 4xx clears the attempt and unlocks corrected input with a fresh identity.
+- The Vite Go auth proxy now owns the entire `/api/auth/*` namespace whenever Go auth is enabled. Unsupported paths and methods fail closed in Go instead of falling through to the legacy auth service; the explicit compatibility opt-out remains available.
+- Vite CRM customer profile saves and bulk profile updates use Go's session-authenticated `crm.updateCustomerProfiles` capability by default in local setups when `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set `CHASTE_GO_CRM_CUSTOMER_PROFILE_UPDATE=0` to keep profile writes on `/api/customers`. Actor and organization scoped retry identities and exact payloads persist through pending or uncertain results, Go returns validated prior snapshots for undo, and Go 404 responses fail closed without falling back to the legacy writer. Other customer writes retain their current routes.
+- Vite CRM deal creation uses Go's session-authenticated `crm.createDeal` capability by default in local setups when `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set `CHASTE_GO_CRM_DEAL_CREATE=0` to keep fresh, scoped deal creation on `/api/deals`; all deal-create writes fail closed until actor and organization scope resolve. An unresolved Go create stays locked and blocks legacy writes until Go routing is restored and that exact action is retried. Go 404 responses fail closed without falling back to the legacy writer, retaining the same draft and intent for retry. Go's deal ID is strictly validated, and other deal actions keep their current routes.
+- Vite CRM customer creation uses Go's session-authenticated `crm.createCustomer` capability by default in local setups when `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set `CHASTE_GO_CRM_CUSTOMER_CREATE=0` to keep fresh, scoped customer creation on `/api/customers`; all customer-create writes fail closed until actor and organization scope resolve. An unresolved Go create stays locked and blocks legacy writes until Go routing is restored and that exact action is retried. The exact form draft and actor/org scoped retry intent survive pending or uncertain responses and restore after reload. Go 404 responses fail closed without falling back to the legacy writer, retaining the same draft and intent for retry. Go's customer ID and duplicate warning are validated, and the warning remains visible after creation. Other CRM writes retain their existing routes.
+- Vite CRM task creation, completion, and follow-up due date and assignee updates use Go's session-authenticated `crm.createTask`, `crm.completeTask`, and `crm.updateTaskDetails` capabilities by default in local setups. Set both `GO_CRM_TASK_WRITES=0` and `CHASTE_GO_CRM_TASK_WRITES=0` to restore legacy `/api/crm` handling. A Go 404 now fails closed without sending the task action to the legacy writer; exact task drafts and actor/org scoped retry identities remain locked through pending or uncertain results.
+- Vite message edits use Go's session-authenticated `messaging.editMessage` capability by default when `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set `CHASTE_GO_MESSAGING_EDIT_SLICE=0` to roll back to legacy edits. Go records a receipt-backed `messaging.restoreMessageEdit` inverse guarded by the message body and a monotonic edit timestamp. The exact scoped edit and intent survive pending or uncertain outcomes, malformed Go results and Go 404s fail closed, and edits are blocked while scope is unresolved or stale. Unresolved Go edits stay locked across selector rollback until Go routing is restored.
+- Vite message deletions use Go's session-authenticated `messaging.deleteMessage` capability by default when `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set `CHASTE_GO_MESSAGING_DELETE_SLICE=0` to roll back to legacy deletion. Go records a receipt-backed `messaging.restoreMessageDelete` inverse guarded by a monotonic deletion timestamp. All delete writes require resolved actor and organization scope. Pending or uncertain deletions restore the same confirmation and intent, 404 and malformed receipts fail closed, stale responses cannot change a new session's confirmation state, and unresolved Go deletions stay locked across selector rollback until Go routing is restored.
+- Vite Messaging conversation list and refresh now use Go's session-authenticated `messaging.listConversations` capability by default when `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set `CHASTE_GO_MESSAGING_CONVERSATION_LIST=0` for legacy rollback. The Go response preserves the Vite list fields, including up to 100 conversations, unread counts, last-message previews, and the current user ID; selected Go errors fail closed.
+- Vite initial, refreshed, and older-page Messaging threads now use Go's session-authenticated `messaging.readMessages` capability by default when `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set `CHASTE_GO_MESSAGING_THREAD_READ=0` to roll back these reads. Go returns the latest message window with the current thread contract and uses a visible message ID for older-page keyset pagination. Around-message reads are tracked separately.
+- Vite around-message Messaging reads now use Go's session-authenticated `messaging.readMessages` capability under the same thread selector. Go returns the target with up to 30 earlier and 30 later messages, and pagination follows the older side of the window. Search discovery remains on its existing route.
+- Vite Messaging read receipts now use Go's `messaging.advanceReadCursor` capability when session capability routing is enabled. Set `CHASTE_GO_MESSAGING_READ_CURSOR=0` for explicit legacy rollback; selected Go errors and malformed results fail closed.
+- Vite message reactions and pins now use Go's session-authenticated `messaging.setMessageReaction` and `messaging.setMessagePin` capabilities when session capability routing is enabled. Set `CHASTE_GO_MESSAGING_REACTIONS=0` or `CHASTE_GO_MESSAGING_PINS=0` for separate legacy rollbacks; selected Go errors and malformed or mismatched results fail closed.
+- Vite typing and online presence heartbeats now use Go's session-authenticated `messaging.updateConversationPresence` capability when session capability routing is enabled. Set `CHASTE_GO_MESSAGING_PRESENCE=0` for explicit legacy rollback; invalid input, selected Go errors, and malformed output fail closed.
+- Vite message attachment uploads now use Go's session-authenticated `messaging.uploadMessageAttachment` capability when session capability routing is enabled. Set `CHASTE_GO_MESSAGING_ATTACHMENT_UPLOAD=0` for explicit legacy rollback. Go receives the original filename and MIME type with base64 file content, enforces the existing one byte to 5 MiB limit, and selected Go failures leave the draft attachment visible without legacy fallback.
+- Vite pending message-attachment removal now uses Go's `messaging.deletePendingAttachment` capability when session capability routing is enabled. Go locks and rechecks ownership/pending state before deletion; the page keeps the attachment visible and reports an error if deletion fails. Set `CHASTE_GO_MESSAGING_ATTACHMENT_DELETE=0` for explicit legacy rollback.
+- Vite message attachment downloads now route to Go's verified-session handler by default when session capability routing is enabled. Go requires `messaging.read`, active same-org conversation membership, a visible message, and uploader ownership for pending uploads before streaming bytes.
+- Vite Marketing campaign creation and sends can opt into Go's session-authenticated `marketing.createCampaign` and `marketing.sendCampaign` capabilities with `CHASTE_GO_MARKETING_CAMPAIGN_WRITES=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Exact campaign drafts lock and restore across pending or uncertain outcomes, with actor/org scoped retry IDs retained through network, 408, 429, and 5xx uncertainty. Go's queued recipient and opt-out counts are validated, and already queued campaigns cannot be resent from the page. Segment creation and analytics keep their current behavior.
+- Vite receipt submission uses Go's session-authenticated `purchasing.receiveGoods` capability by default in local setups with `CHASTE_GO_PURCHASING_RECEIVE_GOODS=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. It preserves approval and same-intent legacy fallback behavior, scopes persistent retry identity to the actor and organization, and retains the receipt draft while approval is pending or the result is uncertain.
+- Vite vendor returns and purchase order closing use Go's session-authenticated `purchasing.returnGoods` and `purchasing.closePurchaseOrder` capabilities by default in local setups with `CHASTE_GO_PURCHASING_RETURN_CLOSE=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. They keep approval and same-intent legacy fallback behavior, validate Go's bounded inputs and exact capability result shapes, and retain scoped retry identities while pending or uncertain.
+- Vite vendor creation, bill recording, bill payment, and bill credits use Go's session-authenticated `purchasing.createVendor`, `purchasing.createBill`, `purchasing.payBill`, and `purchasing.billCreditNote` capabilities by default in local setups with `CHASTE_GO_PURCHASING_FINANCE_WRITES=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Exact action retries are scoped to actor and organization, pending and uncertain submissions keep the same intent, 404 fallback reuses it, and capability results are strictly validated.
+- Vite purchase order creation uses Go's session-authenticated `purchasing.createPurchaseOrder` capability by default in local setups with `CHASTE_GO_PURCHASING_CREATE_ORDER=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. It preserves approval responses and same-intent legacy fallback, retains the exact draft and scoped idempotency intent while a result is pending or uncertain, and rejects invalid quantities and prices before submission.
+- Vite purchase requests, decisions, RFQs, quote recording, and quote awards use Go's session-authenticated purchasing capabilities by default in local setups with `CHASTE_GO_PURCHASING_SOURCING_WRITES=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Scope-hashed local drafts restore the exact pending request or quote after reload; scoped retry IDs persist through pending or uncertain results, and 404 fallback reuses the same intent. Estimate and quote money use the workspace currency.
+- Go purchasing request decisions and quote workflows serialize on the request row, preventing contradictory concurrent decisions and duplicate purchase orders; RFQ input now rejects duplicate vendors.
+- Public invoice links now load through the Vite portal page and Go token-scoped invoice read. The page omits browser credentials, suppresses referrers, and only admits the exact token path.
+- Invoice print pages now load in Vite through Go's verified-session and organization-scoped sales invoice read. Unsupported methods and non-exact route paths keep their legacy fallback.
+- Route the Vite Sales orders collection read through Go's verified-session `sales.listOrders` capability by default. The `{ orders }` response and known status filters match the legacy API; only exact GET `/api/sales` moves, while writes and unrelated paths remain on legacy.
+- The standalone support widget now loads in Vite and posts public start, poll, message, and escalation actions to Go. Configure `GO_SUPPORT_TRUSTED_PROXY_CIDRS` with the exact proxy peers in production so Go can safely rate-limit by visitor IP.
+- The `/sessions` page is now Vite-owned, with session trajectories, canonical replay, durable-run details, and context metrics read through Go's authenticated GET routes. Go returns oversized details with the same bounded error behavior as legacy.
+- The `/ledger` page is now Vite-owned and its session-authenticated `GET /api/ledger` read is Go-owned. Unsupported API methods and unknown paths keep their legacy fallback.
+- Session-authenticated `GET` and `POST /api/support/channels` now use Go. The settings write enforces same-origin requests and checks organization membership, Support availability, and `iam.admin` before its organization-scoped upsert; embed tokens remain visible only to organization admins.
+- Vite segment creation now defaults to the Go `marketing.createSegment` capability. Permission checks, policy approvals, intent receipts, and the legacy path for other Marketing actions remain in place.
+- SCIM collection and single-user reads and writes now use Go by default. Bearer token writes execute through the governed `iam.scimProvisionUser` capability with org scope, idempotent receipts, and external-actor audit events; malformed identity inputs are rejected.
+- Session-authenticated `GET /api/inventory` now serves the Go capability-backed catalog and SKU movement history. Inventory writes remain on legacy, and the response preserves the full catalog payload for Vite inventory consumers.
+- Vite POS collection `GET /api/pos` uses Go's verified-session, organization-scoped reader by default and preserves the `{ sessions, sales }` response. `GO_POS_READ_ROUTE` and `CHASTE_GO_POS_READ_ROUTE` default on. Set `CHASTE_GO_POS_READ_ROUTE=0` to send Vite traffic to legacy; also set `GO_POS_READ_ROUTE=0` to unmount the Go endpoint. Unsupported methods and suffix paths remain on legacy. The `/pos` page remains legacy-owned; this moves the Vite API read only.
+- Exact Vite `POST /api/pos/shift-summary` uses Go's session-authenticated `pos.shiftSummary` capability and preserves the legacy response envelope. `GO_POS_SHIFT_SUMMARY_ROUTE` and `CHASTE_GO_POS_SHIFT_SUMMARY_ROUTE` default on. Set `CHASTE_GO_POS_SHIFT_SUMMARY_ROUTE=0` to send Vite traffic to legacy `POST /api/pos`; also set `GO_POS_SHIFT_SUMMARY_ROUTE=0` to unmount the Go route. Other POS POST actions remain on legacy. Automated checks pass; authenticated browser proof remains open.
+- Vite POS customer lookup now always uses the direct Go `GET /api/pos/customers` reader, independently of the generic session-capability route. The legacy request path and Vite rollback selector were removed. It preserves the POS access rule (`crm.read` or `pos.sell`), works without the CRM module, and returns up to 500 active customers with POS purchase counts and net spend. CRM and Support lookups remain unchanged.
+- Vite POS register opening now uses Go's session-authenticated `pos.openSession` capability by default when `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set `CHASTE_GO_POS_OPEN_SESSION_SLICE=0` to roll back this action; a missing Go capability route falls back to legacy using the same intent, while other POS actions remain unchanged.
+- Vite POS register closing now uses Go's session-authenticated `pos.closeSession` capability by default when `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set `CHASTE_GO_POS_CLOSE_SESSION_SLICE=0` to roll back this action; a missing Go capability route falls back to legacy using the same intent, while other POS actions remain unchanged.
+- Vite POS quick product creation and opening stock adjustment now use Go's `inventory.createItem` and `inventory.adjustStock` capabilities when `CHASTE_GO_INVENTORY_ITEM_SLICE=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set `CHASTE_GO_INVENTORY_ITEM_SLICE=0` to restore both actions to `/api/inventory`; each action keeps a fresh intent ID, the POS response data, and pending approval reasons.
+- Vite inventory transfer creation and confirmation use actor- and organization-scoped persistent intents through pending approvals and uncertain responses. A missing Go route falls back to `/api/inventory` with the same intent; malformed markers fail closed, and success or definitive client errors clear the active retry marker.
+- Vite inventory location creation and stock reservation/release use Go's `inventory.createLocation`, `inventory.reserveStock`, and `inventory.releaseReservation` capabilities when `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set `CHASTE_GO_INVENTORY_LOCATION_RESERVATION_WRITES=0` to restore these actions to `/api/inventory`; Go writes require actor and organization scope, unresolved intents block selector rollback, approval-pending retries keep their intent, and location codes are trimmed and uppercased before validation.
+- Vite cycle-count barcode lookup now uses Go's `inventory.lookupByBarcode` capability when `CHASTE_GO_INVENTORY_BARCODE_LOOKUP=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set the barcode selector to `0` to use `/api/inventory`; a missing Go capability route also falls back to the legacy lookup.
+- Vite CRM deal stage changes now use Go's `crm.moveDealStage` capability when `CHASTE_GO_CRM_DEAL_STAGE_MOVE=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set the selector to `0` to use the legacy `/api/deals` action. Only a missing Go route falls back to legacy, with the same actor/org-scoped intent and exact action; other Go failures, including 408 and 429, retain the retry identity. Lost reasons remain required and capped at 500 characters, and pending or failed changes roll back optimistically while keeping the reason draft available for retry.
+- The `/login` page is now Vite-owned. Sign-in, sign-up, verification, and password recovery continue to use the Go-backed auth endpoints.
+- The `/` Dashboard page and its `GET /api/dashboard` and `GET /api/setup` reads are now Vite/Go-owned. Mirror `SMTP_HOST` and coding-agent CLI `PATH` between Go and Next so the setup checklist agrees across runtimes; unknown paths and unsupported API methods keep their legacy fallback.
+- The `/team` page is now Vite-owned and uses the Go-owned `GET` and `POST /api/team` routes. Other paths continue through the existing legacy fallback.
+- Session trajectory and durable-run detail reads now enforce matching response limits in the Go API and legacy API: 10,000 session events, 256 KiB per event, an 8 MiB session response, and 200 durable-run steps with a 2 MiB logical JSON response cap. Both APIs check visibility before revealing an oversized durable run.
+
+### Changed
+
+- Route Vite module switchboard reads and the Projects page's GET/POST operations through Go by default. Project writes keep session, tenant, permission, approval, and intent checks; set the matching `CHASTE_GO_*_ROUTE` selector to `0` to restore legacy proxying, and the paired `GO_*_ROUTE` flag to `0` to unmount that Go handler.
+- Route Vite `/team` GET and POST requests through Go by default. Session verification, organization scope, capability permissions, approvals, and intent receipts remain enforced; set the matching Go and Vite team route flags to `0` for legacy fallback.
+- Enable the Vite Sessions page metrics read through Go by default. Set `CHASTE_GO_METRICS_ROUTE=0` to restore the legacy proxy, or `GO_METRICS_ROUTE=0` to unmount the Go handler; unsupported methods and extra paths retain legacy fallback.
+- Route exact session-authenticated `GET /api/analytics` requests through Go by default for dataset discovery and previews. Go report `POST /api/analytics` remains on the legacy handler; setting both analytics route flags to `0` rolls back the GET route.
+- Enable eligible Vite conversation sends through Go's governed `messaging.sendMessage` capability by default. Mentions, replies, attachments, stable retry intents, inverse metadata, and pending approvals are preserved; agent-enabled conversations and @agent messages remain on the legacy route.
+- Enable cycle-count create, record, post, and cancel through Go's session capability route. Inventory permission and module checks, approvals, and intent receipts apply; posted counts are corrected with a fresh count and only open counts can be cancelled.
+- Enable POS sales and returns together through Go's session capability route. A sale can be compensated with a governed full or partial return that credits the invoice and restores returned stock; approval, permission, module checks, and intent receipts remain in force.
+- Enable the tenant-scoped Go `GET /api/my-work` reader by default. PostgreSQL-backed coverage verifies approval and receipt-remainder cards remain isolated by organization.
+- Enable Go `POST /api/my-work/summarize` by default for Vite. Verified session and organization checks, bounded card input, server-side workspace credentials, and disabled coding-agent tools remain enforced; set `CHASTE_GO_MY_WORK_SUMMARY_ROUTE=0` to send browser requests to legacy, and set `GO_MY_WORK_SUMMARY_ROUTE=0` to unmount the Go route.
+- Enable the session-authenticated, capability-backed Go `GET /api/signals` feed by default. Unsupported methods and suffix paths continue through legacy.
+- Enable Go's session-authenticated `GET` and governed `POST /api/branding` by default in Vite and the Go API. Branding approval responses remain compatible with Settings.
+- Enable session-authenticated Go `GET` and governed `POST /api/modules` by default in Vite and the Go API. POST approval-pending and success envelopes remain compatible with Settings.
+- Mount Go auth routes by default to match the Vite proxy; set `GO_AUTH_ROUTE=0` only to keep auth on the legacy handler.
+- Route the Vite Products catalog and create, edit, archive, and stock actions through Go's session-authenticated capability endpoint in new local setups. Product defaults and CSV import/undo remain on legacy routes.
+- Go supports authored document reads and parses pasted text or uploaded documents into org-scoped memory using the configured OCR and embedding providers. Parse failures retain the failed document state and failure receipt.
+- Align the Go project, team, module, dashboard, and setup handlers with legacy validation, response, permission, and readiness behavior. Project and team Go API routes are enabled in the local Vite environment and marked verified against the API contracts.
+- The `/analytics` page is now recorded as Vite-owned in the migration manifest. Direct visits load the React Analytics page and its verified Go-backed API routes.
+- The `/projects` page is now recorded as Vite-owned. Its React page preserves project and board reads, creation, task assignment and movement, archive confirmation, module state, and pending approval behavior.
+- The `/products` page is now recorded as Vite-owned. The Vite catalog preserves filtering, product and service creation, stock opening, edits, archive, CSV import with undo, module defaults, and approval-pending feedback.
+- Route only auth methods and paths implemented by Go to its auth handler. Other Better Auth paths and methods continue through the legacy catch-all; optional OIDC and SAML paths require their matching Vite auth selectors.
+- The local Vite/Go environment enables the session-authenticated analytics `GET` for dataset discovery and previews. Report `POST /api/analytics` remains on legacy until its route cutover.
+- Added Vite proxy selectors for Go SCIM collection reads, user reads, provisioning, deactivation, and token management. Collection and user selectors remain off locally. Token management and notification feed/read-receipt routes are Go-owned in the migration manifest and enabled in the local Vite/Go configuration. Token mint and revoke require a UUID `Idempotency-Key`; listing matches the legacy organization-member guard and timestamp precision. Notification read receipts use reversible capabilities.
+- The `pnpm worker` command now supervises both Go workers with role-scoped environments and forwards shutdown signals. The routine E2E proof now waits for worker shutdown and no longer reads transient verification links from the email outbox.
+- Go approval requests now persist organization-scoped action intents and canonical input digests. Matching retries reuse the pending approval, conflicting capability or payload reuse is rejected, and approved execution records the original intent receipt. Vite Sales retains the intent while approval is pending and clears it after resolution.
+
+### Fixed
+
+- Make Go session and durable-run mounts fall through to legacy for invalid UUIDs, unsupported methods, and extra path segments instead of capturing them with wildcard route patterns.
+- Pass the loaded `.env` values into the Go API process launched by `pnpm dev:api`, and forward shutdown signals to it.
+- Require stable intent IDs for Go Projects and Team writes, including the legacy-to-Go Team bridge, so retries use executor receipts instead of silently running without idempotency. Reject blank, overlong, and control-containing Team IDs in both React and server adapters.
+- Require the dashboard `signals` array in Vite responses and reject malformed or duplicate organization selectors before Go dashboard reads.
+- Match SCIM collection filter whitespace, bounded pagination, query validation, and error bodies across Go and the legacy API. Go collection and provisioning handlers now share the same 60-attempt source-IP budget and legacy 401 response, while DELETE uses one SCIM 404 envelope for missing, foreign, and malformed IDs.
+- Bound My Work summary request size and card text consistently across the legacy and Go handlers to limit untrusted model input.
+- Align Go and TypeScript branding behavior for unknown fields, including case-variant aliases, UTF-16 limits, intent validation, permission errors, and pending-approval responses; approval rationale is not returned to the client.
+- Keep the Vite Accounting books available when auxiliary cash-basis or bank-feed requests fail at the network layer, matching the legacy page's failure handling.
+- Keep archived Projects boards read-only in both React clients and reject task moves or assignments at the TypeScript and Go capability boundaries.
+- Explain the generic Go sign-up result without claiming that every request sent a verification email; duplicate addresses receive the same response without a new email being queued.
+- Restore the Sales allow-backorder choice in Vite confirmation and keep it with pending approval retries; queued POS receipts now retain the customer email captured for that sale.
+- Show payment method, cash received, and change in Vite receipts after retrying an offline POS sale, matching the normal-sale and legacy receipts.
+- Ignore Inventory refresh callbacks that arrive after the page unmounts, while keeping the latest report response when action refreshes overlap.
+- Go OIDC connections now pin DNS results to public IPs, reject private or special-use network answers, bypass proxy re-resolution, and fail closed when the transport cannot pin an address.
+- Customer creation now retains one action intent across retries, validates Go success and approval envelopes, recovers the QuickCreate modal after transport errors, selects only valid customer UUIDs, and shows duplicate warnings.
+- Match legacy report validation by rejecting explicit `null` for optional Analytics `narrative`, `ops`, and `chart` fields before running dataset capabilities.
+- Cancel pending Vite Analytics previews and report generation when leaving the page, prevent concurrent duplicate previews, and keep report section selection within the API limit.
+- Hide pending approvals with capability IDs unknown to the Go permission catalog, including from wildcard users, matching the legacy dashboard and avoiding disclosure of unsupported approval details.
+- Vite 8 now forwards opt-in Go routes using method and path checks in middleware before the legacy API proxy. Unmatched methods and paths continue to the legacy API.
+- Clear a stale verification-resend success message when returning to sign-in or switching auth modes, so another unverified account can request its own link.
+
+### Added
+
+- The Go API serves `GET` and `POST /api/notifications`, including per-user read receipts through governed `notifications.markRead` and `notifications.restoreRead` capabilities. Unsupported methods and paths continue to the legacy API.
+- Go serves session list, detail, replay, and durable-run list/detail reads by default. Both API mounts and Vite selectors default on unless their corresponding flags are set to `0`; set both paired flags to `0` for a route's legacy fallback. Session and run visibility remains scoped to the active organization and authenticated user, with admin access preserved. Unmatched methods and paths continue to the legacy API.
+- Session-authenticated `GET /api/my-work` now routes through Go by default in both Vite and the API. Set `CHASTE_GO_MY_WORK_ROUTE=0` and `GO_MY_WORK_ROUTE=0` to use the legacy handler; unsupported methods and extra paths keep the legacy fallback.
+- The Go API can opt authenticated work summaries into `POST /api/my-work/summarize` with `GO_MY_WORK_SUMMARY_ROUTE=1`, paired with `CHASTE_GO_MY_WORK_SUMMARY_ROUTE=1`. It loads and decrypts workspace credentials server-side, uses the legacy fast-to-primary fallback, pins public HTTPS model endpoints, and permits loopback HTTP only in explicit development mode. It can run the authenticated user's default OpenCode connection with tools disabled or the same user's isolated Codex home in read-only CLI mode. Unsupported providers and missing Codex runtime resources fail closed. Both selectors are default-off and route ownership remains legacy.
+- The Go API can opt `GET /api/signals` into Go with `GO_SIGNALS_ROUTE=1`, paired with `CHASTE_GO_SIGNALS_ROUTE=1`. The verified session and `signals.list` capability govern the read; severity and module filters, `{signals}` response, and no-store behavior match legacy. Both selectors are default-off and route ownership remains legacy.
+- The Go API serves `GET`, `POST`, and `DELETE /api/scim/tokens` with `GO_SCIM_TOKENS_ROUTE=1`, paired with `CHASTE_GO_SCIM_TOKENS_ROUTE=1`. Listing requires verified organization membership, matching legacy authorization; mint and revoke run through governed capabilities, require a UUID `Idempotency-Key`, and never persist the raw bearer in receipts or audit events. The raw token is returned only once. Revoke is destructive because the stored hash cannot recover the bearer; policy-pending revokes return the standard approval response. Local flags enable these routes and the ownership manifest records Go as owner.
+- Vite can opt the public support widget endpoint into Go with `CHASTE_GO_SUPPORT_PUBLIC_ROUTE=1` paired with `GO_SUPPORT_PUBLIC_ROUTE=1`. Both flags default to off, and the proxy preserves the widget request and streamed response.
+- Vite authentication now supports Go email verification, verification resend, password reset requests, and token-based password updates. Reset links are removed from browser history as soon as the recovery page opens.
+- Organization admins can explicitly delegate public support auto-replies to their personal connected OpenCode account from AI settings. Go supplies only organization-scoped order status and published knowledge facts, keeps OpenCode tools disabled, and does not fall back to workspace credentials when the delegated connection fails.
+- Vite can opt the dashboard setup checklist read into Go with `CHASTE_GO_SETUP_ROUTE=1` paired with `GO_SETUP_ROUTE=1`; it keeps the same `iam.admin` gate and falls back to the legacy endpoint by default.
+- The Vite app now calls Go's auth endpoints through a small typed browser client and no longer depends on Better Auth's JavaScript client for session, email sign-in, sign-up, or sign-out.
+- Added a default-off Go-owned OIDC authorization-code sign-in flow with state, nonce, PKCE, issuer/signature/audience validation, explicit verified-email trust for linking, and existing Go session cookies. An optional native-client handoff uses a short-lived, single-use PKCE-bound code and returns the live session token only from the authenticated exchange endpoint.
+- Added default-off Go SAML sign-in handling with pinned IdP trust, signed-response validation, one-use request correlation and replay protection, and Go-owned sessions.
+- Vite can opt cycle-count creation, recording, posting, and cancellation into Go's authenticated inventory capabilities. The default remains the legacy inventory route; fallback occurs only when the Go capability endpoint returns 404, and uncertain retries retain the original intent ID.
+- Vite can opt POS sales into Go's authenticated `pos.completeSale` capability with `CHASTE_GO_POS_COMPLETE_SALE_SLICE=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`; the default remains the legacy POS route, carts and queues are scoped to the active organization and operator, uncertain attempts lock to their saved cart and intent until retried or explicitly abandoned, and queued attempts retire their retry mapping when consumed or discarded.
+- Vite can opt POS register closing into Go's authenticated `pos.closeSession` capability with `CHASTE_GO_POS_CLOSE_SESSION_SLICE=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`; the default remains the legacy POS route and fallback occurs only when the Go route is absent.
+- Vite can opt register opening into Go's authenticated `pos.openSession` capability with `CHASTE_GO_POS_OPEN_SESSION_SLICE=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`; the default remains the legacy POS route and fallback occurs only when the Go route is absent.
+- Vite can opt BOM definition into Go's authenticated `manufacturing.defineBom` capability with `CHASTE_GO_MANUFACTURING_DEFINE_BOM_SLICE=1`, paired with `GO_MANUFACTURING_DEFINE_BOM_SLICE=1` and the Go session capability route. The slice defaults to the legacy endpoint; selected-Go 404s retain the exact retry identity and do not retry through legacy.
+- Vite work order creation, release, completion, and cancellation use Go's authenticated manufacturing capabilities with `CHASTE_GO_MANUFACTURING_WORK_ORDER_WRITES=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Selected-Go 404s retain actor/org-scoped retry intents and do not retry through the legacy route; work order drafts remain available after errors.
+- Vite BOM production and production-run reversal use Go's authenticated `manufacturing.produceFromBom` and `manufacturing.reverseProductionRun` capabilities by default in `.env.example`, paired with `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Selected-Go 404s retain the exact intent for Go retry and block legacy rollback while unresolved; capability outputs are validated before success is reported.
+- Vite can opt marketing segment creation into Go's authenticated `marketing.createSegment` capability with `CHASTE_GO_MARKETING_SEGMENT_SLICE=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`; the default remains the legacy route, and other marketing actions are unchanged.
+- Vite can opt eligible conversation message sends into Go's authenticated `messaging.sendMessage` capability with `CHASTE_GO_MESSAGING_SEND_SLICE=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`; the default remains the legacy route, user mentions, replies, attachments, and approval-pending behavior are preserved. Agent-enabled conversations and @agent messages remain on the legacy route until Go workmate replies are supported.
+- Vite Sales can confirm draft orders through Go's existing authenticated `sales.confirmOrder` capability. Approval responses are preserved, and all other sales actions remain on their existing routes.
+- Vite Sales can create, deliver, and cancel orders through Go's authenticated `sales.createOrder`, `sales.deliverOrder`, and `sales.cancelOrder` capabilities with `CHASTE_GO_SALES_ORDER_WRITES=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Drafts and action targets stay in place on pending or failed responses, and create/deliver-all/cancel retries reuse actor- and organization-scoped intents. Delivery records all remaining reserved lines, matching the existing Next flow.
+
+### Fixed
+
+- Go Projects reads reject unsupported query parameters and repeated `projectId` values instead of silently choosing one value.
+
+- Agent-session trajectory events and token usage now run in organization-scoped transactions, with the session row locked while assigning event sequence numbers. This keeps session history and usage visible under PostgreSQL row-level security and prevents concurrent writers from assigning the same sequence.
+- OIDC discovery now rejects non-HTTPS or untrusted endpoint authorities, including JWKS, before tokens can be exchanged; multi-audience ID tokens require an authorized party that matches the configured client.
+- Go capability execution now binds pending approvals to an organization-scoped intent and input digest. Retrying an identical request reuses its approval; reusing the intent for a different action or payload is rejected. Vite Sales keeps the same intent while approval is pending and offers a status check instead of a second confirmation.
+- The opt-in Vite inventory item slice now reads stock totals and records item creation and stock adjustments through Go's authenticated capability endpoint. It requires both `CHASTE_GO_INVENTORY_ITEM_SLICE=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`; other inventory operations and public route ownership stay unchanged.
+- Vite product CSV import and undo can use Go's authenticated `inventory.importItems` and `inventory.undoItemImport` capabilities with approval, stable retry intents, per-organization rate limiting, and `import_products` onboarding completion. The rate limit is process-local, so each API replica has its own quota and restarts reset it, matching the legacy helper. Enable with `CHASTE_GO_INVENTORY_IMPORT_SLICE=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`; oversized or unsupported requests retain the legacy route, and product defaults remain legacy-owned.
+- Support knowledge-base articles are private by default. Staff can explicitly publish an article, and public widget retrieval only searches published articles.
+- Browser auth responses no longer expose reusable session bearer tokens, and email verification responses now prevent caching and referrer leakage. Native clients without browser request metadata retain bearer token issuance.
+- The Go metrics route now falls back when the active organization cookie refers to a removed membership, matching the legacy session behavior.
+- Go public support auto-replies use tenant-scoped support articles and conversation-bound order lookups, quote customer transcripts as untrusted data, and pin provider requests to public HTTPS addresses without proxy or redirect access.
+- Go public support auto-replies enforce organization-wide draft and concurrency limits, with expiring reservations and retained counters cleaned up automatically.
+- Vite document editing cancels a pending page-settings save when the editor effect is cleaned up, avoiding duplicate draft writes during remounts.
+- The Go dashboard trend query reads only the six months included in its response.
+- The legacy SCIM single-user route now applies the shared token rate limit and expiry check to both reads and deactivation requests.
+- Added an opt-in Go SCIM user read handler with hashed-token resolution, expiry checks, paginated collection reads, accurate filtered totals, and organization-scoped queries; production route ownership remains unchanged.
+- Connected Go public support knowledge search to the organization-scoped semantic article index and added an opt-in worker for published article embeddings. Both route and worker remain disabled by default.
+- Added exponential retry backoff for failed support article embeddings so a provider failure does not starve later articles in the same organization.
+- Added separate opt-in Go SCIM provisioning and deactivation routes through governed external-IdP capabilities. Standard clients can omit `Idempotency-Key`; explicit UUID keys are also supported. Audit records omit email values and fingerprints.
+
+- Vite routes explicitly implemented auth method and path pairs to Go by default. Unsupported Better Auth methods and paths continue through the legacy auth handler.
+- Vite vendor creation can opt into Go's session-authenticated `purchasing.createVendor` capability with `GO_SESSION_CAPABILITY_ROUTE=1`, `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`, and `CHASTE_GO_PURCHASING_VENDOR_SLICE=1`. It preserves approval responses and falls back to the existing Purchasing action only when the Go route is absent; default flags keep the legacy request path.
+- **Added direct Go reads for the Vite dashboard, ledger, and metrics APIs.** Dashboard and setup reads now use Go by default; ledger and metrics remain legacy-owned unless their matching Go mount and Vite proxy flags are enabled.
+- **Opt-in Go ownership for projects, team, module settings, branding, and analytics.** Go can now serve session-authenticated `GET`/`POST /api/modules`, `GET`/`POST /api/team`, `GET`/`POST /api/projects`, `GET`/`POST /api/branding`, and `GET /api/analytics` behind matching API and Vite flags. State changes run through the governed capability executor; the team response derives its permission catalog from Go capability metadata. Other methods keep their current owner.
+- **Added opt-in Go ownership for invoice, support-channel, and governed-action endpoints.** Go now resolves Better Auth cookie or bearer sessions directly for `/api/sales/{orderId}`, `/api/support/channels`, and `/api/capabilities/execute`; native clients can select an organization with `X-Organization-ID`, which the Go session resolver checks against membership. Public portal invoice reads use a narrowly granted token resolver. Go and Vite route flags keep the legacy API as the default until each route is proven.
+- **Made Go auth mode explicit and email delivery durable.** `GO_AUTH_ROUTE=1` now requires `GO_AUTH_MODE`; production auth independently enforces an explicit HTTPS origin and secure cookie policy. Verification and recovery links enter a PostgreSQL outbox in the same transaction as their account or recovery token, with leased retry, expiry cleanup, and process restart recovery.
+- **Made the Go organization route compatible with runtime RLS.** A narrowly granted security-definer function resolves a valid Better Auth session to its domain identity and membership ids. Go now loads role grants, organization fields, and agent persona data inside `dbx.WithOrgTx`, and rechecks membership before returning tenant data.
+- **Hardened Go worker lease handling.** Job and routine work now stops when lease renewal errors, times out, or reports lost ownership, and stale workers cannot write completion or retry state after their lease is uncertain.
+- **Hardened Go accounting report and FX totals.** Report and exposure calculations now reject unsafe integer totals and preserve zero exposure rows for fully settled currencies, matching the TypeScript behavior.
+- **Validated Vite CRM API responses.** Saved-view writes now require the documented success envelope, and customer import and undo only treat valid approval responses as pending.
+- **Hardened public support widget polling.** The Next and Go endpoints now accept polling credentials in POST bodies only, and widget state is scoped to its embed token so a prior visitor thread is not shown after switching tokens. Go auto-reply behavior still needs parity before this endpoint can be cut over.
+- **Every application page now lives in the React workspace.** All 30 route-manifest pages are served by the Vite app, so no business page redirects back to the legacy Next.js app. Newly ported: `/accounting`, `/messages`, `/settings`, `/purchasing`, `/purchasing/receiving`, `/support`, `/manufacturing`, `/marketing`, `/proposals`, `/onboarding`, `/documents/editor/[id]`, `/portal/[token]`, `/widget/[token]`, and `/print/invoice/[orderId]`. The public share surfaces (`/portal`, `/widget`), the onboarding wizard, and the print sheet render outside the authenticated shell so they keep their chrome-less layout. Each port validates every response at runtime with strict schemas, preserves `intentId` idempotency on governed writes, surfaces HTTP 202 approval-pending states as pending rather than as success or failure, keeps money in integer minor units, and fails closed on malformed payloads.
+- **Fixed a Vite dev proxy gap that silently broke API calls.** The dev proxy listed API prefixes by hand and had drifted 36 prefixes behind the route manifest, including `/api/crm`, `/api/inventory`, `/api/documents`, `/api/pos`, and `/api/marketing`. An unproxied `/api` path fell through to the SPA fallback, which answered `index.html` at HTTP 200, so the client surfaced a JSON parse error instead of the real configuration fault. The proxy now forwards all `/api` traffic to the legacy app behind a single catch-all, with `/api/health` still routed to the Go API first.
+- **Added a read-only endpoint for the ported invoice print view.** `GET /api/sales/[orderId]` returns the org-scoped order, lines, and governed branding behind authentication. The Next page read those tables server-side, which the Vite client cannot do. It keeps the legacy contract of answering an unknown order with HTTP 200 and the message `Invoice not found.` rather than introducing a 404 before the API version changes.
+- **Complete Go capability coverage.** All 315 ids in the live capability registry now have a Go implementation: 22 `documents` capabilities, 22 `messaging` capabilities, `settings.configureAiProvider`, `settings.restoreAiProvider`, and `harness.approveComposition`. Each preserves its manifest schema, Zod parser behavior, organization scoping, approval payloads, audit and receipt contracts, and fails closed on malformed input. `messaging` preserves the existing non-monotonic read cursors, the ignored `listConversations` filters, and agent mention suppression. Database-backed proofs cover tenant isolation, folder ancestors, version restore, conversation membership, and attachment handling.
+- **Fixed a Go module gate divergence.** `isModuleEnabled` now always allows `settings` and the protected spine modules `iam`, `signals`, and `routines`, matching `createDbModuleGate` in the TypeScript kernel. Previously any organization that had saved a module list silently lost IAM governance in Go while TypeScript still permitted it.
+- **Fixed a Go integer validation divergence.** The shared `requiredSafeInteger` parser rejected nothing about quoted numbers, because `json.Unmarshal` decodes `"5"` into a `json.Number`. Go accepted integer fields that Zod's `z.number()` refuses, across 81 call sites. It now rejects every quoted spelling, and two tests that asserted the lenient behavior under the name "mirror Zod contracts" were corrected to assert the real Zod contract.
+- **TypeScript 7.0.2 (native Go compiler).** Every workspace package type-checks with the native compiler, measured 5.7x faster on `packages/kernel` and 6.1x on `apps/web-vite` than TypeScript 5.9.3 on the same machine and sources. Following Microsoft's side-by-side guidance, `typescript` is aliased to `@typescript/typescript6` so `typescript-eslint` and the migration scripts that read the compiler AST keep the TypeScript 6 API, while `@typescript/native` provides the 7.0 `tsc` binary. `tsconfig.base.json` now declares `"types": ["node"]` explicitly, which TypeScript 7 no longer includes by default. Type checking, lint, tests, and the Vite production build are unchanged.
+- **Migration performance measurements.** README and benchmark reports show a three-run Vite build median of 25.77s versus 34.90s for Next. A refreshed server startup sample measured 2.767s for Vite and 3.491s for Next to the first TCP listener connection; edit-to-ready and route readiness remain unmeasured.
+- **Go accounting and inventory parity proofs.** Database-backed executor tests cover concurrent invoice-payment overage prevention, approved stock-adjustment audit details, and cross-organization item isolation.
+- **Go Purchasing bill payment parity proof.** A database-backed governed executor test confirms simultaneous bill payments cannot exceed the outstanding balance or duplicate payment postings.
+- **Go Purchasing receipt-history parity proof.** The database-backed Go projection test now confirms legacy stock movements appear in accepted and remaining order-line totals without creating synthetic receipt records.
+- **Go routine stock-history access.** The opt-in Go routine agent can now read recent stock movements through the governed inventory capability, with database-backed organization isolation coverage.
+- **Go routine trial-balance access.** The opt-in Go routine agent can now check account totals by currency through the governed accounting capability, with database-backed organization isolation coverage.
+- **Go routine balance-sheet access.** The opt-in Go routine agent can now read balanced assets, liabilities, equity, and retained results through the governed accounting capability, with database-backed organization isolation coverage.
+- **Go routine income-statement access.** The opt-in Go routine agent can now read base-currency revenue, expenses, and net income through the governed accounting capability, with database-backed organization isolation coverage.
+- **Go approval decision atomicity.** Rejection status and its audit event commit together. Approved capability effects, execution audit, and final status now share one transaction; failure injection confirms the effect rolls back and the approval returns to pending.
+- **Legacy approval decision atomicity.** The production TypeScript route commits approved capability effects, audit entries, and final status together. Failure injection verifies rollback and restores the approval to pending; rejection status and its ledger event remain atomic as well.
+- **HR interaction parity.** Preserve draft input when an action is waiting for approval, and add arrow, Home, and End keyboard navigation to People workspace tabs. Inventory history and marketplace reads now time out instead of remaining in loading states indefinitely.
+- **Vite People workspace.** The React app now exposes People, hiring, leave, time, and payroll draft/history surfaces through the existing governed HR endpoints. Payroll execution and voiding, plus Expense controls, continue to use the full legacy workspace.
+- **Vite Documents preview and safer file delivery.** The React app now browses document records and extracted text, while module-disabled organizations cannot list or fetch document files. Detail responses omit original base64 and raw text fields; active or unknown file types download instead of rendering inline.
+- **Go Creator capabilities.** Implement all 13 Creator proposal, scaffolding, plugin marketplace, and controlled release capabilities in the governed Go executor, preserving tenant scope, approval payload checks, audit records, and replay behavior.
+- **Opt-in Go Creator workflows.** Creator evolution mutations and marketplace verification, listing reads, publish, install, and uninstall can dispatch through the signed Go capability bridge behind default-off flags. The listing read bridge validates every field and fails closed on uncertain outcomes. Marketplace writes validate their success and approval responses in the Vite client. Human verification preserves the legacy signed-session and organization-membership access; agents retain their Creator module and permission gates, and system executions retain the module gate.
+- **Vite inventory operations.** The React inventory page now supports item creation and stock adjustment, location creation, reservations and release, cycle counts, partial transfer confirmation, and stock movement history through the existing governed inventory API. Writes carry intent IDs, preserve approval-pending responses, and reconcile timed-out outcomes through refreshed history. History unit costs use the organization base currency and its minor-unit exponent.
+- **Marketplace verification errors.** The opt-in Go verification bridge now preserves the legacy verdict contract for invalid manifests and passes permission errors to the Vite page with their actual message.
+- **Vite CRM task assignments.** Load team members when opening Customers or Tasks so owners can be assigned from a fresh Tasks view; a failed team lookup can be retried.
+- **Opt-in Go inventory valuation reversals.** The `reverseValuationSummary` action can use `inventory.reverseValuationSummary` behind `GO_INVENTORY_VALUATION_SUMMARY_WRITE=1`. The flag defaults off, preserving the TypeScript executor path; Go responses retain approval and error contracts, and unavailable or malformed results fail closed without a TypeScript retry.
+- **Vite Products catalog.** The React app now owns `/products` with catalog filtering, product and service create/edit/archive, opening stock, mapped CSV previews and validation, duplicate reporting, governed import, and import undo through existing same-origin business APIs.
+- **Migration build benchmarks.** README now summarizes measured Next.js, Vite, and Go build times and peak memory, with the existing scope and sample-size caveats.
+- **Inventory reversal approval parity.** The Go bridge validates its pending approval envelope and removes the internal approval ID to match the legacy API response.
+- **Preserved empty inventory location strings through Go.** The opt-in stock-location bridge now accepts the empty `code` or `name` strings allowed by the legacy output contract and database schema.
+- **Opt-in Go support inbox reads.** `GET /api/support` can dispatch customer-bound inbox lists through `support.listConversations` behind `GO_SUPPORT_CONVERSATION_READS=1`. The Go query filters customer-bound threads before the limit to preserve the legacy join and pagination behavior; strict response validation and missing actor context fail closed without TypeScript fallback.
+- **Opt-in Go support conversation detail reads.** `GET /api/support?id=<id>` can dispatch through `support.readConversation` behind `GO_SUPPORT_CONVERSATION_DETAIL_READS=1`. The Go output preserves the legacy oldest-first 200-message detail projection while routine calls without a limit retain their existing shape.
+- **Hardened Go support conversation detail reads.** Uppercase UUID query values now match Go's canonical response IDs, transcript row-stream errors fail closed instead of returning partial messages, and empty transcripts serialize as arrays.
+- **Opt-in Go CRM task reads.** `GET /api/crm` task lists can dispatch through `crm.listTasks` behind `GO_CRM_TASK_READS=1`, preserving open-task filtering and the existing response shape. Other CRM reads remain on their current handlers.
+- **Opt-in Go supplier statement reads.** The `supplierStatement` action on `POST /api/purchasing` can use `purchasing.supplierStatement` behind `GO_PURCHASING_SUPPLIER_STATEMENT_READS=1`. The flag defaults off, response fields are strictly validated, and unavailable or malformed Go results fail closed without a TypeScript retry.
+- **Go routine supplier statements.** Go routines can read a tenant-scoped supplier statement through `purchasing.supplierStatement` using `purchasing.read`, with a session-linked audit event.
+- **Hardened supplier statement reads.** Bill, credit, and payment row-stream errors now fail closed, and equal-date/equal-kind rows retain stable TypeScript ordering.
+- **No-store Go invoice reads.** Go-backed `GET /api/accounting` responses, including unauthorized and permission-denial responses, explicitly disable caching.
+- **Opt-in Go support library reads.** `GET /api/support?library=1` can dispatch through the signed `support.listLibrary` capability behind `GO_SUPPORT_LIBRARY_READS=1`. The response keeps its organization-scoped canned response and article lists, uses no-store caching, and fails closed without a TypeScript retry.
+- **Opt-in Go inventory item metadata reads.** `GET /api/inventory` can fetch the IDs and catalog metadata merged into stock report rows through `inventory.listItemMetadata` behind `GO_INVENTORY_ITEM_METADATA_READS=1`. The bridge is organization-scoped, strictly validated, and fails closed without a TypeScript retry.
+- **Opt-in Go supplier performance reads.** `GET /api/purchasing` can dispatch vendor performance metrics through `purchasing.supplierPerformance` behind `GO_PURCHASING_SUPPLIER_PERFORMANCE_READS=1`. The flag defaults off; responses are strictly validated and unavailable or malformed Go results fail closed without a TypeScript retry.
+- **Hardened supplier performance reads.** Go now checks vendor, order, and line row-stream errors before returning supplier metrics, preventing partial reports from appearing successful.
+- **Opt-in Go HR applicant reads.** Applicant lists in `GET /api/hr` can use the signed `hr.listApplicants` capability behind `GO_HR_APPLICANT_READS=1`. The flag defaults off, and unavailable or malformed Go results fail closed without querying the TypeScript executor.
+- **Go routine authored-document reads.** With the Go routine runner enabled, routines can list authored documents through the governed `documents.listDocs` capability using `documents.read`, preserving organization scope, document metadata, version counts, and session-linked system audit history.
+- **Go routine document version reads.** With the Go routine runner enabled, routines can list authored document version history through the governed `documents.listDocVersions` capability using `documents.read`, preserving ascending version order, nullable notes and authors, the `workmate` agent label, millisecond timestamps, organization scope, and session-linked system audit history.
+- **Go routine document version details.** With the Go routine runner enabled, routines can read one authored document version through the governed `documents.getDocVersion` capability using `documents.read`, preserving content, HTML, nullable notes, millisecond timestamps, organization scope, and session-linked system audit history.
+- **Go routine inventory locations.** Routines can list organization-scoped stock location codes and names through the governed `inventory.listLocations` capability using `inventory.read`, with results ordered by code and a session-linked system audit event.
+- **Go routine quote reads.** Go routines can list organization-scoped customer quotes through the governed `accounting.listQuotes` capability using `accounting.read`, with the legacy status filter, newest-first ordering, nullable invoice and expiry fields, and session-linked system audit history.
+- **Opt-in Go recurring-template reads.** `GET /api/recurring` can dispatch through signed Go `accounting.listRecurringTemplates` behind `GO_ACCOUNTING_RECURRING_READS=1`. The flag defaults off; the response is strictly validated, and unavailable or malformed Go results fail closed without a TypeScript retry.
+- **Opt-in Go cash forecast reads.** The `cashForecast` action on `POST /api/accounting` can use signed Go `accounting.cashForecast` behind `GO_ACCOUNTING_CASH_FORECAST_READS=1`. The flag defaults off; forecast weeks and integer minor-unit fields are validated, explicitly null saved assumptions are rejected while missing fields use TypeScript defaults, and unavailable or malformed Go results fail closed without a TypeScript retry.
+- **Opt-in Go purchasing price history reads.** `GET /api/purchasing` can dispatch `purchasing.priceHistory` through signed Go behind `GO_PURCHASING_PRICE_HISTORY_READS=1`. The flag defaults off; price rows retain the existing response shape, and unavailable or malformed Go results fail closed.
+- **Go routine customer timelines.** Go routines can read a customer timeline through governed `crm.customerTimeline` using `crm.read`, with the legacy per-activity limit and reverse-chronological entries. The database-backed proof checks organization scope and the session-linked system audit event.
+- **Opt-in Go inventory barcode lookup.** The `lookupByBarcode` action on `POST /api/inventory` can use signed Go `inventory.lookupByBarcode` reads behind `GO_INVENTORY_BARCODE_LOOKUP_READS=1`. The flag defaults off; the legacy response envelope and nullable item result are preserved, and unavailable or malformed Go responses fail closed without a TypeScript retry.
+- **Opt-in Go customer statement reads.** The `customerStatement` action on `POST /api/accounting` can use the signed Go `accounting.customerStatement` capability behind `GO_ACCOUNTING_CUSTOMER_STATEMENT_READS=1`. The flag defaults off; statement rows and currency balances are validated and preserved, and unavailable or malformed Go responses fail closed without a TypeScript retry.
+- **Fixed Go organization settings validation parity.** Inventory module settings now trim and validate configured defaults like the TypeScript schema, unknown keys are stripped, JSON `null` is rejected, and omitted approval categories persist as an empty array.
+- **Fixed Go stock report average cost parity.** Go now divides the ledger valuation by the same projected on-hand quantity displayed in the report, matching the TypeScript report when the stock projection and movement replay differ.
+- **Opt-in Go routine scheduler.** `GO_ROUTINE_SCHEDULER=1` moves due routine discovery and enqueue to Go with globally ordered bounded candidates, tenant-scoped row locking, and duplicate-safe occurrence/job creation. The TypeScript worker skips only routine scheduling under the same flag. Go routine claiming and execution remain separately default-off behind `GO_ROUTINE_AGENT_RUNNER=1`; when only scheduling is enabled, keep the TypeScript worker running to consume routine jobs.
+- **Preserved routine credential behavior.** When an organization has stored AI settings but no stored provider key, Go routine execution no longer falls back to a process-wide provider key.
+- **Default-off Go routine execution.** With `GO_ROUTINE_AGENT_RUNNER=1`, the Go jobs worker can execute scheduled and manual `routines.executeRoutine` jobs. It rechecks disabled scheduled routines, creates replayable sessions, invokes the workspace-configured OpenAI-compatible provider, routes schema-described CRM customer, invoice, inventory stock report, and support read tools through the governed Go executor, and finalizes notifications and scheduled occurrences. Broader routine tool parity remains open.
+- **Go routine CRM task-list tool.** Go routine agents can call `crm_listTasks` through governed `crm.listTasks` execution with the optional `openOnly` filter. The tool uses `crm.read` and produces a system audit event linked to the routine session; broader routine tool parity remains open.
+- **Go routine cash-flow report tool.** Go routine agents can call `accounting_cashFlow` through governed `accounting.cashFlow` execution, optionally selecting cash account codes and otherwise using the legacy `1000` default. The routine integration proof verifies the tied local cash total and tenant isolation.
+- **Go routine customer statement tool.** Go routine agents can call `accounting_customerStatement` through governed `accounting.customerStatement` execution. Its database-backed routine proof checks the selected customer's invoice balance and excludes other customer and tenant data.
+- **Go routine receivables aging tool.** Go routine agents can call `accounting_arAging` through governed `accounting.arAging` execution. The routine proof verifies the aging totals include only the organization's outstanding invoices.
+- **Go routine AP aging tool.** Go routine agents can call `purchasing_apAging` through governed `purchasing.apAging` execution. Its database-backed proof checks the local bill total and excludes foreign tenant balances.
+- **Go routine HR, CRM view, budget, lot, reservation, and receipt tools.** Go routine agents can call `hr_listEmployees`, `hr_leaveBalance`, `crm_listCustomerViews`, `accounting_listBudgetScenarios`, `inventory_listLots`, `inventory_listReservations`, and `purchasing_listReceipts` through the same governed executor. The database-backed routine proof checks tenant isolation for each, that a system actor sees only shared saved customer views, that a cross-tenant employee leave balance is refused rather than returned empty, and that accepted and remaining purchase-order line totals exclude foreign receipts.
+- **Opt-in Go period-close readiness reads.** `GET /api/accounting/close` can dispatch `accounting.periodCloseWorkbench` through the signed Go bridge behind `GO_ACCOUNTING_PERIOD_CLOSE_WRITES=1`. The default remains TypeScript; period, task, blocker, and FX fields are validated, and unavailable or malformed Go responses fail closed.
+- **Fixed accounting report input parity.** Go's `accounting.reportCurrencyMetadata` parser now accepts and strips unknown object keys, matching the TypeScript Zod contract.
+- **Vite CRM customer bulk updates.** Select visible customer records to assign an owner and add a tag through the existing governed profile API, retaining its approval-pending behavior.
+- **Vite CRM follow-up task filters.** Task views now separate work due today, overdue, unassigned, and all open tasks, with counts and an option to include completed work.
+- **Vite CRM selected customer export.** Export selected customer profiles as CSV with the legacy columns and spreadsheet formula protection.
+- **Fixed Go read parity for supplier metrics and support conversations.** Void purchase orders no longer affect supplier performance, and support conversation lists use the conversation creation time when a thread has no messages.
+- **Opt-in Go authored-document version reads.** Version history and single-version content reads on `GET /api/docs/:id` can use signed Go capabilities behind `GO_DOCUMENTS_VERSION_READS=1`. The flag defaults off, preserves the legacy response projection, and fails closed when Go is unavailable or returns invalid data.
+- **Opt-in Go POS shift-summary reads.** The `shiftSummary` action on `/api/pos` can use the signed `pos.shiftSummary` capability behind `GO_POS_SHIFT_SUMMARY_READS=1`. The flag defaults off, the summary response is validated and preserved, and unavailable or malformed Go responses fail closed without a TypeScript retry.
+- **Opt-in Go payment-run reads.** `GET /api/purchasing/payment-runs` can use the signed Go `purchasing.listPaymentRuns` capability behind `GO_PURCHASING_PAYMENT_RUN_READS=1`. The flag defaults off; run state, timestamps, journal references, and bill-level remittance fields are validated and preserved, and unavailable or malformed Go results fail closed.
+- **Opt-in Go inventory transfer reads.** The transfer list on `GET /api/inventory` can use signed Go `inventory.listTransfers` reads behind `GO_INVENTORY_TRANSFER_READS=1`. The flag defaults off; transfer routes, notes, the 50-row limit, and line quantities are preserved, and unavailable or malformed Go results fail closed.
+- **Opt-in Go inventory lot reads.** The lot list on `GET /api/inventory` can use signed Go `inventory.listLots` reads behind `GO_INVENTORY_LOTS_READS=1`. The flag defaults off; the 200-row newest-first order, SKU, lot code, nullable expiration timestamp, and response fields are preserved, and unavailable or malformed Go results fail closed.
+- **Opt-in Go inventory reservation reads.** The reservation list on `GET /api/inventory` can use signed Go `inventory.listReservations` reads behind `GO_INVENTORY_RESERVATIONS_READS=1`. The flag defaults off; all statuses, the 100-row newest-first order, and complete reservation response fields are preserved, and unavailable or malformed Go results fail closed.
+- **Opt-in Go inventory cycle-count reads.** The cycle-count list on `GET /api/inventory` can use signed Go `inventory.listCycleCounts` reads behind `GO_INVENTORY_CYCLE_COUNTS_READS=1`. The flag defaults off; the 20-row newest-first order and full cycle-count header and line projection are preserved, and unavailable or malformed Go results fail closed.
+- **Opt-in Go inventory location reads.** The location list on `GET /api/inventory` can use the signed Go `inventory.listLocationRecords` capability behind `GO_INVENTORY_LOCATIONS_READS=1`. The flag defaults off; full row fields and code ordering come from Go, the routine tool keeps its existing shape, and unavailable or malformed Go results fail closed without a duplicate TypeScript location query.
+- **Opt-in Go accounts payable aging.** The `apAging` report in `GET /api/purchasing` can use the signed Go `purchasing.apAging` capability behind `GO_PURCHASING_AP_AGING_READS=1`. The flag defaults off; outstanding balance filters, bill-date bucket boundaries, workspace currency, and the response fields are preserved, and unavailable or malformed Go results fail closed.
+
+- **Opt-in Go purchasing workflow reads.** Purchase requests and RFQs in `GET /api/purchasing` can use the signed `purchasing.listPurchaseWorkflow` capability behind `GO_PURCHASING_WORKFLOW_READS=1`. The flag defaults off; decision reasons, vendor names, quote notes, ordering, timestamps, and the aggregate response stay stable, and unavailable or malformed Go responses fail closed.
+- **Opt-in Go accounting invoice reads.** The invoice list in `GET /api/accounting` can use the signed Go `accounting.listInvoices` capability behind `GO_ACCOUNTING_INVOICE_READS=1`. The flag defaults off; response fields are validated and preserved, and unavailable or malformed Go results fail closed without a TypeScript retry.
+- **Opt-in Go CRM saved-view reads.** Saved customer views can use a signed Go reader behind `GO_CRM_VIEW_READS=1`. The flag defaults off; shared and current-user private views retain their organization scope, ordering, and response fields, and unavailable or invalid Go responses fail closed.
+- **Opt-in Go CRM saved-view writes.** Saving customer views can use the signed Go capability executor behind `GO_CRM_VIEW_WRITES=1`. The flag defaults off; human session checks, private-view ownership, approval handling, audit receipts, snapshot restore, and the legacy response contract are preserved. Unavailable or invalid Go outcomes fail closed without a TypeScript retry.
+
+### Added
+
+- **Go IAM org settings and purchasing supplier analytics.** Module switchboard (set and restore, protected spine unioned in), per-module configuration, the blanket autonomy policy, print branding, and the supplier performance, price history, and statement reads are ported to the signed Go capability executor and jobs worker under `iam.admin` and `purchasing.read`. They are reachable through governed agent and worker dispatch; the settings routes keep their TypeScript handlers for now, so no new flags ship with this slice.
+- **Go manufacturing, marketing, HR openings, and reminder parity.** The manufacturing BOM and work-order surface (definition, explosion, costing, feasibility, production, reversal, lot traceability), the marketing campaign surface (segments, campaigns, opt-out-honoring sends, delivery analytics), HR job openings, and payment reminder building are ported to the signed Go capability executor and jobs worker. Job opening writes (`GO_HR_OPENINGS_WRITE=1`) and reminder building (`GO_ACCOUNTING_REMINDERS_READS=1`) are bridged behind default-off flags; manufacturing and marketing are reachable through governed agent and worker dispatch since no public route serves them today. Existing handlers keep every other action, and uncertain writes fail closed without retrying through TypeScript.
+- **Opt-in Go supplier AP aging read.** The purchasing AP aging report can be served by the signed Go capability executor behind `GO_PURCHASING_AP_AGING_READS=1`. The flag defaults off, all other purchasing actions keep their current handlers, the aging shape stays stable, and an unavailable Go service fails closed without retrying through TypeScript.
+- **Vite accounting and purchasing previews.** Added read-only invoice and supplier payment-run pages with validated same-origin APIs, currency-aware amounts, accessible loading and error states, and links to the full legacy workspaces.
+- **Vite period-close readiness preview.** Added a read-only Accounting page with period selection, validated close tasks and blockers, reconciliation and FX exposure status, and accessible loading, empty, disabled, and error states. Checklist changes, FX revaluation, close, and reopen remain in the full workspace.
+- **Vite purchase receipt history preview.** Added a read-only React page to choose a purchase order and review receipt dates, accepted, rejected, returned, and outstanding quantities. It validates the existing same-origin Purchasing APIs, preserves currency and thousandth-unit formatting, provides accessible loading, empty, and error states, and links receiving actions to the full workspace.
+- **Vite inventory and POS summaries.** Added read-only React previews for inventory stock levels, reorder needs, and POS shift summaries. Both use validated same-origin APIs, preserve workspace currency formatting, and link to the full legacy workspaces for actions.
+- **Vite inventory lot preview.** The read-only inventory page now shows SKU, lot code, and expiry date from the existing inventory API. A current-balance column appears only when the API supplies lot balances; lot operations remain in the full workspace.
+- **Vite inventory location preview.** The read-only inventory page now shows stock location codes and names from the existing inventory API. Location changes remain in the full workspace.
+- **Vite cycle-count preview.** The read-only inventory page now shows cycle-count status, location, date, progress, and expected, counted, and variance quantities from the existing inventory API. Count creation and posting remain in the full workspace.
+- **Vite inventory transfer preview.** The read-only inventory page now shows transfer status, source and destination, notes, and requested and confirmed quantities from the existing inventory API. Transfer actions remain in the full workspace.
+- **Vite accounts payable aging preview.** Added an authenticated read-only Purchasing page with the outstanding total, age-band amounts, proportional aging meter, and accessible loading, disabled, and error states. Bill review and payment remain in the full workspace.
+- **Vite sales order filters.** The Sales orders preview now filters by draft, confirmed, delivered, and cancelled status, while retaining customer/order search and the `/` search shortcut.
+- **Vite sales orders preview.** Added a React sales orders page with same-origin API loading, validated order data, search, totals, backorder labels, and recoverable loading and error states. Sales mutations remain on the current route owner.
+- **Opt-in Go authored-document reads.** The authored-document list in `GET /api/docs` can use signed Go `documents.listDocs` reads behind `GO_DOCUMENTS_LIST_READS=1`. The flag defaults off, templates stay on the legacy executor, the combined response is preserved, and unavailable or malformed Go results fail closed.
+- **Opt-in Go ingested-document reads.** `GET /api/documents` list and detail reads can use the signed Go `documents.listIngestedDocuments` capability behind `GO_DOCUMENT_INGESTED_READS=1`. The flag defaults off, list and vendor data plus detail suggestions stay compatible, `preview=1` omits suggestions, raw upload/text columns remain excluded, and unavailable or malformed Go responses fail closed.
+- **Opt-in Go inventory stock report reads.** The main inventory report and reorder alerts can use signed Go `inventory.stockReport` reads behind `GO_INVENTORY_STOCK_REPORT_READS=1`. The flag defaults off, existing report fields stay stable, and unavailable or malformed Go results fail closed.
+- **Opt-in Go inventory valuation posting.** The `postValuationSummary` action on `POST /api/inventory` can use `inventory.postValuationSummary` behind `GO_INVENTORY_VALUATION_SUMMARY_WRITE=1`. The flag defaults off; memo defaults, approval responses, no-op results, and valuation fields stay stable, and unavailable or malformed Go results fail closed.
+- **Opt-in Go sales order reads.** `GET /api/sales` can use the signed Go `sales.listOrders` capability behind `GO_SALES_LIST_ORDERS_READS=1`. The flag defaults off; status filtering and the `{ orders }` response stay stable, and unavailable or malformed Go responses fail closed.
+- **Opt-in Go payment reversals.** `accounting.reversePayment` can use the signed Go capability bridge behind `GO_ACCOUNTING_REVERSE_PAYMENT_WRITE=1`. The flag defaults off; approval and response fields stay stable, and uncertain outcomes fail closed without a TypeScript retry.
+- **Opt-in Go FX rate recording.** `accounting.recordFxRate` can use the signed Go capability bridge behind `GO_ACCOUNTING_FX_RATE_WRITE=1`. The flag defaults off; input normalization and approval responses stay stable, and uncertain outcomes fail closed without a TypeScript retry.
+- **Opt-in Go FX revaluation.** The month-end `revalue` action on `POST /api/accounting/close` can use `accounting.revalueForeignReceivables` behind `GO_ACCOUNTING_FX_REVALUATION_WRITE=1`. The flag defaults off; `accounting.post` checks, approval responses, and all revaluation fields stay stable, and unavailable or malformed Go results fail closed.
+- **Opt-in Go supplier payment reversals.** `purchasing.reverseVendorPayment` can use the signed Go capability bridge behind `GO_PURCHASING_REVERSE_VENDOR_PAYMENT_WRITE=1`. The flag defaults off; approval and error responses stay stable, and uncertain outcomes fail closed without a TypeScript retry.
+- **Opt-in Go payment recording.** `accounting.recordPayment` can use the signed Go capability bridge behind `GO_ACCOUNTING_RECORD_PAYMENT_WRITE=1`. The flag defaults off; approval and validation responses remain stable, and uncertain outcomes fail closed without a TypeScript retry.
+- **Opt-in Go supplier bill credits.** `purchasing.billCreditNote` can use the signed Go capability bridge behind `GO_PURCHASING_BILL_CREDIT_WRITES=1`. The flag defaults off; approval and validation responses remain stable, and uncertain outcomes fail closed without a TypeScript retry.
+- **Opt-in Go CRM timeline reads.** Customer timelines can use the signed Go reader behind `GO_CRM_TIMELINE_READS=1`. The flag defaults off; task reads stay on their current path, timeline entries are strictly validated, and unavailable or malformed Go results fail closed.
+- **Opt-in Go quote reads.** `GET /api/quotes` can use the signed Go `accounting.listQuotes` capability behind `GO_ACCOUNTING_QUOTES_READS=1`. The flag defaults off, status filtering and response fields stay stable, and unavailable or malformed Go results fail closed.
+- **Opt-in Go inventory item history.** `GET /api/inventory?sku=...` can read item movements through the signed Go capability behind `GO_INVENTORY_ITEM_HISTORY_READS=1`. The flag defaults off, preserves the movement response and missing-item behavior, and fails closed for unavailable or malformed Go results.
+- **Opt-in Go purchase receipt reads.** The purchasing `receiptDetail` action can use the signed Go `purchasing.listReceipts` capability behind `GO_PURCHASING_RECEIPT_READS=1`. The flag defaults off, preserves receipt and order-line response fields, and fails closed when Go is unavailable.
+- **Opt-in Go purchase order closure.** The `closePurchaseOrder` action can use the signed Go capability behind `GO_PURCHASING_PO_CLOSE_WRITES=1`. The flag defaults off, preserves approval and response behavior, and fails closed without a TypeScript retry when the Go outcome is uncertain.
+- **Opt-in Go accounting report reads.** The report capabilities and dedicated signed `accounting.reportCurrencyMetadata` read consumed by `GET /api/reports` can use the Go executor behind `GO_ACCOUNTING_REPORTS_READ=1`. The flag defaults off; base and unsupported currency metadata, report fields, and optional null behavior stay stable, and unavailable or malformed Go responses fail closed.
+- **Go Wave 6 accounting, inventory, and purchasing capabilities.** Added governed Go execution and worker support for accounting reports and FX revaluation, inventory valuation and read models, and purchasing bill credits, purchase order closure, and receipt listing. Public route ownership remains unchanged while opt-in bridges and parity proofs are completed.
+- **Human approval for automated system money actions.** System jobs now use the configured money thresholds, and above-threshold or unknown amounts require a matching executing human approval. The legacy TypeScript and Go executors reject system jobs that try to create or reuse an unverified approval.
+- **Opt-in Go tax returns, HR leave and time, and HR payroll and applicants.** Sales tax return filing (`GO_ACCOUNTING_TAX_RETURNS_WRITE`), leave requests, decisions, cancellation, and clock in/out (`GO_HR_LEAVE_TIME_WRITES`), and payroll run creation, execution, voiding plus the applicant pipeline (`GO_HR_PAYROLL_APPLICANT_WRITES`) can use the signed Go capability executor and jobs worker. The three flags default off, existing handlers keep every other action, tax master writes ride the executor and worker without a route flag, public response shapes stay stable, and uncertain writes fail closed without retrying through TypeScript.
+- **Go Wave 4 capability families.** Budget scenarios, period close, inventory imports and reservations, and supplier payment runs now have Go parsers, tenant-scoped governed execution, approval replay, audit receipts, and worker claim support. Existing API actions can opt into signed Go dispatch with the new `GO_ACCOUNTING_BUDGET_WRITES`, `GO_ACCOUNTING_PERIOD_CLOSE_WRITES`, `GO_INVENTORY_IMPORT_WRITES`, `GO_INVENTORY_RESERVATION_WRITES`, and `GO_PURCHASING_PAYMENT_RUN_WRITES` flags. All default off, response contracts stay stable, and uncertain writes fail closed.
+- **Opt-in Go purchase returns.** `purchasing.returnGoods` allocates returns to received receipt lines, rejects returned or unavailable stock, preserves legacy no-receipt history, and records audited stock movements. The `/api/purchasing` action and jobs worker use the governed Go executor behind `GO_PURCHASING_RETURN_WRITES=1`, which defaults off.
+- **Opt-in Go credit notes, entry reversals, banking, purchase requests, and item master.** Credit notes and journal entry reversals (`GO_ACCOUNTING_INVOICE_OPS_WRITE`), bank account, feed, matching, exclusion, and deletion writes (`GO_BANKING_WRITES`), the purchase request through RFQ award workflow (`GO_PURCHASING_REQUEST_WRITES`), and inventory item and location master writes (`GO_INVENTORY_ITEM_WRITES`) can use the signed Go capability executor and jobs worker. All four flags default off, existing handlers keep every other action, public response shapes stay stable, and uncertain writes fail closed without retrying through TypeScript.
+- **Opt-in Go purchase order receiving.** `receiveGoods` can use the signed Go capability executor and jobs worker behind `GO_PURCHASING_RECEIPT_WRITES=1`. The flag defaults off; reads and other purchasing actions keep their current handlers. Duplicate lines, accepted and rejected quantities, over-receipt authority, stock effects, three-way matching, and fail-closed uncertain writes are preserved.
+- **Opt-in Go inventory cycle counts.** Starting, recording, posting, and cancelling cycle counts can use the signed Go capability executor and jobs worker behind `GO_INVENTORY_CYCLE_COUNTS=1`. The flag defaults off; the existing `startCycleCount` alias and unrelated inventory actions keep their current handlers. Movement drift checks, location snapshots, audit and approval behavior, and fail-closed uncertain writes are preserved.
+- **Generated Go policy API contract.** Added a versioned OpenAPI contract for the signed Go policy read, with generated Go and TypeScript models and a drift check. Existing paths, runtime validation, and response behavior remain in place.
+- **Opt-in Go purchase order creation.** The purchasing route can create purchase orders through the signed Go capability executor and worker behind `GO_PURCHASING_PO_WRITES=1`. The flag defaults off, other purchasing actions keep their existing handlers, and uncertain writes fail closed without TypeScript retry.
+- **Opt-in Go expense, purchasing, inventory, and POS capabilities.** Expense claim submission, decisions, and payments; vendor and bill creation and bill payments; stock adjustments and transfer lifecycle actions; and POS session, sale, return, and summary actions now have Go capability and worker paths. Four independent flags default off, public route ownership and existing data remain intact, and uncertain writes fail closed without TypeScript retry.
+- **Opt-in Go expense policy updates.** The `setPolicy` action now uses the governed Go capability and worker path when `GO_ACCOUNTING_EXPENSE_WRITES=1`; the flag remains off by default, and the existing upsert, approvals, audit, receipts, and response stay intact.
+- **Opt-in Go expense reads.** Expense claims and category limits can use separately governed Go reads behind `GO_ACCOUNTING_EXPENSE_READS=1`; the combined API response stays unchanged, the flag remains off by default, and unavailable Go reads fail closed.
+- **Opt-in Go sales order writes.** Sales order creation, confirmation, delivery, and cancellation can use the signed Go capability executor behind `GO_SALES_WRITE=1`. The flag defaults off; order listing and other sales actions keep their existing handlers. Public response shapes stay stable, and uncertain writes fail closed without retrying through TypeScript.
+- **Opt-in Go accounting quote writes.** Quote creation, acceptance, decline, and expiry sweeps can use the signed Go capability executor behind `GO_ACCOUNTING_QUOTES_WRITE=1`. The flag defaults off; the dedicated quotes route and other accounting actions keep their existing handlers. Public response shapes stay stable, and uncertain writes fail closed without retrying through TypeScript.
+- **Opt-in Go recurring invoice template writes.** Recurring template creation, pausing, and resumption can use the signed Go capability executor behind `GO_ACCOUNTING_RECURRING_WRITE=1`. The flag defaults off; template listing and other accounting actions keep their existing handlers. Public response shapes stay stable, and uncertain writes fail closed without retrying through TypeScript.
+- **Opt-in Go HR employee writes.** Employee hiring, deactivation, and structure updates can use the signed Go capability executor behind `GO_HR_EMPLOYEE_WRITES=1`. The flag defaults off; leave, payroll, and other HR actions keep their existing handlers. Public response shapes stay stable, and uncertain writes fail closed without retrying through TypeScript.
+- **Opt-in Go CRM task writes.** CRM task creation, completion, and detail updates can use the signed Go capability executor behind `GO_CRM_TASK_WRITES=1`. The flag defaults off; CRM reads, follow-up drafting, and other writes keep their existing handlers. Public response shapes stay stable, and uncertain writes fail closed without retrying through TypeScript.
+- **Opt-in Go customer imports.** Customer import and undo can use the existing governed Go CRM capabilities behind `GO_CRM_IMPORT_WRITES=1`. The flag defaults off; product imports and other CRM actions keep their current handlers. Row validation, duplicate results, partial errors, approval responses, and fail-closed uncertain writes are preserved.
+- **Opt-in Go customer writes.** Customer creation, deactivation, merge, merge undo, and profile updates can use the existing governed Go CRM capabilities behind `GO_CRM_CUSTOMER_WRITES=1`. The flag defaults off; customer reads stay on the existing handler, approval responses keep their shape, and uncertain outcomes fail closed without retrying through TypeScript.
+- **Opt-in Go CRM deal lifecycle writes.** Deal creation, stage changes, and lead conversion can use the signed Go capability executor behind `GO_CRM_DEAL_WRITES=1`. The flag defaults off; CRM reads and other writes keep their existing handlers. Public response shapes remain stable, and uncertain writes fail closed without retrying through TypeScript.
+- **Opt-in Go CRM deal reads.** The deals list can use the signed Go `crm.listDeals` capability behind `GO_CRM_DEAL_READS=1`. The flag defaults off; the org-scoped 200-row response fields and timestamps are preserved, and unavailable or invalid Go responses fail closed.
+- **Opt-in Go invoice creation.** `POST /api/accounting` can dispatch only `action: "createInvoice"` to the signed Go capability executor behind `GO_ACCOUNTING_CREATE_INVOICE=1`. The flag defaults off; all other accounting actions and GET remain legacy-owned. Pending approval responses keep the existing public shape, and uncertain writes fail closed without a TypeScript retry.
+- **Go API migration foundation.** Added a pinned Go service, graceful HTTP server startup, a transaction-local tenant RLS helper, and Go implementations of the existing health response and a read-only governance policy query. The policy shadow uses a short-lived signed session assertion; the Go policy GET is an explicit opt-in while the existing response remains the default. CI now runs Go tests and vet; no production route has changed owners.
+- **Go database isolation hardening.** Provisioning now repairs the dedicated `chaste_app` role and its password, clears role memberships, preserves database TLS options, and is an explicit setup command. Go requires and checks that role at startup; policy responses are not cacheable, and development shadow requests require loopback HTTP or HTTPS.
+- **Vite React migration shell.** Added a parallel React 19 and Vite workspace app with strict TypeScript, Zod validation at the Go health boundary, and a development proxy to the Go API. Existing pages and production routing remain on their current owner while route parity is built.
+- **Vite sign-in and registration flow.** Ported the existing Better Auth email sign-in and sign-up experience into the Vite client while keeping Better Auth and its session cookies on the legacy server. The development auth allowlist accepts the local Vite origin only in development.
+- **Vite team and roles preview.** Added the team management screen with validated API calls for member and role reads, invitations, role assignment, and permission editing. It uses the existing `/api/team` route, which remains legacy-owned by default.
+- **Vite CRM preview.** Added a React workspace for customer, deal, task, saved-view, profile, merge, lead conversion, follow-up draft, and CSV import workflows using the existing same-origin APIs. Direct `/crm` access uses the existing Better Auth session check before CRM APIs load. The legacy CRM remains the route owner until runtime and parity proofs pass.
+- **Opt-in Go team and roles API.** Added Go parity for member and role reads, invitations, role assignment, and permission editing behind `GO_IAM_TEAM=1`. The full permission catalog and existing route responses are preserved, uncertain writes fail closed, and the public route remains legacy-owned by default.
+- **Opt-in Go approvals inbox read.** Pending approvals and recent decision history can use a signed Go read bridge behind `GO_APPROVALS_READ=1`. The full TypeScript capability registry continues to govern row visibility, and Go rechecks session, membership, live permissions, ordering, limits, and org-scoped document titles. The flag defaults off; decision writes are unchanged.
+- **Receivables aging filters.** Accounting aging cards now filter outstanding invoices by the displayed bands, return focus to the invoice list, and cap long lists at 30 rows until expanded.
+- **Migration ownership inventory.** Checked in an API-method and page ownership manifest, with a CI check that requires the inventory to stay aligned with the current route source.
+- **Runtime capability census.** Generated a manifest from the live capability registry with permissions, risk classes, inverses, and JSON Schemas; CI checks it for drift.
+- **Database schema census.** Generated a source-linked manifest of every exported Drizzle table and added a CI drift check, giving the migration an explicit data-preservation inventory.
+- **Policy read wire parity.** Go-backed policy reads preserve the legacy response for JSONB arrays, including arrays with mixed element types.
+- **Go ledger read slice.** Added an opt-in, signed-assertion Go reader for existing audit rows, with organization-scoped PostgreSQL access, response validation, and development shadow comparison. The public route and all writes remain on the legacy owner.
+- **Vite organization switching.** The React/Vite shell now lists the signed-in user's organizations and switches the active organization through the existing `/api/org` endpoint. The server remains responsible for membership checks and the HttpOnly active-org cookie; API ownership remains legacy.
+- **Opt-in Go organization switching.** Added an independently signed Go membership check and active-org cookie writer behind `GO_ORG_SWITCH=1`; the legacy handler remains the default and production route owner.
+- **Internal Go CRM capability slice.** The transactional Go executor now covers customer create/deactivate, merge and restore, import/undo/restore, and profile update/restore/reapply, with verified-session and grant rechecks, tenant RLS, approval decisions, existing ledger continuation, receipts, and same-intent replay. Merge restore preserves the current caller-snapshot contract. These Go operations remain internal; public customer/import routes and agent-tool dispatch remain legacy-owned.
+- **Go-backed slice demo proof.** `pnpm demo:slice` now exercises Go capability, approval, and trial-balance APIs. Public business routes remain legacy-owned while the broader migration continues.
+- **Internal Go accounting capability slice.** Go now records dated FX rates, snapshots rates on invoices, posts base and foreign settlement entries with realized gain or loss, and reverses both currencies through the same audited capability path. Human approval replay and exact-once payment decisions have DB-backed parity coverage; public accounting routes remain legacy-owned.
+- **Internal Go dashboard read model.** Added tenant-scoped Go aggregates and parity tests for dashboard money, working capital, pipeline, operations, six-month trend, and ledger activity. Report-read outcomes are explicit inputs so inaccessible or failed financial reports keep the legacy zero/null defaults. Signals and the public dashboard route remain legacy-owned.
+- **Vite home dashboard preview.** Added a session-checked React home with validated dashboard, setup, work queue, and brief responses; active-organization and display-currency handling; receipt reminders; and the existing workmate prompt actions. Unported pages use the legacy development fallback. Production page and API ownership remain unchanged while signed-in runtime parity is completed.
+- **Vite approvals preview.** Added the approvals queue and recent decision history to the React client, using the existing governed approvals API by default and redacting credential-shaped fields from payload previews. Approval POST decisions can opt into the signed Go service with `GO_APPROVAL_DECISION=1`; queue reads and production route ownership remain on the legacy application.
+- **Vite event ledger preview.** Added a read-only audit ledger with kind/capability/actor filters, full hash-chain disclosure, and loading, error, and empty states. It uses the existing API and authentication shell; route ownership remains unchanged.
+- **Go CRM customer timeline read.** Added the internal `crm.customerTimeline` reader with legacy event summaries, source ordering, date formatting, limits, permission checks, and tenant isolation. The public CRM route remains legacy-owned.
+- **Go webhook outbox worker.** Added a standalone webhook dispatcher with a dedicated least-privilege database role, tenant-scoped payload access, stable provider idempotency, retry and lease fencing, and scoped reconciliation. The existing TypeScript worker remains the default owner until cutover parity is complete.
+- **Vite agent sessions preview.** Added a React sessions view backed by the existing session, event, replay, durable-run, and metrics APIs. It preserves selection and event order; the legacy page and API routes retain ownership.
+- **Go CRM read parity.** Added tenant-scoped Go readers for CRM timeline and task GET modes with the existing response shapes. The signed bridge is opt-in; other CRM modes and public route ownership remain legacy.
+- **Go capability jobs worker.** Added a standalone worker over existing durable job rows, receipts, approvals, audit events, and run transitions, with a dedicated restricted database role and an explicit executor allowlist. The TypeScript worker remains the sole default queue owner.
+- **Vite Projects preview.** Added the existing Projects board to the authenticated React shell, including module-switchboard state, task controls, archive confirmation, approval notices, and organization-scoped reloads. It continues to use the legacy business API.
+- **Vite Analytics preview.** Added the governed dataset report composer to the authenticated React shell, with permission-filtered discovery, previews, chart configuration, exact result tables, and downloadable HTML. The API stays legacy-owned; the Vite development proxy uses the existing `/api/analytics` handler.
+- **Projects team lookup proxy.** The Vite preview now proxies the existing `/api/team` endpoint so task assignee names can load through the same origin.
+- **Internal Go Projects write capabilities.** Added Go implementations for project creation and archival, and task creation, movement, and assignment. Database-backed parity covers module and permission checks, actor attribution, approvals, tenant isolation, audit rollback, and same-intent receipt replay.
+- **Opt-in Go Projects writes.** `POST /api/projects` can dispatch through the signed Go capability bridge when `GO_PROJECTS_WRITE=1`; it preserves the legacy response shapes and fails closed on unknown outcomes. The flag defaults off.
+- **Opt-in Go Projects reads.** The signed Go bridge can serve project list and board GETs with `GO_PROJECTS_READ=1`. The collection keeps its no-audit behavior, board reads keep the capability audit, and development shadow comparison is limited to the collection read.
+- **Go metrics read parity.** Added a tenant-scoped reader over the newest 200 agent sessions and a signed HTTP adapter. `/api/metrics` remains legacy-owned unless `GO_METRICS_READ=1` is enabled.
 - **Messages search and collaboration.** Conversations can be searched by channel name or latest preview, while a separate history search finds older messages and opens their surrounding thread. Messages now support per-member read positions and unread counts, private file attachments, emoji reactions, threaded replies, pinned messages, member-name lookup, and online or typing status refreshed in the background.
 - **A more comfortable Messages workspace.** The conversation list has Active and Archived filters, clearer loading and retry states, a guided first-channel empty state, and an explicit mobile path back to the list. Drafts save in the browser per conversation, the composer grows with its text and accepts attachments, and messages group by sender and day for easier scanning.
 - **Emoji in the message composer.** Choose from a compact emoji picker and insert at the current cursor position while writing.
@@ -391,15 +2140,15 @@ The full v1 changelog is preserved at the bottom of this file.
   payment-crash-retry money case.
 - **Least-privilege runtime database role** (`@chaste/db/roles`): `chaste_app`
   - NOBYPASSRLS, DML-only, no DDL - provisioned idempotently with grants on
-  existing tables and default privileges for future ones, so the application
-  can stop running as the superuser migration owner (migration 0014's stated
-  intent, previously never wired up: the deployed database had a single
-  superuser role, making RLS inert). `runMigrations` accepts
-  `MIGRATION_DATABASE_URL` for separated owner credentials. The role's
-  security contract (tenant-scoped reads, fail-closed without context, no
-  cross-tenant writes, no DDL) is pinned by five tests in
-  `packages/db/src/runtime-role.test.ts`. The application's own role flip is
-  deliberately not done yet - it requires the entry-point context audit (S01).
+    existing tables and default privileges for future ones, so the application
+    can stop running as the superuser migration owner (migration 0014's stated
+    intent, previously never wired up: the deployed database had a single
+    superuser role, making RLS inert). `runMigrations` accepts
+    `MIGRATION_DATABASE_URL` for separated owner credentials. The role's
+    security contract (tenant-scoped reads, fail-closed without context, no
+    cross-tenant writes, no DDL) is pinned by five tests in
+    `packages/db/src/runtime-role.test.ts`. The application's own role flip is
+    deliberately not done yet - it requires the entry-point context audit (S01).
 - **W0 evidence register** (`docs/W0_EVIDENCE_REGISTER.md`): F01–F17 and
   N01–N10 revalidated at the current commit with executed probes where
   possible - F01 (committed write reported as failure when the audit append
@@ -457,6 +2206,9 @@ The full v1 changelog is preserved at the bottom of this file.
   for user-started runs, or the organization's configured model provider.
 
 ### Fixed
+
+- **CRM timeline profile switching.** Closing a customer profile or opening another surface invalidates its pending timeline request, so late results and errors do not update a dismissed profile.
+- **Unverified sessions could inspect organization membership names.** The organization list and switch endpoints now stop before querying memberships for unverified email sessions, preserving the empty organization context and preventing the active-org cookie from being set.
 - **Messages stayed on the loading screen.** The conversation list now loads on mount, and request failures leave loading state so the retry message can render.
 - **Templates outside the catalog were invisible in the gallery.** Built-in general templates (blank note, business letter, meeting notes, quote) and anything saved with Save as template lacked a catalog entry and silently skipped their cards; they now render under Other with their own paper thumbnails.
 - **Authored document creation now returns the created record reliably.** The document API returns capability results at the shape the editor expects, so template and blank-document creation navigate to the saved document instead of appearing to fail after persistence.
@@ -471,8 +2223,7 @@ The full v1 changelog is preserved at the bottom of this file.
   vendor and purchase-order controls have accessible names.
 - **Document and suggestion counts were silently zero.** Correlated count
   subqueries interpolated unqualified column names, so a subquery like
-  `where document_id = id` compared a table to itself and always returned
-  0. Authored-document version counts and the long-standing open-coding-
+  `where document_id = id` compared a table to itself and always returned 0. Authored-document version counts and the long-standing open-coding-
   suggestions count now qualify their columns explicitly.
 - **Deleted conversations and messages could still leak through detail paths.**
   Conversation lists, reads, sends, and the workmate transcript now exclude
@@ -528,7 +2279,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - **My Work remainders read full outstanding (W0.5).** The receipt-remainder
   query correlated receipt lines with a bare `"id"` (Drizzle renders an
   embedded column unqualified, so the subquery compared each receipt's
-  `po_line_id` against its *own* id and always summed zero) - every card
+  `po_line_id` against its _own_ id and always summed zero) - every card
   read the full order as outstanding. The correlation is now explicit, the
   remainder subtracts returns net of receipts (a returned delivery demotes
   the order to partial in the domain but read as received here), quantities
@@ -566,7 +2317,7 @@ The full v1 changelog is preserved at the bottom of this file.
   reached back to stamp `source_id` on a posted ledger row. The invoice is
   now created first and the entry posts with its source link at insert time
   - the only legitimate post-insert journal mutation is gone, and returns
-  find the sale entry exactly as before.
+    find the sale entry exactly as before.
 - **A generic journal reversal was offered as a complete business undo
   (N12).** Reversing a payment's GL entry left the invoice collecting on
   money already returned, reversing a payroll posting left the run marked
@@ -756,6 +2507,9 @@ The full v1 changelog is preserved at the bottom of this file.
 - Messages now loads the conversation list on entry and shows a recoverable error state if that request fails, instead of staying on the loading skeleton.
 
 ### Changed
+
+- Added an opt-in Vite POS return dispatch through the Go `pos.returnSale` capability, with 404-only same-intent fallback and actor/org scoped exact retry recovery. Pending and uncertain returns keep their UUID and locked payload across reloads until completion or a definitive refusal.
+- **Vite owns the main local app port.** The React preview now opens at `http://localhost:3000`; the legacy compatibility server runs at `http://localhost:3001`, and Vite proxies its remaining API routes there.
 - **The desktop sidebar is less crowded.** Removed its two compact quick-action shortcuts; module actions remain available in the page header.
 - **Document studio entry points are quieter.** Removed the editor and upload shortcuts from the Documents top bar; invoices now prefill their issue date using the local calendar date, and generated numbers or references across document templates are labeled as editable.
 - **Built-in templates are code-owned.** Organizations that seeded templates under an older catalog automatically receive the redesigned papers on their next visit to Documents; custom templates are never touched.
@@ -847,6 +2601,22 @@ The full v1 changelog is preserved at the bottom of this file.
 - Mobile app sections use visible, horizontally scrollable tabs again, and narrow app headers wrap action buttons instead of overflowing the page.
 - CRM customer filters and create/import actions fit 320px screens without horizontal scrolling, and saved-view creation stays closed until requested.
 - Empty Products & Services catalogs point to add and spreadsheet-import actions instead of reporting stock as healthy.
+- The Vite development proxy carries only the selectors it can act on: the dead per-module `CHASTE_GO_*` flag surface and its `__GO_*` defines are gone, leaving the three capability-slice switches, the live route flags, and the session capability route. `.env.example`, the README selector table, and the setup troubleshooting guide document only live switches, and the proxy tests keep only the retained selectors.
+- Creator Mode file proposals now target Go paths; proposal fixtures in the Vite tests and the demo proofs use Go artifact paths.
+- The capability manifest reads the checked-in retired-capability census plus the Go overrides directly; the legacy capture path, its `--freeze-census` mode, and the `migration:capabilities:census` command are gone, and the continuity inventory census now also records the retired module and package sources cited by the migration docs.
+- `pnpm test` runs the root node tests first and then the Turborepo suite with `--concurrency=1`, so database-backed suites no longer race each other.
+- `demo:m11:isolated` now starts a throwaway Go API on a loopback port against its fixture database, so the proof runs end to end against a clean database and the Go runtime role instead of the shared development API.
+- Documentation and repository hygiene now match the retired Next.js app: architecture, contributing, and roadmap describe only the Vite + Go layout; the PR template drops legacy-app and stale migration wording; the local `.env` documents the marketing and notification email worker roles; leftover failed jobs and orphan recurring invoices were cleared from the development database.
+
+### Removed
+
+- The retired TypeScript runtime packages are deleted: `modules/*` (20 domain modules), `packages/kernel`, `packages/ai`, and `packages/plugin-kit`, together with the scripts that existed only to exercise them (`demo-agent.ts` and the `pnpm demo` entry, `registry-check.mts`, `gates/creator-isolation.ts`, `gates/zai-live.ts`, `gates/detector-positive-control.ts`, `env-probe.ts`, `test-inkling.ts`). `demo-m7` inlines the GL and stock checks it still needs, `demo-m11` drives the Go executor for its standalone proof, and `demo-support` and the remaining proofs were already Go-backed.
+- Tracked graft cache files, the Next.js MCP server entry, the Next.js agent skills with their lock file, and stale `.next/` ignore entries are removed from the repository.
+
+- The legacy Next.js app and its server-only TypeScript runtime are removed: `apps/web` (routes, server actions, kernel, instrumentation, tests) plus the scripts that drove it (`scripts/probe/*`, `scripts/agent-pilot-eval.ts`, `scripts/test-groq-agents.ts`, `scripts/tool-list-probe.ts`, `scripts/verify-documents-templates.mjs`) and the already-unwired `scripts/worker.ts` with its durable-run pilot gates (`scripts/gates/durable-po-run.ts`, `scripts/gates/supervised-pilot.ts`). Vite and the Go API are now the only runtime; no command path starts a Next server or reaches port 3001.
+- `packages/harness` and the `dev:legacy`, `bench:agents`, `migration:session-parity`, and `migration:permission-parity` package scripts are removed. Demo and node scripts now compile against the root `tsconfig.scripts.json`.
+- The Go internal capability contract no longer emits a TypeScript model file; the retired app was its only consumer.
+- The migration route, server-action, capability, and continuity checkers no longer read deleted sources: they validate against checked-in frozen censuses (`docs/migration/retired-route-census.json`, `retired-server-action-census.json`, `retired-capability-census.json`, `retired-source-census.json`), so the recorded route, action, capability, and citation inventories stay stable without the Next project.
 
 ## [0.5.0] - 2026-09-09
 
@@ -857,16 +2627,17 @@ puts tests around the two surfaces a new business touches first: the setup
 wizard and the spreadsheet import.
 
 ### Added
+
 - **Tests for the CSV importer and the setup wizard**: 140 tests covering
   `lib/csv.ts` (RFC 4180 quoting, line endings, ragged rows, header
   guessing), `lib/onboarding-flow.ts`, `components/onboarding/wizard.tsx`,
   and the shell app/module catalogs. The wizard's decisions - which screen
   comes next, whether a profile may be submitted, how a failure is explained
   - now live in `lib/onboarding-flow.ts` so they can be tested without
-  rendering React; the component tests then drive the real wizard through its
-  flows, including the one where a skipped step comes back. `jsdom` and
-  `@testing-library/react` are new `apps/web` dev dependencies, and
-  `pnpm-lock.yaml` is regenerated with them.
+    rendering React; the component tests then drive the real wizard through its
+    flows, including the one where a skipped step comes back. `jsdom` and
+    `@testing-library/react` are new `apps/web` dev dependencies, and
+    `pnpm-lock.yaml` is regenerated with them.
 - **Retail & reach (M13, ADR 0040)**: `pos.returnSale` - always-gated
   full-sale reversal that refunds through a mirrored entry, credits the
   invoice, and restores stock; per-register shift summaries; marketing-lite
@@ -953,7 +2724,6 @@ wizard and the spreadsheet import.
   the stricter cap, so the onboarding blanket rule can be tightened per
   module without loosening anything.
 
-
 - **Inventory → GL closure (M7, ADR 0033)**: `inventory.postValuationSummary`
   reconciles the GL inventory account (1200) to the stock ledger's
   moving-average value with one balanced entry against COGS; money-class
@@ -1029,6 +2799,7 @@ wizard and the spreadsheet import.
   at a nonexistent `./apps/...` location, so the queue never drained.
 
 ### Changed
+
 - **Document memory indexing degrades to a zero vector**: `embedDocChunk` now
   inserts a content chunk with a zero-length embedding when the embedding
   service is unavailable (previously an embedding failure silently skipped the
@@ -1056,6 +2827,7 @@ wizard and the spreadsheet import.
   and `CONTRIBUTING.md` documents how to keep a stack from rotting.
 
 ### Fixed
+
 - **Version drift**: `package.json` said `0.2.0` while the changelog's latest
   release was `0.4.0`, so no file in the repository named the version it was
   on. The manifest now reads `0.5.0`, matching this entry. One gap is recorded
@@ -1107,6 +2879,7 @@ wizard and the spreadsheet import.
 ## [0.4.0], 2026-08-26
 
 ### Added
+
 - **Tabbed app framework (`AppFrame`)**: every business app now opens into a
   shared frame - breadcrumb, app identity, underline tabs with live counts.
   Tabs persist per app (`persistKey`) and initialize from `?tab=` for
@@ -1135,6 +2908,7 @@ wizard and the spreadsheet import.
 - **Meridian is the default theme** for new devices.
 
 ### Changed
+
 - **Dashboard fits one desktop screen**: the ledger band compacts (tighter
   paddings, chart drawn inside the band), setup shows the first two steps
   with "Show N more" expandable, the ledger feed trims to three entries, and
@@ -1149,6 +2923,7 @@ wizard and the spreadsheet import.
   bordered ledgers, and a staggered entrance that respects reduced motion.
 
 ### Fixed
+
 - **ThemeMenu hydration mismatch**: replaced direct DOM read
   (`document.documentElement.dataset.mode`) with the `useMode()` state
   during render, eliminating the server/client HTML mismatch that triggered
@@ -1159,6 +2934,7 @@ wizard and the spreadsheet import.
 - Dev server picks the next free port when 3000 is occupied.
 
 ### Added
+
 - **Guided setup ("what is expected of me")**: `GET /api/setup` computes a
   live checklist per organization - products, customers, vendors, team,
   email, website widget, Creator-mode agent - each item with a one-sentence
@@ -1273,6 +3049,7 @@ wizard and the spreadsheet import.
   command palette, split-screen branded login, full responsive to 375px.
 
 ### Changed
+
 - **OS navigation model** (ADR 0030): five-group ERP sidebar replaced by
   workspace rail + full-screen Apps Launcher with type-to-filter and
   keyboard grid navigation.
@@ -1303,10 +3080,12 @@ wizard and the spreadsheet import.
 - CI gains gitleaks workflow; `.env.example` cleaned up.
 
 ### Removed
+
 - `_shell/nav.ts` (sidebar navigation tree) - superseded by the application
   catalog in `_shell/apps.ts`.
 
 ### Fixed
+
 - **ThemeMenu hydration mismatch** (see above).
 - **Theme hydration flash** (see above).
 - Accounting's year-end close lives behind its own confirmation dialog.
@@ -1341,6 +3120,7 @@ wizard and the spreadsheet import.
 - Dev server picks next free port when 3000 is occupied.
 
 ### Added
+
 - ADRs 0015–0030 covering design system, org memory, RLS, plugin kit,
   trust-spine hardening, multi-currency, ledger partitioning, creator-mode
   sandbox, support module, security audit remediation, OS navigation model,
@@ -1721,7 +3501,7 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
     elevated) permissions → record `policy/decision` and
     `command/query/dispatched|result` → normalize to the canonical output →
     render a concise model-facing result → log `tool/result`. Approval-required
-    calls are returned as `approval_required` (approval *requests*, never
+    calls are returned as `approval_required` (approval _requests_, never
     failures), and granted approvals carry the durable `approvalGrantId` into
     the envelope. `defaultToolPolicy` allows `read`/`write_local` under the
     actor's own authority and requires a durable grant for `exec`/`external`.
@@ -1762,7 +3542,7 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
     surfaces an inbox approval item (when wired), awaits the human decision,
     and on `allow`/`always` mints a durable grant whose id becomes the tool
     call's `approvalGrantId`; without a decision surface the call stays an
-    approval *request*, never a failure. `grantCoveredToolPolicy` checks the
+    approval _request_, never a failure. `grantCoveredToolPolicy` checks the
     store before the default risk policy, so a durable grant auto-allows
     subsequent identical calls until expiry/revocation; the trajectory's
     `policy/decision` cites `grant:<id>`.
@@ -1792,7 +3572,7 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
     auto-runs low-risk plans, surfaces medium/high-risk plans as an inbox
     `plan` item (editable/rejectable), and on approval mints one durable grant
     per `requiredApproval` (command/resource-scoped, TTL, `policyBasis:
-    "plan-approval"`, conditioned on the reason + plan id) so
+"plan-approval"`, conditioned on the reason + plan id) so
     `grantCoveredToolPolicy` auto-allows the matching steps. Rejection mints
     nothing and logs `approval/rejected`; no decision surface fails closed.
   - **Tests**, `planning/planning.test.ts` (risk classification, low-risk
@@ -1860,7 +3640,7 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
     `workflow.tasks.workQueue` (ready pending tasks) / `workflow.tasks.list`.
   - Permissions `activities.read` / `activities.write` /
     `workflow.tasks.read` / `workflow.tasks.write` declared in the manifest.
-  - `packages/runtime` builds the durable Postgres stores *before* module
+  - `packages/runtime` builds the durable Postgres stores _before_ module
     registration and injects them into the module, so the same stores serve
     the module and the harness.
   - Tests: `workflow-tasks.test.ts`, manifest, CRUD round-trips, overdue
@@ -1870,8 +3650,8 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
   - Docs: ADR 0014 tranche-7 update `docs/adr/0014-agent-harness-spine-pivot.md`.
 
 - **Host layer (harness over HTTP/chat), the eighth harness tranche**,
-  laying the build-item-9 foundation: the surface that *runs the native
-  harness* and serves inbox plan/approval decisions through durable grants.
+  laying the build-item-9 foundation: the surface that _runs the native
+  harness_ and serves inbox plan/approval decisions through durable grants.
   Additive, `/api/v1/ai/chat` and the legacy orchestrator are untouched.
   - **Bus→tool adapter (`@chaste/ai-core` `tools/from-bus.ts`)**, every
     registered command and query becomes a tool wrapping the same bus contract
@@ -1964,7 +3744,7 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
   13, cost-control half): the `ModelRouter` stage between the prompt envelope
   and the LLM call selects a provider per task class and records token/cost
   attribution. Every routed completion appends an append-only row to the
-  shared `model_usage` table; budget caps are enforced *before* dispatch by
+  shared `model_usage` table; budget caps are enforced _before_ dispatch by
   summing recorded spend, so a cap configured on one host reflects spend
   recorded on every host. Fail-closed: unroutable task classes and exhausted
   budgets refuse the request.
@@ -1997,7 +3777,7 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
 
 - **Proactive coordinator, the twelfth harness tranche** (build item 13,
   part 2): natural-language schedules parse into exact
-  who/what/when/condition/action objects *before* confirmation; watch rules
+  who/what/when/condition/action objects _before_ confirmation; watch rules
   (notify < suggest < draft < request_approval) fire durably with trigger
   evidence, proposed action, expected impact, and an explicit
   `requiredApproval` flag; quiet hours, a daily cap, and occurrence
@@ -2016,9 +3796,9 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
     wired as `runtime.watchRules` / `runtime.proactivePreferences` /
     `runtime.proactiveDeliveries`.
   - **`apps/api`**, `app.proactive` surface; `/api/v1/proactive/rules` (CRUD
-    + pause/resume), `/api/v1/proactive/preferences` (read/edit),
-    `/api/v1/proactive/suggestions?now=` (dry-run, records nothing), and
-    `/api/v1/proactive/tick` (collect + gate + record).
+    - pause/resume), `/api/v1/proactive/preferences` (read/edit),
+      `/api/v1/proactive/suggestions?now=` (dry-run, records nothing), and
+      `/api/v1/proactive/tick` (collect + gate + record).
   - Tests: ai-core `proactive/coordinator.test.ts` (parsing, store scoping,
     next-fire times, gate + quiet hours, collect/advance/duplicate,
     approval-safety, wakes + overdue activities, cap/quiet-hours suppression);
@@ -2041,7 +3821,7 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
     (`forkSession` with boundary validation, copies events under a new
     identity, appends `session/forked` + `session/resumed`), `scenario.ts`
     (`Scenario`, `createScenarioContext`, `runScenario` auto-attaching replay
-    + fork, `runScenarioSuite` → `SuiteReport`).
+    - fork, `runScenarioSuite` → `SuiteReport`).
   - **`@chaste/ai-core` `eval/scenarios/`**, golden scenarios over a real
     kernel bus/tools/grants/decision surface with the harness pointed at the
     scenario's own session log: `harness/unauthorized-tool-refusal` (tool
