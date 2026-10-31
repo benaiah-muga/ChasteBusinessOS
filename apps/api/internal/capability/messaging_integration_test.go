@@ -2122,7 +2122,7 @@ func TestMessagingReadMessagesReturnsLatestWindowInDisplayOrder(t *testing.T) {
 	if err != nil || len(limited.Messages) != 2 {
 		t.Fatalf("readMessages limit=2 returned %d rows err=%v, want the two latest", len(limited.Messages), err)
 	}
-	if limited.Messages[0].CreatedAt == "2026-09-01T08:00:00.000Z" || limited.Messages[1].CreatedAt <= limited.Messages[0].CreatedAt {
+	if limited.Messages[0].CreatedAt == "2026-09-01T08:00:00.000Z" || limited.Messages[1].CreatedAt < limited.Messages[0].CreatedAt {
 		t.Fatalf("readMessages order=%+v, want the latest two in ascending display order", limited.Messages)
 	}
 	if !limited.HasMore || limited.NextCursor == nil || *limited.NextCursor != limited.Messages[0].ID || limited.Me != fx.userID {

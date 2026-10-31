@@ -15,7 +15,7 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Fixed
 
-- The routine integration proof now dates its local vendor bill relative to the test run instead of a fixed September date, so AP aging stays in the current bucket after a UTC date boundary. This is a test-only fix; no product behavior changed.
+- The routine integration proof now dates its local vendor bill relative to the test run instead of a fixed September date, so AP aging stays in the current bucket after a UTC date boundary. The messaging read proof now accepts equal `createdAt` timestamps in its display window, matching the query's deterministic id tie-breaker. Both are test-only fixes; no product behavior changed.
 
 ## [0.6.0] - 2026-11-01
 
