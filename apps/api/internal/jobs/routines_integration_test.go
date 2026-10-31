@@ -244,7 +244,10 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 	if err := owner.QueryRow(ctx, `INSERT INTO vendors (org_id, name) VALUES ($1::uuid, 'Routine foreign supplier') RETURNING id::text`, otherOrgID).Scan(&foreignVendorID); err != nil {
 		t.Fatal(err)
 	}
-	statementAt := time.Date(2026, 9, 30, 9, 10, 11, 123000000, time.UTC)
+	// Keep the bill inside the current AP aging bucket regardless of the
+	// calendar date on which the integration suite runs.
+	statementAt := time.Now().UTC().AddDate(0, 0, -10).Truncate(time.Millisecond)
+	statementAtText := statementAt.Format("2006-01-02T15:04:05.000Z")
 	var localBillID string
 	if err := owner.QueryRow(ctx, `
 		INSERT INTO vendor_bills (org_id, vendor_id, number, status, currency, total_minor, bill_date, created_at)
@@ -560,7 +563,7 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 					continue
 				}
 				row := result.Data.Rows[0]
-				if row.Date != "2026-09-30T09:10:11.123Z" || row.Kind != "bill" || row.Ref != "Bill #71" || row.AmountMinor != 12345 || row.BalanceMinor != 12345 {
+				if row.Date != statementAtText || row.Kind != "bill" || row.Ref != "Bill #71" || row.AmountMinor != 12345 || row.BalanceMinor != 12345 {
 					t.Errorf("purchasing.supplierStatement row = %+v, want the seeded local bill", row)
 				}
 			case "call-routine-ap-aging":
