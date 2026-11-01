@@ -515,7 +515,7 @@ id):
   loop - a single request-scoped id would false-conflict; job-driven agent
   runs already key receipts by job id), notifications (idempotent read
   receipt on a conflict-protected table, not a domain write).
-- Pinned by `GATES-INTENT.md`: postApi unit test, the route-threading sweep
+- Pinned by the intent gate evidence: postApi unit test, the route-threading sweep
   across 26 routes, the effect-receipts replay/conflict suite, and the repo
   verification gate.
 

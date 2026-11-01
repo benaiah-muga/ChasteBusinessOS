@@ -22,6 +22,18 @@ the crawler rules, and the machine-readable project summary.
   setup guide, ADRs, and changelog.
 - `apps/web-vite/public/site.webmanifest` supplies install metadata and icons.
 
+## GitHub repository discovery
+
+The repository description and topics are part of the public discovery surface.
+Keep them aligned with the product summary and the capabilities above.
+
+- Description: open-source, AI-native ERP for governed business operations.
+- Topics: `erp`, `open-source-erp`, `ai-erp`, `agentic-erp`, `ai-agents`,
+  `ai-native`, `business-operating-system`, `enterprise-resource-planning`,
+  `accounting`, `crm`, `inventory-management`, `purchasing`, `manufacturing`,
+  `workflow-automation`, `audit-trail`, `react`, `go`, `typescript`,
+  `postgresql`, `small-business`.
+
 ## Canonical domain and sitemap
 
 The deployment domain is not assumed in the repository. The route helper writes

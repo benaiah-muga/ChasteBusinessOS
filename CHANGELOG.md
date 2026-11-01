@@ -11,6 +11,12 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-11-01
+
+### Changed
+
+- Repository discovery now presents ChasteBusinessOS as an open-source, AI-native ERP. The README opening, the search and AI discovery guide, the GitHub repository description, and the GitHub topics use the same product language so people and agents can find the project by category and capability.
+
 ## [0.6.1] - 2026-11-01
 
 ### Fixed

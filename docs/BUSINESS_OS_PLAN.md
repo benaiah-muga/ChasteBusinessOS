@@ -355,7 +355,7 @@ verification gate, a demo proof, and at least one subset-org run (§0.3).
 ## 6. Process (long-running engagement rules)
 
 - One milestone at a time; within it, one slice at a time. Each slice:
-  `GATES.md` from the unlazy leaf template first (specs in these plans are
+  the unlazy gate ledger first (specs in these plans are
   the source), four-pass implementation, `--reverify` before done, repo
   verification gate (`pnpm typecheck && pnpm lint && pnpm test`).
 - Rolling dispatch across slices when dependencies verify (unlazy

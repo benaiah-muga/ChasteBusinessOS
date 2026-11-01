@@ -177,7 +177,7 @@ triaged against the codebase)
       → policy-gated approval (upgrades the `stock-reorder` advisory skill)
 - Demo proof: `pnpm demo:m8`
 
-## M9 - Quote-to-cash completed + CRM depth (✅ 2026-08-31, 15/15 gates - `GATES.md`)
+## M9 - Quote-to-cash completed + CRM depth (✅ 2026-08-31, 15/15 acceptance checks)
 - [x] Quote lifecycle: `quotes.expires_at`, expiry-refusing acceptance,
       `accounting.expireQuote` idempotent sweep, expired-quote signal (ADR 0034)
 - [x] Sales orders + fulfillment: reservation-anchored confirm (oversell
@@ -193,7 +193,7 @@ triaged against the codebase)
   EXPIRY GUARD OK / TIMELINE OK; live-DB suites green in modules/sales,
   modules/accounting (quotes), modules/crm
 
-## M10 - Accounting & purchasing depth (✅ 2026-08-31, 21/21 gates - `GATES.md`)
+## M10 - Accounting & purchasing depth (✅ 2026-08-31, 21/21 acceptance checks)
 Plan: `docs/BUSINESS_OS_PLAN.md` (eleven external module audits, triaged)
 - [x] Cash flow statement (direct method, erp-core, property-tested: ties
       to the cash balance) + AR/AP credit notes (always-gated,
@@ -208,7 +208,7 @@ Plan: `docs/BUSINESS_OS_PLAN.md` (eleven external module audits, triaged)
   STATEMENTS RENDERED / REMINDER DRAFTED / SUPPLIER MEMORY OK /
   FORECAST RENDERED / DUPLICATE FLAGGED
 
-## M11 - People, projects, expenses (✅ 2026-09-01, 19/19 gates - `GATES.md`)
+## M11 - People, projects, expenses (✅ 2026-09-01, 19/19 acceptance checks)
 - [x] HR structure (department/position/manager/emergency contacts),
       attendance via clockIn/clockOut with late flags, derived leave
       balance + calendar, chronic-lateness signals
@@ -225,7 +225,7 @@ Plan: `docs/BUSINESS_OS_PLAN.md` (eleven external module audits, triaged)
 - Demo proof: `pnpm demo:m11` - ATTENDANCE WATCH OK / PROJECTS STANDALONE OK /
   M11 ALL OK (hire → project → time → expense → approve)
 
-## M12 - Understanding: analytics + helpdesk + documents (✅ 2026-09-01, 17/17 gates - `GATES.md`)
+## M12 - Understanding: analytics + helpdesk + documents (✅ 2026-09-01, 17/17 acceptance checks)
 - [x] `analytics.explainChange`: deterministic decomposition (contributions
       sum to the delta, property-tested), capability over invoice lines
       with drill-to-transactions; `analytics.askYourBusiness` cited
@@ -237,7 +237,7 @@ Plan: `docs/BUSINESS_OS_PLAN.md` (eleven external module audits, triaged)
 - Demo proof: `pnpm demo:m12` - DECOMPOSITION SUMS / ASK-ANSWER CITED /
   TICKETS DEEP OK / DOCUMENTS LAYER OK
 
-## M13 - Retail & reach (✅ 2026-09-01, 11/11 gates - `GATES.md`, demand confirmed)
+## M13 - Retail & reach (✅ 2026-09-01, 11/11 acceptance checks, demand confirmed)
 - [x] POS returns (always-gated full-sale reversal: refund entry, invoice
       credit, stock restored), shift summaries per register
 - [x] Marketing-lite on confirmed demand: saved deterministic segments,

@@ -127,8 +127,7 @@ product identity is complete enough for real shops.
 - Capability `inventory.postValuationSummary`: risk `money`, approval-gated,
   inverse = reversal entry. Blocked when derived variance ≠ 0.
 
-Gates (spec - materialized into `GATES.md` from the unlazy leaf template when
-the slice starts):
+Gates (spec - materialized into the unlazy gate ledger when the slice starts):
 
 - **G7.1a** reconciliation property: randomized mixed activity → variance = 0
   - `CHECK: pnpm --filter @chaste/erp-core test -- gl-reconciliation`
@@ -362,7 +361,7 @@ Gate:
 
 ## 9. Process
 
-- Each slice: write `GATES.md` from the unlazy leaf template **first** (the
+- Each slice: write the unlazy gate ledger **first** (the
   gate specs above are the source), implement all four passes, then re-run
   runnable gates with `--reverify` before declaring the slice done. Approval
   of every `CHECK:` command happens per the unlazy inspection flow.

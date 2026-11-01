@@ -4007,7 +4007,7 @@ new owners and the manifest shows zero legacy runtime paths.
      ownership manifest to the existing Vite wizard and its Go onboarding API.
 
 355. (Runtime verified) The authenticated signup and email-verification proof
-     in GATES.md item G102 used the local SMTP sink, then completed the Go
+     in the migration gate evidence for G102 used the local SMTP sink, then completed the Go
      onboarding POST/PATCH flow and opened the Vite dashboard. The route
      ownership manifest now records `/onboarding` as Vite-verified. This
      completes item 354.

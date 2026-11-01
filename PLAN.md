@@ -16,7 +16,7 @@ executable gate and a user-visible or operator-visible proof.
 ## Sequence status: delivered
 
 D1, R1, P1, G1, and C1 now have passing executable gates in
-`GATES-ENGINE.md`. The first durable purchasing run proves that a run can
+the engine gate ledger. The first durable purchasing run proves that a run can
 resume after a worker crash, preserve its version-pinned step contract, and
 commit exactly one governed effect. Replay is read-only and receipt-backed;
 the supervised pilot proves human/agent postcondition parity; capability gaps
@@ -36,18 +36,18 @@ registry and `KernelExecutor` as the only capability authority. It must not add
 direct module calls, production code execution, or a second replay path.
 
 Acceptance for the composition boundary and persisted identity is tracked in
-`GATES-HARNESS.md` and `GATES-INSPECTION.md`, and is delivered. The current
-slice adds a profile-aware coordinator tracked in `GATES-COORDINATOR.md`: it
+the harness gate ledger and the inspection gate ledger, and is delivered. The current
+slice adds a profile-aware coordinator tracked in the coordinator gate ledger: it
 resolves the tenant-owned snapshot, verifies the live adapter can represent
 that exact composition, mounts the existing kernel bridge, and creates the
 durable run only after identity checks pass. H4 adds an explicit approved
-bundle resolver list tracked in `GATES-BUNDLES.md`: registered bundles can
+bundle resolver list tracked in the bundles gate ledger: registered bundles can
 mount alongside the ERP bridge, persisted patches reach runtime config, and
 unknown manifests still fail closed. H5 now governs composition approval in
-`GATES-APPROVAL.md`: the existing kernel approval inbox and decision path
+the approval gate ledger: the existing kernel approval inbox and decision path
 authorize an exact immutable digest, and the coordinator refuses to mount or
 create a run without an executed matching approval. W6 now adds a durable,
-approval-gated Creator release handoff tracked in `GATES-EVOLUTION.md`: only
+approval-gated Creator release handoff tracked in the evolution gate ledger: only
 an approved proposal's exact isolated-candidate digest can be staged or
 promoted, and staged/promoted handoffs can be rolled back conditionally. The
 handoff records artifact metadata only; it does not install or execute source

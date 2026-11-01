@@ -4,7 +4,7 @@
 
 # ChasteBusinessOS
 
-**The governed, AI-native operating system for business operations.**
+**The governed, AI-native ERP for business operations.**
 
 [![Release](https://img.shields.io/github/v/release/benaiah-muga/ChasteBusinessOS?label=release&sort=semver)](https://github.com/benaiah-muga/ChasteBusinessOS/releases)
 [![CI](https://img.shields.io/github/actions/workflow/status/benaiah-muga/ChasteBusinessOS/ci.yml?branch=main&label=CI)](https://github.com/benaiah-muga/ChasteBusinessOS/actions/workflows/ci.yml)
@@ -19,7 +19,7 @@
 
 ---
 
-ChasteBusinessOS is an open-source, AI-native business operating system. It gives a team one operating layer for finance, sales, purchasing, inventory, manufacturing, projects, customer relationships, support, documents, and people operations.
+ChasteBusinessOS is an open-source, AI-native ERP and business operating system. It gives a team one operating layer for finance, sales, purchasing, inventory, manufacturing, projects, customer relationships, support, documents, and people operations.
 
 Work begins with an outcome described in plain language. The workmate gathers the relevant records, drafts or executes the permitted steps, and stops at the approval boundary. Every material action is permission-checked, evaluated against policy, recorded in an append-only audit ledger, and reversible where the capability declares an inverse.
 
